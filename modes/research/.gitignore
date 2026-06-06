@@ -1,0 +1,17 @@
+# local secrets
+openai_api_key.txt
+gemini_api_key.txt
+chatshare_api_key.txt
+xai_api_key.txt
+ark_endpoint_id.txt
+doubao_endpoint_id.txt
+ark_api_key.txt
+doubao_api_key.txt
+quanlan_email_settings.local.json
+
+# runtime outputs
+chapter_pdf_direct_output/
+99_章节压缩包/
+__pycache__/
+*.pyc
+*.log

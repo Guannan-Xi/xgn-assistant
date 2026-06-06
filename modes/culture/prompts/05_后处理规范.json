@@ -1,0 +1,1118 @@
+{
+  "version": 3,
+  "说明": "这是全局后处理规范。当前版本优化 A/C 系列为内容驱动的短视频强封面：大标题、高对比、清晰层级、动态适配不同书籍气质，提升手机缩略图冲击力和可读性。",
+  "brand": {
+    "name": "知识慢炖",
+    "slogan": "让经典不再高冷，让智慧人人可用",
+    "end_heading": "下集预告",
+    "follow_text": "想看完整论证，可以回到原书。",
+    "cta_text": "想读完整原书，可以看下方链接",
+    "share_text": "转给正被类似问题困住的人"
+  },
+  "assets": {
+    "cover_specs": [
+      {
+        "asset_id": "A1",
+        "key": "wx_3x4",
+        "label": "微信视频号3:4封面",
+        "size": [
+          1080,
+          1440
+        ],
+        "ratio": [
+          3,
+          4
+        ],
+        "platform": "wechat"
+      },
+      {
+        "asset_id": "A2",
+        "key": "wx_9x16",
+        "label": "微信视频号9:16竖版封面",
+        "size": [
+          1080,
+          1920
+        ],
+        "ratio": [
+          9,
+          16
+        ],
+        "platform": "wechat"
+      },
+      {
+        "asset_id": "A01",
+        "key": "bili_4x3",
+        "label": "哔哩哔哩4:3封面",
+        "size": [
+          1600,
+          1200
+        ],
+        "ratio": [
+          4,
+          3
+        ],
+        "platform": "bilibili"
+      },
+      {
+        "asset_id": "A02",
+        "key": "bili_16x9",
+        "label": "哔哩哔哩16:9封面",
+        "size": [
+          1920,
+          1080
+        ],
+        "ratio": [
+          16,
+          9
+        ],
+        "platform": "bilibili"
+      }
+    ],
+    "endcard_spec": {
+      "asset_id": "C",
+      "key": "end_9x16",
+      "label": "9:16结尾页",
+      "size": [
+        1080,
+        1920
+      ],
+      "ratio": [
+        9,
+        16
+      ],
+      "platform": "vertical"
+    }
+  },
+  "layout": {
+    "version": 11,
+    "note": "AC 单行完整显示版：书名/章节名/本集名不换行、不省略；通过自动缩字号防止溢出；自动清理“经典版/修订版”等书名装饰。",
+    "cover": {
+      "A2": {
+        "book_box": [
+          0.075,
+          0.058,
+          0.925,
+          0.155
+        ],
+        "author_box": [
+          0.28,
+          0.168,
+          0.72,
+          0.205
+        ],
+        "chapter_no_box": [
+          0.33,
+          0.225,
+          0.67,
+          0.268
+        ],
+        "chapter_name_box": [
+          0.1,
+          0.3,
+          0.9,
+          0.398
+        ],
+        "episode_no_box": [
+          0.33,
+          0.42,
+          0.67,
+          0.463
+        ],
+        "episode_name_box": [
+          0.075,
+          0.493,
+          0.925,
+          0.61
+        ],
+        "footer_box": [
+          0.07,
+          0.78,
+          0.93,
+          0.902
+        ],
+        "episode_box": [
+          0.33,
+          0.42,
+          0.67,
+          0.463
+        ],
+        "title_box": [
+          0.1,
+          0.3,
+          0.9,
+          0.398
+        ],
+        "description_box": [
+          0.075,
+          0.493,
+          0.925,
+          0.61
+        ]
+      },
+      "A1": {
+        "book_box": [
+          0.075,
+          0.06,
+          0.925,
+          0.155
+        ],
+        "author_box": [
+          0.28,
+          0.168,
+          0.72,
+          0.208
+        ],
+        "chapter_no_box": [
+          0.32,
+          0.245,
+          0.68,
+          0.292
+        ],
+        "chapter_name_box": [
+          0.11,
+          0.318,
+          0.89,
+          0.42
+        ],
+        "episode_no_box": [
+          0.32,
+          0.452,
+          0.68,
+          0.498
+        ],
+        "episode_name_box": [
+          0.07,
+          0.528,
+          0.93,
+          0.65
+        ],
+        "footer_box": [
+          0.08,
+          0.79,
+          0.92,
+          0.91
+        ],
+        "episode_box": [
+          0.32,
+          0.452,
+          0.68,
+          0.498
+        ],
+        "title_box": [
+          0.11,
+          0.318,
+          0.89,
+          0.42
+        ],
+        "description_box": [
+          0.07,
+          0.528,
+          0.93,
+          0.65
+        ]
+      },
+      "A01": {
+        "book_box": [
+          0.1,
+          0.052,
+          0.9,
+          0.165
+        ],
+        "author_box": [
+          0.33,
+          0.178,
+          0.67,
+          0.225
+        ],
+        "chapter_no_box": [
+          0.36,
+          0.264,
+          0.64,
+          0.31
+        ],
+        "chapter_name_box": [
+          0.16,
+          0.335,
+          0.84,
+          0.43
+        ],
+        "episode_no_box": [
+          0.36,
+          0.466,
+          0.64,
+          0.51
+        ],
+        "episode_name_box": [
+          0.11,
+          0.538,
+          0.89,
+          0.65
+        ],
+        "footer_box": [
+          0.22,
+          0.79,
+          0.78,
+          0.905
+        ],
+        "episode_box": [
+          0.36,
+          0.466,
+          0.64,
+          0.51
+        ],
+        "title_box": [
+          0.16,
+          0.335,
+          0.84,
+          0.43
+        ],
+        "description_box": [
+          0.11,
+          0.538,
+          0.89,
+          0.65
+        ]
+      },
+      "A02": {
+        "book_box": [
+          0.22,
+          0.075,
+          0.78,
+          0.205
+        ],
+        "author_box": [
+          0.42,
+          0.22,
+          0.58,
+          0.26
+        ],
+        "chapter_no_box": [
+          0.42,
+          0.295,
+          0.58,
+          0.34
+        ],
+        "chapter_name_box": [
+          0.3,
+          0.38,
+          0.7,
+          0.475
+        ],
+        "episode_no_box": [
+          0.42,
+          0.505,
+          0.58,
+          0.55
+        ],
+        "episode_name_box": [
+          0.22,
+          0.585,
+          0.78,
+          0.685
+        ],
+        "footer_box": [
+          0.32,
+          0.76,
+          0.68,
+          0.89
+        ],
+        "episode_box": [
+          0.42,
+          0.505,
+          0.58,
+          0.55
+        ],
+        "title_box": [
+          0.3,
+          0.38,
+          0.7,
+          0.475
+        ],
+        "description_box": [
+          0.22,
+          0.585,
+          0.78,
+          0.685
+        ]
+      },
+      "vertical": {
+        "book_box": [
+          0.075,
+          0.058,
+          0.925,
+          0.155
+        ],
+        "author_box": [
+          0.28,
+          0.168,
+          0.72,
+          0.205
+        ],
+        "chapter_no_box": [
+          0.33,
+          0.225,
+          0.67,
+          0.268
+        ],
+        "chapter_name_box": [
+          0.1,
+          0.3,
+          0.9,
+          0.398
+        ],
+        "episode_no_box": [
+          0.33,
+          0.42,
+          0.67,
+          0.463
+        ],
+        "episode_name_box": [
+          0.075,
+          0.493,
+          0.925,
+          0.61
+        ],
+        "footer_box": [
+          0.07,
+          0.78,
+          0.93,
+          0.902
+        ],
+        "episode_box": [
+          0.33,
+          0.42,
+          0.67,
+          0.463
+        ],
+        "title_box": [
+          0.1,
+          0.3,
+          0.9,
+          0.398
+        ],
+        "description_box": [
+          0.075,
+          0.493,
+          0.925,
+          0.61
+        ]
+      },
+      "wide": {
+        "book_box": [
+          0.22,
+          0.075,
+          0.78,
+          0.205
+        ],
+        "author_box": [
+          0.42,
+          0.22,
+          0.58,
+          0.26
+        ],
+        "chapter_no_box": [
+          0.42,
+          0.295,
+          0.58,
+          0.34
+        ],
+        "chapter_name_box": [
+          0.3,
+          0.38,
+          0.7,
+          0.475
+        ],
+        "episode_no_box": [
+          0.42,
+          0.505,
+          0.58,
+          0.55
+        ],
+        "episode_name_box": [
+          0.22,
+          0.585,
+          0.78,
+          0.685
+        ],
+        "footer_box": [
+          0.32,
+          0.76,
+          0.68,
+          0.89
+        ],
+        "episode_box": [
+          0.42,
+          0.505,
+          0.58,
+          0.55
+        ],
+        "title_box": [
+          0.3,
+          0.38,
+          0.7,
+          0.475
+        ],
+        "description_box": [
+          0.22,
+          0.585,
+          0.78,
+          0.685
+        ]
+      }
+    },
+    "endcard": {
+      "C": {
+        "heading_panel": [
+          0.08,
+          0.115,
+          0.92,
+          0.255
+        ],
+        "heading_box": [
+          0.08,
+          0.12,
+          0.92,
+          0.245
+        ],
+        "teaser_panel": [
+          0.08,
+          0.315,
+          0.92,
+          0.505
+        ],
+        "teaser_box": [
+          0.12,
+          0.34,
+          0.88,
+          0.48
+        ],
+        "cta_panel": [
+          0.08,
+          0.61,
+          0.92,
+          0.738
+        ],
+        "cta_box": [
+          0.12,
+          0.63,
+          0.88,
+          0.718
+        ],
+        "footer_box": [
+          0.08,
+          0.805,
+          0.92,
+          0.93
+        ]
+      },
+      "vertical": {
+        "heading_panel": [
+          0.08,
+          0.115,
+          0.92,
+          0.255
+        ],
+        "heading_box": [
+          0.08,
+          0.12,
+          0.92,
+          0.245
+        ],
+        "teaser_panel": [
+          0.08,
+          0.315,
+          0.92,
+          0.505
+        ],
+        "teaser_box": [
+          0.12,
+          0.34,
+          0.88,
+          0.48
+        ],
+        "cta_panel": [
+          0.08,
+          0.61,
+          0.92,
+          0.738
+        ],
+        "cta_box": [
+          0.12,
+          0.63,
+          0.88,
+          0.718
+        ],
+        "footer_box": [
+          0.08,
+          0.805,
+          0.92,
+          0.93
+        ]
+      }
+    }
+  },
+  "split_cover_rules": {
+    "说明": "拆分分集封面文案规则，已尽量解耦到后处理中。先按 derived_fields 生成书名/作者/章节名/期数/本期标题等逻辑字段，再由 slot_mapping 决定这些字段分别放进哪个版位。可用变量：{episode_label} {part_code} {part_number} {part_episode_label} {chapter_name} {book_title} {author} {theme_full} {theme_body} {description}",
+    "derived_fields": {
+      "book_name": "{book_title}",
+      "author_name": "{author}",
+      "chapter_title": "《{chapter_name}》",
+      "period": "{part_episode_label}",
+      "current_title": "{theme_body}"
+    },
+    "slot_mapping": {
+      "episode": "period",
+      "title": "chapter_title",
+      "book": "book_name",
+      "author": "author_name",
+      "description": "current_title"
+    },
+    "field_order": [
+      "book_name",
+      "author_name",
+      "chapter_title",
+      "period",
+      "current_title"
+    ],
+    "strip_part_prefix_in_description": true,
+    "episode_template": "{part_episode_label}",
+    "title_template": "《{chapter_name}》",
+    "book_template": "{book_title}",
+    "author_template": "{author}",
+    "description_template": "{description}"
+  },
+  "style": {
+    "说明": "排版表现参数。颜色支持 #RRGGBB、[r,g,b] 或 [r,g,b,a]。scale 表示相对 min(width,height) 的比例。",
+    "colors": {
+      "cover_episode": [
+        255,
+        242,
+        194
+      ],
+      "cover_book": [
+        212,
+        166,
+        74
+      ],
+      "cover_author": [
+        242,
+        226,
+        196
+      ],
+      "cover_description": [
+        246,
+        236,
+        214
+      ],
+      "brand_name": [
+        230,
+        193,
+        118
+      ],
+      "brand_slogan": [
+        242,
+        226,
+        196
+      ],
+      "end_heading": [
+        235,
+        188,
+        95
+      ],
+      "end_teaser": [
+        248,
+        238,
+        218
+      ],
+      "end_cta": [
+        248,
+        238,
+        218
+      ],
+      "end_brand": [
+        212,
+        166,
+        74
+      ],
+      "end_slogan": [
+        242,
+        226,
+        196
+      ],
+      "end_follow": [
+        248,
+        238,
+        218
+      ],
+      "end_share": [
+        238,
+        220,
+        184
+      ],
+      "separator": [
+        154,
+        122,
+        47,
+        170
+      ]
+    },
+    "text_shadow": {
+      "enabled": true,
+      "shadow_color": [
+        0,
+        0,
+        0,
+        190
+      ],
+      "stroke_color": [
+        80,
+        58,
+        24,
+        190
+      ],
+      "stroke_divisor": 36,
+      "offsets": [
+        [
+          -2,
+          -2
+        ],
+        [
+          2,
+          -2
+        ],
+        [
+          -2,
+          2
+        ],
+        [
+          2,
+          2
+        ],
+        [
+          0,
+          3
+        ]
+      ]
+    },
+    "border": {
+      "enabled": true,
+      "margin_min_px": 24,
+      "margin_max_px": 36,
+      "margin_scale": 0.024,
+      "inner_gap_scale": 0.012,
+      "radius_scale": 0.018,
+      "outer_width_scale": 0.0026,
+      "outer_color": [
+        212,
+        166,
+        74,
+        220
+      ],
+      "inner_color": [
+        154,
+        122,
+        47,
+        180
+      ],
+      "corner_scale": 0.034,
+      "corner_step_scale": 0.01
+    },
+    "cover": {
+      "tint": {
+        "base_overlay": [
+          5,
+          4,
+          4,
+          80
+        ],
+        "top_overlay": [
+          0,
+          0,
+          0,
+          80
+        ],
+        "top_height": 0.25,
+        "bottom_overlay": [
+          0,
+          0,
+          0,
+          95
+        ],
+        "bottom_start": 0.78,
+        "soft_box": [
+          0.08,
+          0.08,
+          0.92,
+          0.58
+        ],
+        "soft_radius_scale": 0.05,
+        "soft_alpha": 70,
+        "soft_blur_scale": 0.045,
+        "soft_blur_min_px": 28
+      },
+      "grain_opacity": 12,
+      "crop": {
+        "master_focus_x": 0.5,
+        "master_focus_y": 0.5,
+        "A1_top_ratio_from_2160x3840": 0.09375,
+        "wide_bg_focus_x": 0.5,
+        "wide_bg_focus_y": 0.48,
+        "wide_bg_blur_scale": 0.018,
+        "wide_bg_blur_min_px": 10,
+        "A01_fg_height_ratio": 0.96,
+        "A02_fg_height_ratio": 0.94,
+        "A01_fg_center_x": 0.58,
+        "A02_fg_center_x": 0.6,
+        "wide_fade_ratio": 0.1,
+        "wide_fade_min_px": 24
+      },
+      "text": {
+        "vertical": {
+          "book_max_scale": 0.06,
+          "book_min_scale": 0.012,
+          "author_max_scale": 0.03,
+          "author_min_scale": 0.016,
+          "chapter_no_max_scale": 0.03,
+          "chapter_no_min_scale": 0.014,
+          "chapter_name_max_scale": 0.045,
+          "chapter_name_min_scale": 0.012,
+          "episode_no_max_scale": 0.03,
+          "episode_no_min_scale": 0.014,
+          "episode_name_max_scale": 0.04,
+          "episode_name_min_scale": 0.012,
+          "book_max_lines": 1,
+          "author_max_lines": 1,
+          "chapter_no_max_lines": 1,
+          "chapter_name_max_lines": 1,
+          "episode_no_max_lines": 1,
+          "episode_name_max_lines": 1,
+          "episode_max_scale": 0.03,
+          "episode_min_scale": 0.014,
+          "title_max_scale": 0.045,
+          "title_min_scale": 0.012,
+          "description_max_scale": 0.04,
+          "description_min_scale": 0.012,
+          "episode_max_lines": 1,
+          "title_max_lines": 1,
+          "description_max_lines": 1
+        },
+        "wide": {
+          "book_max_scale": 0.046,
+          "book_min_scale": 0.01,
+          "author_max_scale": 0.026,
+          "author_min_scale": 0.014,
+          "chapter_no_max_scale": 0.026,
+          "chapter_no_min_scale": 0.013,
+          "chapter_name_max_scale": 0.036,
+          "chapter_name_min_scale": 0.01,
+          "episode_no_max_scale": 0.026,
+          "episode_no_min_scale": 0.013,
+          "episode_name_max_scale": 0.034,
+          "episode_name_min_scale": 0.01,
+          "book_max_lines": 1,
+          "author_max_lines": 1,
+          "chapter_no_max_lines": 1,
+          "chapter_name_max_lines": 1,
+          "episode_no_max_lines": 1,
+          "episode_name_max_lines": 1,
+          "episode_max_scale": 0.026,
+          "episode_min_scale": 0.013,
+          "title_max_scale": 0.036,
+          "title_min_scale": 0.01,
+          "description_max_scale": 0.034,
+          "description_min_scale": 0.01,
+          "episode_max_lines": 1,
+          "title_max_lines": 1,
+          "description_max_lines": 1
+        }
+      },
+      "separator": {
+        "enabled": true,
+        "book_offset_y": 0.01,
+        "x1": 0.28,
+        "x2": 0.72,
+        "color": [
+          154,
+          122,
+          47,
+          170
+        ]
+      },
+      "plates": {
+        "enabled": true,
+        "fill": [
+          7,
+          6,
+          6,
+          138
+        ],
+        "subtle_fill": [
+          7,
+          6,
+          6,
+          96
+        ],
+        "outline": [
+          202,
+          154,
+          72,
+          220
+        ],
+        "separator": [
+          190,
+          145,
+          64,
+          160
+        ],
+        "description_fill": [
+          8,
+          7,
+          7,
+          188
+        ],
+        "description_outline": [
+          212,
+          166,
+          74,
+          225
+        ],
+        "description_width_px": 2,
+        "description_radius_scale": 0.12,
+        "book_separator_offset": 0.012,
+        "width_px": 2
+      },
+      "editorial_layout": {
+        "enabled": true,
+        "title_rewrites": [
+          {
+            "book_contains": "贫穷",
+            "pattern": "给\\\\s*100\\\\s*万.*消灭贫穷",
+            "replacement": "给穷人100万，能消灭贫穷吗？"
+          }
+        ],
+        "vertical_bg_darken": 0.5,
+        "wide_bg_darken": 0.44,
+        "bg_blur": 1
+      }
+    },
+    "footer_bar": {
+      "fill": [
+        8,
+        7,
+        7,
+        178
+      ],
+      "outline": [
+        176,
+        134,
+        72,
+        220
+      ],
+      "width_px": 2,
+      "radius_ratio": 0.18,
+      "icon_size_ratio": 0.54,
+      "icon_x_ratio_vertical": 0.055,
+      "icon_x_ratio_wide": 0.05,
+      "icon_bg_fill": [
+        247,
+        242,
+        230,
+        235
+      ],
+      "icon_bg_outline": [
+        184,
+        144,
+        86,
+        235
+      ],
+      "text_gap_ratio": 0.032,
+      "vertical_name_y": 0.14,
+      "vertical_slogan_y": 0.57,
+      "vertical_name_size_ratio": 0.285,
+      "vertical_slogan_size_ratio": 0.145,
+      "wide_name_box": [
+        0.08,
+        0.08,
+        0.96,
+        0.42
+      ],
+      "wide_slogan_box": [
+        0.08,
+        0.4,
+        0.96,
+        0.92
+      ],
+      "wide_name_max_ratio": 0.235,
+      "wide_name_min_ratio": 0.14,
+      "wide_slogan_max_ratio": 0.132,
+      "wide_slogan_min_ratio": 0.078
+    },
+    "endcard": {
+      "tint": {
+        "base_overlay": [
+          5,
+          4,
+          4,
+          170
+        ],
+        "soft_ellipse": [
+          0.12,
+          0.05,
+          0.88,
+          0.82
+        ],
+        "soft_alpha": 70,
+        "soft_blur_scale": 0.05,
+        "soft_blur_min_px": 30
+      },
+      "grain_opacity": 10,
+      "logo_plate_pad_divisor": 14,
+      "logo_plate_outline_width_divisor": 30,
+      "logo_plate_fill": [
+        247,
+        242,
+        230,
+        235
+      ],
+      "logo_plate_outline": [
+        184,
+        144,
+        86,
+        235
+      ],
+      "heading_panel": {
+        "fill": [
+          8,
+          7,
+          7,
+          184
+        ],
+        "outline": [
+          176,
+          134,
+          72,
+          210
+        ],
+        "width_px": 2,
+        "radius_scale": 0.16
+      },
+      "panel": {
+        "fill": [
+          8,
+          7,
+          7,
+          164
+        ],
+        "outline": [
+          176,
+          134,
+          72,
+          220
+        ],
+        "width_px": 2,
+        "radius_scale": 0.11
+      },
+      "text": {
+        "heading_max_scale": 0.108,
+        "heading_min_scale": 0.055,
+        "teaser_max_scale": 0.048,
+        "teaser_min_scale": 0.026,
+        "cta_max_scale": 0.046,
+        "cta_min_scale": 0.024,
+        "brand_max_scale": 0.082,
+        "brand_min_scale": 0.043,
+        "slogan_max_scale": 0.038,
+        "slogan_min_scale": 0.022,
+        "heading_max_lines": 1,
+        "teaser_max_lines": 2,
+        "cta_max_lines": 2,
+        "brand_max_lines": 1,
+        "slogan_max_lines": 1
+      },
+      "separators": {
+        "heading_offset_y": 0.012,
+        "heading_x1": 0.3,
+        "heading_x2": 0.7,
+        "brand_offset_y": 0.01,
+        "brand_x1": 0.35,
+        "brand_x2": 0.65,
+        "color": [
+          154,
+          122,
+          47,
+          140
+        ]
+      },
+      "editorial_layout": {
+        "enabled": true,
+        "next_label": "下一期",
+        "teaser_rewrites": [
+          {
+            "pattern": "宁可买电视也不吃饱",
+            "replacement": "宁可买电视，也不吃饱？"
+          },
+          {
+            "pattern": "宁可买电视，也不吃饱$",
+            "replacement": "宁可买电视，也不吃饱？"
+          }
+        ],
+        "bg_darken": 0.6,
+        "bg_blur": 1.8
+      }
+    }
+  },
+  "rendering": {
+    "engine": "pillow",
+    "fallback_engine": "pillow"
+  },
+  "visual_controls": {
+    "preset": "magazine_prime",
+    "说明": "顶刊杂志方向的 A/C 与分集封面视觉控件：更清晰的标题层级、更克制的面板、更少装饰；GUI 保存后仍可继续微调。",
+    "background": {
+      "brightness": 0.92,
+      "saturation": 0.98,
+      "contrast": 1.1,
+      "blur_px": 3,
+      "blur_opacity": 0.24,
+      "vignette": 0.34,
+      "top_darken": 0.18,
+      "bottom_darken": 0.3,
+      "focus_x": 50,
+      "focus_y": 48
+    },
+    "glass": {
+      "opacity": 0.68,
+      "blur_px": 14,
+      "radius_px": 28,
+      "border_opacity": 0.58,
+      "glow": 0.22
+    },
+    "title": {
+      "scale": 1.18,
+      "glow": 0.18,
+      "stroke": 0.26,
+      "letter_spacing": 0,
+      "max_lines_vertical": 3,
+      "max_lines_wide": 3
+    },
+    "ornaments": {
+      "frame": true,
+      "corner": false,
+      "cloud": false,
+      "noise": true,
+      "scanline": false,
+      "progress_bar": false,
+      "particle": false,
+      "orb": false
+    },
+    "composition": {
+      "visual_priority": true,
+      "wide_text_side": "left",
+      "wide_panel_width_pct": 52,
+      "vertical_panel_y_pct": 10,
+      "vertical_panel_h_pct": 76,
+      "vertical_card_y_pct": 16,
+      "vertical_card_h_pct": 52
+    }
+  }
+}

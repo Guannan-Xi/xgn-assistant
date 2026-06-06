@@ -1,0 +1,233 @@
+{
+  "brand": {
+    "name": "知识慢炖",
+    "follow_sentence": "想读完整论证，可以看原书；也欢迎关注【知识慢炖】，下一期继续讲。"
+  },
+  "split_transition": {
+    "opening_book_first": "先从一个容易理解的问题进入：{title}。{book}这一集会把这个问题放回{chapter}的具体语境中展开。",
+    "opening_with_prev": "上集讲到，{prev_summary}；这一集直接看{current_summary}，问题会更尖锐。",
+    "opening_chapter_first": "这一集进入{chapter}，先看{title}这个问题。",
+    "opening_first": "这一集先抓住{current_summary}，从一个具体场面讲清楚。",
+    "closing_with_next": "这一集先看到{current_summary}；下一集继续看{next_summary}。{follow_sentence}",
+    "closing_book_final": "全书最后，{summary}。{follow_sentence}",
+    "closing_no_next": "这一集先讲到这里。{follow_sentence}",
+    "forbidden_prefixes": [
+      "主题：",
+      "主题",
+      "本集主题：",
+      "本集名：",
+      "本期标题：",
+      "生活中，我们常常",
+      "生活里，很多",
+      "日常生活中，我们",
+      "身不由己，被各种规则束缚",
+      "我们每个人都会被规则束缚",
+      "规则无处不在",
+      "这件小事",
+      "这件事",
+      "这背后",
+      "你以为午朝大典讹传、官员被罚只是偶然事件吗",
+      "我们再来看看他的婚姻",
+      "我们再来看看他的",
+      "接着看这件事",
+      "再看这个问题"
+    ],
+    "title_policy": "每集名称先由大模型根据本集内容概括为凝练标题，再作为分集文件夹主体名，并同步到封面小标题、视频简介 name 和脚本 title。",
+    "recap_policy": "上集回顾必须概括中心线索或结果，一两句话即可；禁止流水账罗列多个事件、人物和枝节消息。",
+    "cross_chapter_next_policy": "每章最后一集生成前，必须提前准备下一章第一分集的小标题、内容提要和台词范围；C 口播与 C 图主文案优先使用内容提要，标题只校验方向。",
+    "opening_bridge_policy": "A1 如果包含上集回顾，必须同时为 A1 后第一条正文铺路；第一条正文不得在缺少对象和问题铺垫时直接以“之后、随后、又有、再到后来、后来、此后、还有流言称”等依赖前文的词开头，也不得用“我们再来看看他的婚姻”“接着看这件事”“再看这个问题”等弱指代句开头。",
+    "unsafe_opening_connectors": [
+      "随后",
+      "随后又有",
+      "又有",
+      "再到后来",
+      "后来",
+      "此后",
+      "同时",
+      "另外",
+      "还有",
+      "还有流言称",
+      "于是",
+      "因此",
+      "由此",
+      "我们再来看看他的",
+      "再来看看他的",
+      "接着看这件事",
+      "再看这个问题",
+      "我们再来看看这个",
+      "我们再来看看这件事",
+      "之后",
+      "之后又有",
+      "之后，又有流言传出"
+    ],
+    "polish_context_policy": "分集一润色和 DeepSeek 终稿润色必须同时向模型提交上一集/前文实际台词片段、本集台词、下一集/后文实际台词片段；A1、正文首句、C 片尾必须按前后上下文连读审片。",
+    "next_preview_title_policy": "下一集/下一章预告必须以 next_title 为语义锚点；C 口播、下集预告卡、next_summary 三者含义必须一致。next_summary 是内容提要，应优先用于具体预告；冲突时以标题校正。跨章节时使用下一章第一分集标题与内容提要，不使用章节大标题、下一集第一句口播或旧笼统预告。",
+    "next_preview_card_policy": "下集预告卡必须使用 next_summary/content_outline 内容提要作为主文案，并与 next_title 含义一致；禁止使用下一集第一句口播、绘图提示词、dry-run 示例句、口播台词对应内容画面或“每句台词对应描述内容的画面”。"
+  },
+  "image_prompt_policy": {
+    "source_priority": "final_voiceover_first; episode_title_and_summary_only_as_context",
+    "rebuild_after_polish": true,
+    "strict_alignment": "A1/B image prompts are rebuilt from final narration lines after script polish, split polish and final polish; C has no image prompt.",
+    "forbidden_generic_prompts": [
+      "对应内容画面",
+      "历史感背景",
+      "读书解读短视频插图，主题",
+      "泛泛宫殿背景",
+      "知识感画面"
+    ],
+    "style_rule": "绘图提示词必须符合台词风格：克制、准确、纪录片式历史人文；用人物关系、空间、器物、奏疏、宫门、书案、礼制符号表现台词里的事件和矛盾；涉及身体不适或传闻时只做间接表达，避免任何身体伤害细节。",
+    "safety_rewrite_policy": "台词可以保留历史事实，但绘图提示词在涉及身体不适、意外、病因或传闻时必须改写为间接画面；不得直接描写弄伤、抓破、伤口、流血、自伤、自杀、服毒、上吊等高风险身体伤害内容。",
+    "safe_visual_fallback": "宫门、奏疏、药案、帘幕、书房、人物远景、朝臣低声议论、闭门不出等。"
+  },
+  "voiceover_polish": {
+    "final_style_policy": "最终润色必须使用通俗易懂的标准汉语旁白：清楚、平实、顺口，普通观众一听就懂；但不能聊天化、网络化或营销号化。减少“其、由此可见、得以、致使、从而、进而、显现出、在此背景下”等书面套语；禁用“咱们、你看、说白了、其实吧、搞事情、离谱、扎心、摆烂、封神、天花板”等口语/网感表达。保留必要历史名词，但用短句解释清楚人物、制度、原因和后果。",
+    "do_not_compress_source_coverage": "润色阶段不能把脚本生成阶段覆盖的原文要点压缩掉；只能把表达改得更易懂、更顺口。"
+  },
+  "script_generation": {
+    "source_coverage_policy": "脚本生成阶段必须充分覆盖本集原文，不得只写摘要或只选一两个戏剧性事件。长章节应输出足够数量的 B 系正文句，并在 source_coverage_checklist 中列出 6-15 个已覆盖原文要点。最终润色只做通俗化和逻辑顺滑处理，不能删减原文覆盖点。"
+  },
+  "source_context": {
+    "strip_non_story_source": true,
+    "remove_before_llm": "送入大模型前去除注释、参考文献、图片占位、脚注编号和孤立图注；保留正文叙事和论证。可用 AMP_STRIP_NON_STORY_SOURCE=0 关闭。"
+  },
+  "retention_optimization": {
+    "source": "近期单集数据：约5分30秒完播率约27.45%；最新两条约5分50秒，完播率约34%，0:00-1:10 流失到约35%。",
+    "target_duration": "2分10秒-3分10秒",
+    "max_duration": "3分10秒",
+    "title_chars": "8-18最佳，最多24",
+    "opening_rule": "3秒给人物困境或制度矛盾，8秒说明本集问题，45秒内出现一个明确转折；先讲谁遇到什么麻烦，再讲背景",
+    "coverage_rule": "脚本生成阶段不压缩，充分覆盖原文；留存优化只在分集拆分阶段控制单条视频时长。",
+    "script_upper_limit": "无；整章脚本 B 系句数不设上限。"
+  },
+  "wechat_publish_pack": {
+    "enabled": true,
+    "files": [
+      "04_微信发布包.txt",
+      "04_发布文案.txt",
+      "04_朋友圈转发文案.txt",
+      "04_微信群转发文案.txt",
+      "04_置顶评论.txt",
+      "04_评论引导问题.txt",
+      "04_转发金句.txt",
+      "04_公众号联动文案.txt"
+    ],
+    "title_policy": "标题和内容概括分开；视频号标题16-24字，优先写成清楚的问题或冲突判断；朋友圈标题像自然转发理由，公众号标题可稍完整。",
+    "interaction_policy": "每集必须生成置顶评论、3个评论问题和2-3句转发金句。互动问题要围绕具体矛盾、人物处境或制度选择，避免泛泛问“你怎么看”。",
+    "audience_policy": "默认受众是微信视频号普通观众：可能没读过原书、弱注意力滑动浏览。所有最终文案都要先讲清人物/事件/矛盾和观看价值，避免论文题目、课堂提纲、广告腔、鸡汤和空泛爆款词。"
+  },
+  "default_model_policy": {
+    "start_stage": "outline",
+    "outline": "gemini / gemini-3.5-flash",
+    "episode_prompt": "openai / gpt-5.5",
+    "script": "gemini / gemini-3.5-flash",
+    "note": "分集提示词默认 GPT-5.5（非 pro）；脚本生成默认 Gemini 3.5 Flash。",
+    "episode_prompt_note": "分集提示词默认使用 gpt-5.5，明确不是 gpt-5.5-pro。旧工程遗留的 Gemini/mini/pro 默认会自动迁移到 gpt-5.5。",
+    "episode_prompt_llm_default": true,
+    "episode_prompt_local_template_only_when": "dry-run 或 AMP_USE_EPISODE_PROMPT_LLM=0"
+  },
+  "wechat_preflight": {
+    "enabled": true,
+    "max_part_seconds": 190,
+    "invalid_title_keywords": [
+      "内容概括",
+      "摘要",
+      "summary_150"
+    ],
+    "output_file": "04_微信发布前校验.txt",
+    "reuse_policy": "已有分集若缺少微信发布包、标题混入内容概括，或拆分后单条超过建议时长，会判定为未完成并重建。"
+  },
+  "image_model_policy": {
+    "openai_default": "gpt-image-2",
+    "openai_quality_default": "low",
+    "gemini_low_cost_default": "gemini-2.5-flash-image",
+    "gemini_extra_choices": [
+      "gemini-3.1-flash-image",
+      "gemini-3-pro-image"
+    ],
+    "deprecated_aliases": {
+      "gemini-2.0-flash-preview-image-generation": "gemini-2.5-flash-image",
+      "gemini-2.5-flash-image-preview": "gemini-2.5-flash-image"
+    },
+    "note": "Gemini 生图旧模型会自动映射到低成本稳定模型 gemini-2.5-flash-image。",
+    "openai_gpt_image_choices": [
+      "gpt-image-2",
+      "gpt-image-1.5",
+      "gpt-image-1",
+      "gpt-image-1-mini"
+    ],
+    "openai_low_cost_choice": "gpt-image-1-mini",
+    "note_openai": "OpenAI 生图下拉框新增 GPT Image 2 / 1.5 / 1 / 1 Mini；低成本可选 gpt-image-1-mini。"
+  },
+  "source_coverage_generation": {
+    "script_is_full_narration_not_summary": true,
+    "do_not_compress_in_script_stage": true,
+    "min_b_lines": {
+      "pages>=30_or_chars>=70000": 100,
+      "pages>=20_or_chars>=45000": 75,
+      "pages>=10_or_chars>=22000": 50,
+      "pages>=5_or_chars>=9000": 25,
+      "tiny": 10
+    },
+    "coverage_checklist_min": {
+      "long": 14,
+      "medium": 12,
+      "short": 10
+    },
+    "style": "全面、精彩、重视地解读原文；精彩来自具体事件、制度机制和因果推进，不靠夸张词。",
+    "target_b_lines": {
+      "pages>=30_or_chars>=70000": 120,
+      "pages>=20_or_chars>=45000": 90,
+      "pages>=10_or_chars>=22000": 60
+    },
+    "repair_rounds_default": 2,
+    "hard_fail_if_incomplete": true
+  },
+  "chapter_vs_split_policy": {
+    "chapter_script_stage": "全面覆盖原文，不限制 B 系总数，不压缩内容。",
+    "split_stage": "只在分集拆分阶段限制单条视频长度，默认 2:10-3:10。",
+    "split_max_seconds_default": 190,
+    "split_env_overrides": {
+      "AMP_SPLIT_PART_MIN_SECONDS": "默认130",
+      "AMP_SPLIT_PART_TARGET_SECONDS": "默认165",
+      "AMP_SPLIT_PART_MAX_SECONDS": "默认190",
+      "AMP_ALLOW_OVERLONG_SPLIT_CONFIG": "设为1时允许人工拆分配置超过上限"
+    },
+    "rule": "长脚本通过拆成更多短集解决，不在整章脚本生成或润色阶段删减原文覆盖点。"
+  },
+  "script_json_stability": {
+    "enabled": true,
+    "script_stage_image_prompts": "empty array",
+    "full_script_policy": "may be empty; auto-built from voiceover",
+    "reason": "避免整章全面覆盖时 JSON 输出过大被 Gemini 截断，导致不可解析。",
+    "coverage_field": "voiceover"
+  },
+  "final_polish_style_examples": {
+    "enabled": true,
+    "goal": "顺、准、有力量；通俗但不口语化；保留信息量。",
+    "preferred_rewrites": {
+      "有分歧": "存在分歧",
+      "获皇帝信任": "获得皇帝信任",
+      "但难以": "却难以",
+      "不予嫉恨追究": "不记恨、不追究",
+      "考核结果，": "考核结果显示，",
+      "以……为首要原则": "将……作为首要原则",
+      "长期的搁置": "长期搁置",
+      "两相割裂": "表里割裂"
+    },
+    "c_rule": "C 结尾必须完整引用下一集标题，内容提要不能替代标题。"
+  },
+  "recent_data": {
+    "source": "近7天微信视频号数据：完播率约35％，平均播放时长尚可，但关注、分享、评论偏低。",
+    "diagnosis": "内容有一定留存，主要短板是缺少关注理由、转发理由和低门槛评论问题。",
+    "priority": [
+      "C片尾先给下集承诺或转发理由，再引导关注",
+      "发布包必须生成自然朋友圈/微信群转发理由",
+      "置顶评论必须是具体处境题或选择题"
+    ]
+  },
+  "wechat_publish": {
+    "title_policy": "标题抓一个具体矛盾，不承担转发理由；转发理由放到朋友圈/微信群文案。",
+    "interaction_policy": "每集必须生成置顶评论、3个评论问题、2-3句转发金句，并明确适合转给谁。",
+    "follow_share_policy": "关注引导要承诺下一集继续拆解什么问题；转发引导要说明这段能帮谁看懂什么处境。"
+  }
+}

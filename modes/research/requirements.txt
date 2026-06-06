@@ -1,0 +1,8 @@
+requests
+openai
+google-genai
+customtkinter
+pypdf
+pillow
+pymupdf4llm
+pymupdf

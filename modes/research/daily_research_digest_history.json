@@ -1,0 +1,549 @@
+{
+  "used_pmids": {
+    "42225991": {
+      "date": "2026-06-06",
+      "journal": "Nature medicine",
+      "title": "Tumor-targeted interferon-α gene therapy for glioblastoma: a phase 1 trial.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260606（1）"
+    },
+    "42214342": {
+      "date": "2026-06-05",
+      "journal": "Cell",
+      "title": "Physiological brain clearance architecture revealed by neuronal protein tracing.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（7）"
+    },
+    "42203860": {
+      "date": "2026-06-06",
+      "journal": "Nature methods",
+      "title": "External validation improves generalizability, replicability and reproducibility in predictive models for neuroimaging.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260606（6）"
+    },
+    "41819099": {
+      "date": "2026-06-05",
+      "journal": "Neuron",
+      "title": "Brain-engrafted monocyte-derived macrophages from blood and skull-bone marrow exhibit distinct properties.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（7）"
+    },
+    "42237030": {
+      "date": "2026-06-05",
+      "journal": "Nature neuroscience",
+      "title": "Single-cell multi-omic atlas and morphogen screening informs midbrain and hindbrain organoid engineering.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（1）"
+    },
+    "42237031": {
+      "date": "2026-06-05",
+      "journal": "Nature neuroscience",
+      "title": "A brainstem pathway underlying vagal modulation of somatic pain and affective states.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（8）"
+    },
+    "42231021": {
+      "date": "2026-06-05",
+      "journal": "Nature neuroscience",
+      "title": "Microbial reactivation of host androgens directs enteric neuronal regulation of gut motility.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（7）"
+    },
+    "42225897": {
+      "date": "2026-06-06",
+      "journal": "Nature neuroscience",
+      "title": "Deep brain stimulation induces white matter remodeling and functional changes to brain-wide networks.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260606（4）"
+    },
+    "42215643": {
+      "date": "2026-06-05",
+      "journal": "Nature neuroscience",
+      "title": "Neuroproteasomes regulate endogenous tau paired helical filament formation in an APOE genotype- and age-dependent manner.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（1）"
+    },
+    "42235510": {
+      "date": "2026-06-05",
+      "journal": "Neuron",
+      "title": "A hypothalamic circuit for anticipating future changes in energy balance.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（2）"
+    },
+    "42235490": {
+      "date": "2026-06-06",
+      "journal": "Neuron",
+      "title": "The schema spectrum: Emergent structures and levels of abstraction in AI and the brain.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260606（2）"
+    },
+    "42235489": {
+      "date": "2026-06-05",
+      "journal": "Neuron",
+      "title": "Danilo Bzdok.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（2）"
+    },
+    "42235488": {
+      "date": "2026-06-05",
+      "journal": "Neuron",
+      "title": "When memory shapes appetite: A top-down peptidergic gate for context-dependent feeding.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（2）"
+    },
+    "42235487": {
+      "date": "2026-06-05",
+      "journal": "Neuron",
+      "title": "Who sets the brakes on anxiety? A role for astrocytic histamine 3 receptors.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（6）"
+    },
+    "42235486": {
+      "date": "2026-06-05",
+      "journal": "Neuron",
+      "title": "The rewarding crunch: A brainstem circuit links incisor mechanosensation to motivated gnawing.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（8）"
+    },
+    "42235485": {
+      "date": "2026-06-05",
+      "journal": "Neuron",
+      "title": "A cytoplasmic turn in TDP-43 toxicity.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（2）"
+    },
+    "41943580": {
+      "date": "2026-06-05",
+      "journal": "Neuron",
+      "title": "DCPS modulates TDP-43-linked neurodegeneration through P-body-mediated RNA decay.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（10）"
+    },
+    "41831442": {
+      "date": "2026-06-05",
+      "journal": "Neuron",
+      "title": "A genetically encoded fluorescent sensor for monitoring spatiotemporal prostaglandin E2 dynamics in vivo.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（15）"
+    },
+    "41825443": {
+      "date": "2026-06-05",
+      "journal": "Neuron",
+      "title": "Endocytome profiling uncovers cell-surface protein dynamics underlying neuronal connectivity.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（15）"
+    },
+    "41812659": {
+      "date": "2026-06-05",
+      "journal": "Neuron",
+      "title": "A touch-guided neural circuit regulates motivated gnawing to maintain dental alignment.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（4）"
+    },
+    "41791374": {
+      "date": "2026-06-05",
+      "journal": "Neuron",
+      "title": "David Sussillo.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（5）"
+    },
+    "41763203": {
+      "date": "2026-06-05",
+      "journal": "Neuron",
+      "title": "Stochastic misfolding drives the emergence of distinct α-synuclein strains.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（10）"
+    },
+    "41687615": {
+      "date": "2026-06-05",
+      "journal": "Neuron",
+      "title": "A dorsal hippocampus-prodynorphinergic dorsolateral septum-to-lateral hypothalamus circuit mediates contextual gating of feeding.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（4）"
+    },
+    "42191500": {
+      "date": "2026-06-06",
+      "journal": "Trends in neurosciences",
+      "title": "The 'neat' and 'messy' in task-dependent neural geometry and computation.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260606（2）"
+    },
+    "42185119": {
+      "date": "2026-06-05",
+      "journal": "Trends in neurosciences",
+      "title": "A holistic perspective on noninvasive brain-computer interfaces.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（5）"
+    },
+    "42230965": {
+      "date": "2026-06-05",
+      "journal": "Molecular psychiatry",
+      "title": "Sex-specific regulation of angiogenin in Alzheimer's disease.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（5）"
+    },
+    "42230964": {
+      "date": "2026-06-05",
+      "journal": "Molecular psychiatry",
+      "title": "Reduced BCL2 level in astrocytes contributes to blood-brain barrier disruption in the striatum of offspring exposed to maternal preeclampsia.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（5）"
+    },
+    "41986742": {
+      "date": "2026-06-06",
+      "journal": "Molecular psychiatry",
+      "title": "Postpartum psychosis is associated with elevated neuromelanin-MRI signal in the midbrain.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260606（5）"
+    },
+    "41699103": {
+      "date": "2026-06-05",
+      "journal": "Molecular psychiatry",
+      "title": "A large-scale DNA methylation study of alcohol use identified robust associations and cell-type specific insights.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（6）"
+    },
+    "41691109": {
+      "date": "2026-06-05",
+      "journal": "Molecular psychiatry",
+      "title": "Systems genetic dissection of brain gene expression reveals excitotoxic mechanisms of Alzheimer's disease.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（6）"
+    },
+    "41297785": {
+      "date": "2026-06-05",
+      "journal": "Biological psychiatry",
+      "title": "Imaging Neuroimmune Dysfunction: From TSPO to Emerging Positron Emission Tomography Targets.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（6）"
+    },
+    "41275953": {
+      "date": "2026-06-05",
+      "journal": "Biological psychiatry",
+      "title": "Lessons From Clinical Trials of Immunomodulatory Drugs in Psychiatric Disorders.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（6）"
+    },
+    "41270915": {
+      "date": "2026-06-06",
+      "journal": "Biological psychiatry",
+      "title": "Immunity in Rodent Models of Stress.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260606（3）"
+    },
+    "41173201": {
+      "date": "2026-06-05",
+      "journal": "Biological psychiatry",
+      "title": "Neuroimmune Mechanisms of Neurodevelopmental Disorders.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（7）"
+    },
+    "42237024": {
+      "date": "2026-06-05",
+      "journal": "Acta neuropathologica",
+      "title": "AETA peptide contributes to Alzheimer's disease signature of synapse dysfunction.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（7）"
+    },
+    "42213237": {
+      "date": "2026-06-06",
+      "journal": "Acta neuropathologica",
+      "title": "Reevaluating the role of beta2-microglobulin: new insights on selective vulnerability in ALS pathology.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260606（4）"
+    },
+    "42184025": {
+      "date": "2026-06-06",
+      "journal": "Acta neuropathologica",
+      "title": "Neocortical tau burden determines the degree of cognitive impairment in individuals with Braak stage V neurofibrillary degeneration.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260606（5）"
+    },
+    "41967760": {
+      "date": "2026-06-05",
+      "journal": "Progress in neurobiology",
+      "title": "Therapeutic ultrasound for the treatment of demyelinating diseases.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（7）"
+    },
+    "42243402": {
+      "date": "2026-06-05",
+      "journal": "Nature neuroscience",
+      "title": "Aberrant tau accumulation caused by MAPT mutations induces early pathological changes in axonal transport that are rescued by p38α inhibition.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（4）"
+    },
+    "42242218": {
+      "date": "2026-06-05",
+      "journal": "Neuron",
+      "title": "POINTseq: Cell-type-specific barcoding reveals single-cell projection architecture of the mouse dopaminergic system.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（2）"
+    },
+    "42236937": {
+      "date": "2026-06-05",
+      "journal": "Nature",
+      "title": "LASER couples damage sensing to ESCRT assembly for lysosome repair.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（1）"
+    },
+    "42234478": {
+      "date": "2026-06-05",
+      "journal": "eLife",
+      "title": "CO2-dependent opening of connexin 43 hemichannels.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（1）"
+    },
+    "42241537": {
+      "date": "2026-06-05",
+      "journal": "Science (New York, N.Y.)",
+      "title": "Bad memories, bad sleep.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（1）"
+    },
+    "41127961": {
+      "date": "2026-06-05",
+      "journal": "Brain : a journal of neurology",
+      "title": "Profiling cognition and brain metabolism in amyotrophic lateral sclerosis and frontotemporal dementia.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（1）"
+    },
+    "42241547": {
+      "date": "2026-06-05",
+      "journal": "Science (New York, N.Y.)",
+      "title": "Brain-mapping effort searches for roots of neurodegenerative diseases.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（2）"
+    },
+    "41999185": {
+      "date": "2026-06-05",
+      "journal": "Brain : a journal of neurology",
+      "title": "Opposing μ-opioid receptor signalling in spinal NPY microcircuits constrains morphine analgesia.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（2）"
+    },
+    "42236948": {
+      "date": "2026-06-06",
+      "journal": "Nature",
+      "title": "A natural depsipeptide antibiotic binds the E-site of the bacterial ribosome.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260606（2）"
+    },
+    "42174242": {
+      "date": "2026-06-05",
+      "journal": "Nature methods",
+      "title": "A multimodal adaptive optical microscope for in vivo imaging from molecules to organisms.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（2）"
+    },
+    "42236943": {
+      "date": "2026-06-06",
+      "journal": "Nature",
+      "title": "Acquired genetic and cell-state changes in IDH-mutant glioma progression.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260606（3）"
+    },
+    "41231728": {
+      "date": "2026-06-05",
+      "journal": "Brain : a journal of neurology",
+      "title": "Synaptic density and tau pathology in Alzheimer's disease: a dual role in susceptibility and degeneration.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（3）"
+    },
+    "42225964": {
+      "date": "2026-06-05",
+      "journal": "Nature methods",
+      "title": "Neuropixels Opto: combining high-resolution electrophysiology and optogenetics.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（3）"
+    },
+    "42225066": {
+      "date": "2026-06-06",
+      "journal": "Neuron",
+      "title": "A learning-evoked slow-oscillatory architecture paces population activity for offline reactivation across the human medial temporal lobe.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260606（3）"
+    },
+    "42223470": {
+      "date": "2026-06-05",
+      "journal": "eLife",
+      "title": "Mural cells protect the adult brain from hemorrhage but do not control the blood-brain barrier in developing zebrafish.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（4）"
+    },
+    "42243549": {
+      "date": "2026-06-05",
+      "journal": "Nature medicine",
+      "title": "Human microglial transitions at the Aβ-tau inflection point associate with divergent pathways to dementia and resilience.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（4）"
+    },
+    "42242225": {
+      "date": "2026-06-05",
+      "journal": "Cell",
+      "title": "Deep learning of functional perturbations from condensate morphology.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（4）"
+    },
+    "41410687": {
+      "date": "2026-06-05",
+      "journal": "Brain : a journal of neurology",
+      "title": "ApoE4 lowers the ptau217 threshold for tau aggregation and spread in an allele dose-dependent manner.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（4）"
+    },
+    "42206967": {
+      "date": "2026-06-05",
+      "journal": "eLife",
+      "title": "Chromosome-scale genome assembly of the European common cuttlefish Sepia officinalis.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（5）"
+    },
+    "42214341": {
+      "date": "2026-06-06",
+      "journal": "Cell",
+      "title": "Decoding the spatiotemporal development of human meninges.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260606（2）"
+    },
+    "40994051": {
+      "date": "2026-06-05",
+      "journal": "Brain : a journal of neurology",
+      "title": "Normalization of network activity in an epilepsy model with a constitutively active GABBR2 variant.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（5）"
+    },
+    "42241552": {
+      "date": "2026-06-06",
+      "journal": "Science (New York, N.Y.)",
+      "title": "Memory reactivation underlies experience-dependent adaptive regulation of sleep.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260606（1）"
+    },
+    "42097138": {
+      "date": "2026-06-05",
+      "journal": "Cell",
+      "title": "Affinity-matured B cell responses neutralizing type-I interferons underlie severe viral infections.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（6）"
+    },
+    "41239869": {
+      "date": "2026-06-05",
+      "journal": "Brain : a journal of neurology",
+      "title": "SUR1-TRPM4 is expressed in human epilepsy and promotes neuron hyperactivity and seizures in rodents.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（6）"
+    },
+    "41578740": {
+      "date": "2026-06-05",
+      "journal": "Brain : a journal of neurology",
+      "title": "Targeting UCHL3 attenuates pathological markers in neuronal models of Huntington's disease.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（7）"
+    },
+    "42223014": {
+      "date": "2026-06-05",
+      "journal": "eLife",
+      "title": "Distinct evolutionary trajectories of two integration centres, the central complex and mushroom bodies, across Heliconiini butterflies.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（7）"
+    },
+    "41793123": {
+      "date": "2026-06-05",
+      "journal": "Brain : a journal of neurology",
+      "title": "A computational framework for epigenetic plasticity in memory.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（8）"
+    },
+    "42241317": {
+      "date": "2026-06-06",
+      "journal": "eLife",
+      "title": "Quantitative RNA pseudouridine landscape reveals dynamic modification patterns and evolutionary conservation across bacterial species.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260606（6）"
+    },
+    "42054995": {
+      "date": "2026-06-06",
+      "journal": "Cell",
+      "title": "Spatial organization and detection of social odors in mouse primary olfactory system.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260606（4）"
+    },
+    "41738433": {
+      "date": "2026-06-05",
+      "journal": "Brain : a journal of neurology",
+      "title": "Distinct contribution of spinal neuropeptide Y and NPY1R neurons to morphine analgesia.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（10）"
+    },
+    "41178353": {
+      "date": "2026-06-05",
+      "journal": "Brain : a journal of neurology",
+      "title": "Estimating the time course of biomarker changes in Alzheimer's disease.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（10）"
+    },
+    "41325105": {
+      "date": "2026-06-05",
+      "journal": "Brain : a journal of neurology",
+      "title": "Is glymphatic clearance the secret to restorative sleep?",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（10）"
+    },
+    "41861062": {
+      "date": "2026-06-05",
+      "journal": "Brain : a journal of neurology",
+      "title": "Oxytocin receptor neurons in the paraventricular thalamus as a nexus for social behaviour and fear.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（15）"
+    },
+    "41802262": {
+      "date": "2026-06-05",
+      "journal": "Brain : a journal of neurology",
+      "title": "Evidence of skull bone translocator protein overexpression linked to multiple sclerosis progression.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（15）"
+    },
+    "42219867": {
+      "date": "2026-06-05",
+      "journal": "Brain : a journal of neurology",
+      "title": "Syndrome-specific vulnerability of neuronal and glial 4-repeat frontotemporal lobar degeneration-tau.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260605（15）"
+    },
+    "41934103": {
+      "date": "2026-06-06",
+      "journal": "Glia",
+      "title": "RXR Gamma Enables Oligodendrocyte Differentiation by Suppressing Sonic Hedgehog Signaling.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260606（1）"
+    },
+    "42230967": {
+      "date": "2026-06-06",
+      "journal": "Neuropsychopharmacology : official publication of the American College of Neuropsychopharmacology",
+      "title": "The role of subcortical brain tissue iron as an indicator of dopamine neurophysiology in adolescent cannabis use.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260606（1）"
+    },
+    "42067650": {
+      "date": "2026-06-06",
+      "journal": "Nature reviews. Neuroscience",
+      "title": "Large-scale electrophysiology at single-spike resolution.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260606（1）"
+    },
+    "41975100": {
+      "date": "2026-06-06",
+      "journal": "Nature reviews. Neuroscience",
+      "title": "Categorization is 'baked' into the brain.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260606（2）"
+    },
+    "42235660": {
+      "date": "2026-06-06",
+      "journal": "NeuroImage",
+      "title": "Convergent Resting-State Functional Connectivity and Meta-Analytic Functional Decoding for Describing Probabilistic Maps of Visual Perception of Emotional Constructs.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260606（3）"
+    },
+    "42153343": {
+      "date": "2026-06-06",
+      "journal": "Human brain mapping",
+      "title": "Striatal Prediction Error Tracking Moderates the Influence of Social Exposure on Adolescent Substance Use Curiosity.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260606（3）"
+    },
+    "42241879": {
+      "date": "2026-06-06",
+      "journal": "Developmental cognitive neuroscience",
+      "title": "Neural focalization of dorsolateral prefrontal cortex and the inferior parietal lobule is associated with inhibitory control performance in adolescence.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260606（4）"
+    },
+    "42237744": {
+      "date": "2026-06-06",
+      "journal": "Human brain mapping",
+      "title": "Distinct Physiological Mechanisms Drive Grey Matter Plasticity in Complex Versus Simple Sequence Learning.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260606（4）"
+    },
+    "42246108": {
+      "date": "2026-06-06",
+      "journal": "Human brain mapping",
+      "title": "Energy-Based Phase-Locking State Analysis in Brain State Identification.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260606（5）"
+    },
+    "41215623": {
+      "date": "2026-06-06",
+      "journal": "Brain : a journal of neurology",
+      "title": "Safety and short-term outcomes of lecanemab for Alzheimer's disease in China: a multicentre study.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260606（5）"
+    },
+    "42011986": {
+      "date": "2026-06-06",
+      "journal": "Glia",
+      "title": "A Cross-Disease Microglial Transcriptional Program Characterizes Neurodegeneration and Highlights SPP1 as a Biomarker.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260606（5）"
+    },
+    "42229316": {
+      "date": "2026-06-06",
+      "journal": "Developmental cognitive neuroscience",
+      "title": "In relation to anxiety severity, puberty moderates functional connectivity between the amygdala and anterior cingulate cortex for negative relative to neutral stimuli during an emotional categorization task.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260606（6）"
+    },
+    "41956196": {
+      "date": "2026-06-06",
+      "journal": "Progress in neurobiology",
+      "title": "Glial dynamics in brain aging: Cellular heterogeneity and regional vulnerability.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260606（6）"
+    },
+    "41927918": {
+      "date": "2026-06-06",
+      "journal": "Nature reviews. Neuroscience",
+      "title": "Opportunities and pitfalls of data contextualization in neuroimaging.",
+      "issue_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\20260606（6）"
+    }
+  },
+  "journal_counts": {
+    "nature medicine": 6,
+    "cell": 8,
+    "nature methods": 8,
+    "neuron": 56,
+    "nature neuroscience": 29,
+    "trends in neurosciences": 3,
+    "molecular psychiatry": 6,
+    "biological psychiatry": 5,
+    "acta neuropathologica": 5,
+    "progress in neurobiology": 2,
+    "nature": 10,
+    "elife": 8,
+    "science (new york, n.y.)": 7,
+    "brain : a journal of neurology": 35,
+    "glia": 2,
+    "neuropsychopharmacology": 1,
+    "nature reviews. neuroscience": 3,
+    "neuroimage": 1,
+    "human brain mapping": 3,
+    "developmental cognitive neuroscience": 2
+  },
+  "updated_at": "2026-06-06T03:21:31"
+}

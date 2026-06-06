@@ -1,0 +1,287 @@
+{
+  "brand": {
+    "name": "知识慢炖",
+    "follow_sentence": "喜欢本集，欢迎点赞、分享并关注【知识慢炖】"
+  },
+  "split_transition": {
+    "opening_book_first": "先从一个容易理解的问题进入：{title}。{book}这一集会把这个问题放回{chapter}的具体语境中展开。",
+    "opening_with_prev": "上集讲到，{prev_summary}；这一集直接看{current_summary}，问题会更尖锐。",
+    "opening_chapter_first": "这一集进入{chapter}，先看{title}这个问题。",
+    "opening_first": "这一集先抓住{current_summary}，从一个具体场面讲清楚。",
+    "closing_with_next": "这一集先看到{current_summary}；下一集继续看{next_summary}。{follow_sentence}",
+    "closing_book_final": "全书最后，{summary}。{follow_sentence}",
+    "closing_no_next": "这一集先讲到这里。{follow_sentence}",
+    "forbidden_prefixes": [
+      "主题：",
+      "主题",
+      "本集主题：",
+      "本集名：",
+      "本期标题：",
+      "生活中，我们常常",
+      "生活里，很多",
+      "日常生活中，我们",
+      "身不由己，被各种规则束缚",
+      "我们每个人都会被规则束缚",
+      "规则无处不在",
+      "这件小事",
+      "这件事",
+      "这背后",
+      "你以为午朝大典讹传、官员被罚只是偶然事件吗",
+      "我们再来看看他的婚姻",
+      "我们再来看看他的",
+      "接着看这件事",
+      "再看这个问题"
+    ],
+    "title_policy": "每集名称先由大模型根据本集内容概括为凝练标题，再作为分集文件夹主体名，并同步到封面小标题、视频简介 name 和脚本 title。",
+    "recap_policy": "上集回顾必须概括中心线索或结果，一两句话即可；禁止流水账罗列多个事件、人物和枝节消息。",
+    "cross_chapter_next_policy": "每章最后一集生成前，必须提前准备下一章第一分集标题；C 口播与 C 图必须完整引用下一集标题。内容提要只作解释，不能替代标题。",
+    "opening_bridge_policy": "A1 如果包含上集回顾，必须同时为 A1 后第一条正文铺路；第一条正文不得在缺少对象和问题铺垫时直接以“之后、随后、又有、再到后来、后来、此后、还有流言称”等依赖前文的词开头，也不得用“我们再来看看他的婚姻”“接着看这件事”“再看这个问题”等弱指代句开头。",
+    "unsafe_opening_connectors": [
+      "随后",
+      "随后又有",
+      "又有",
+      "再到后来",
+      "后来",
+      "此后",
+      "同时",
+      "另外",
+      "还有",
+      "还有流言称",
+      "于是",
+      "因此",
+      "由此",
+      "我们再来看看他的",
+      "再来看看他的",
+      "接着看这件事",
+      "再看这个问题",
+      "我们再来看看这个",
+      "我们再来看看这件事",
+      "之后",
+      "之后又有",
+      "之后，又有流言传出"
+    ],
+    "polish_context_policy": "分集一润色和 DeepSeek 终稿润色必须同时向模型提交上一集/前文实际台词片段、本集台词、下一集/后文实际台词片段；A1、正文首句、C 片尾必须按前后上下文连读审片。",
+    "next_preview_title_policy": "下一集/下一章预告必须以 next_title 为唯一上屏锚点；C 口播和下集预告卡必须完整引用 next_title。next_summary 只能辅助润色，不能替代标题。",
+    "next_preview_card_policy": "下集预告卡必须直接显示下一集标题；禁止用下一集第一句口播、内容提要、绘图提示词、dry-run 示例句替代标题。"
+  },
+  "image_prompt_policy": {
+    "source_priority": "final_voiceover_first; episode_title_and_summary_only_as_context",
+    "rebuild_after_polish": true,
+    "strict_alignment": "A1/B image prompts are rebuilt from final narration lines after script polish, split polish and final polish; C has no image prompt.",
+    "forbidden_generic_prompts": [
+      "对应内容画面",
+      "历史感背景",
+      "读书解读短视频插图，主题",
+      "泛泛宫殿背景",
+      "知识感画面"
+    ],
+    "style_rule": "绘图提示词必须符合台词风格：克制、准确、纪录片式历史人文；用人物关系、空间、器物、奏疏、宫门、书案、礼制符号表现台词里的事件和矛盾；涉及身体不适或传闻时只做间接表达，避免任何身体伤害细节。",
+    "safety_rewrite_policy": "台词可以保留历史事实，但绘图提示词在涉及身体不适、意外、病因或传闻时必须改写为间接画面；不得直接描写弄伤、抓破、伤口、流血、自伤、自杀、服毒、上吊等高风险身体伤害内容。",
+    "safe_visual_fallback": "宫门、奏疏、药案、帘幕、书房、人物远景、朝臣低声议论、闭门不出等。",
+    "poor_economics_mode": {
+      "enabled_when": "book_title contains 贫穷的本质 / Poor Economics or narration contains 贫穷陷阱/RCT/发展经济学等关键词",
+      "style": "发展经济学纪录片、田野调查、公共政策、真实生活场景",
+      "avoid": "宫殿、奏疏、皇帝、明代服饰、龙纹、黑金暗红历史风",
+      "respect_rule": "贫困、疾病、儿童相关画面只用远景/背影/群像；不画痛苦特写、脏乱猎奇或可识别真人肖像"
+    },
+    "adaptive_genre_detection": {
+      "enabled": true,
+      "genres": [
+        "history",
+        "social_science",
+        "business",
+        "psychology",
+        "science",
+        "finance",
+        "philosophy",
+        "literature",
+        "biography",
+        "health",
+        "education",
+        "general"
+      ],
+      "rule": "重建绘图提示词时用 book_title、episode_title、voiceover_text 推断类型；类型不同，画面空间、物件、气质和安全规则不同。"
+    }
+  },
+  "voiceover_polish": {
+    "final_style_policy": "最终润色必须使用通俗易懂的标准汉语旁白：清楚、平实、顺口，普通观众一听就懂；但不能聊天化、网络化或营销号化。减少“其、由此可见、得以、致使、从而、进而、显现出、在此背景下”等书面套语；禁用“咱们、你看、说白了、其实吧、搞事情、离谱、扎心、摆烂、封神、天花板”等口语/网感表达。保留必要历史名词，但用短句解释清楚人物、制度、原因和后果。",
+    "do_not_compress_source_coverage": "润色阶段不能把脚本生成阶段覆盖的原文要点压缩掉；只能把表达改得更易懂、更顺口。"
+  },
+  "script_generation": {
+    "source_coverage_policy": "脚本生成阶段必须充分覆盖本集原文，不得只写摘要或只选一两个戏剧性事件。长章节应输出足够数量的 B 系正文句，并在 source_coverage_checklist 中列出 6-15 个已覆盖原文要点。最终润色只做通俗化和逻辑顺滑处理，不能删减原文覆盖点。"
+  },
+  "source_context": {
+    "strip_non_story_source": true,
+    "remove_before_llm": "送入大模型前去除注释、参考文献、图片占位、脚注编号和孤立图注；保留正文叙事和论证。可用 AMP_STRIP_NON_STORY_SOURCE=0 关闭。"
+  },
+  "retention_optimization": {
+    "source": "近期单集数据：5分30秒，完播率约27.45%，前1分钟流失明显。",
+    "target_duration": "3-4分钟",
+    "max_duration": "4分30秒",
+    "title_chars": "8-18最佳，最多24",
+    "opening_rule": "5秒给冲突，10秒说明本集问题，60秒内至少一个明确转折",
+    "coverage_rule": "脚本生成阶段不压缩，充分覆盖原文；留存优化只在分集拆分阶段控制单条视频时长。",
+    "script_upper_limit": "无；整章脚本 B 系句数不设上限。"
+  },
+  "wechat_publish_pack": {
+    "enabled": true,
+    "files": [
+      "04_微信发布包.txt",
+      "04_发布文案.txt",
+      "04_朋友圈转发文案.txt",
+      "04_微信群转发文案.txt",
+      "04_置顶评论.txt",
+      "04_评论引导问题.txt",
+      "04_转发金句.txt",
+      "04_公众号联动文案.txt"
+    ],
+    "title_policy": "标题和内容概括分开；视频号标题18-28字，朋友圈标题像自然转发理由，公众号标题可稍完整。",
+    "interaction_policy": "每集必须生成置顶评论、3个评论问题和2-3句转发金句。"
+  },
+  "default_model_policy": {
+    "start_stage": "outline",
+    "outline": "gemini / gemini-3.5-flash",
+    "episode_prompt": "openai / gpt-5.5",
+    "script": "gemini / gemini-3.5-flash",
+    "note": "分集提示词默认 GPT-5.5（非 pro）；脚本生成默认 Gemini 3.5 Flash。",
+    "episode_prompt_note": "分集提示词默认使用 gpt-5.5，明确不是 gpt-5.5-pro。旧工程遗留的 Gemini/mini/pro 默认会自动迁移到 gpt-5.5。",
+    "episode_prompt_llm_default": true,
+    "episode_prompt_local_template_only_when": "dry-run 或 AMP_USE_EPISODE_PROMPT_LLM=0"
+  },
+  "wechat_preflight": {
+    "enabled": true,
+    "max_part_seconds": 270,
+    "invalid_title_keywords": [
+      "内容概括",
+      "摘要",
+      "summary_150"
+    ],
+    "output_file": "04_微信发布前校验.txt",
+    "reuse_policy": "已有分集若缺少微信发布包、标题混入内容概括，或拆分后单条超过建议时长，会判定为未完成并重建。"
+  },
+  "image_model_policy": {
+    "openai_default": "gpt-image-2",
+    "openai_quality_default": "low",
+    "gemini_low_cost_default": "gemini-2.5-flash-image",
+    "gemini_extra_choices": [
+      "gemini-3.1-flash-image",
+      "gemini-3-pro-image"
+    ],
+    "deprecated_aliases": {
+      "gemini-2.0-flash-preview-image-generation": "gemini-2.5-flash-image",
+      "gemini-2.5-flash-image-preview": "gemini-2.5-flash-image"
+    },
+    "note": "Gemini 生图旧模型会自动映射到低成本稳定模型 gemini-2.5-flash-image。",
+    "openai_gpt_image_choices": [
+      "gpt-image-2",
+      "gpt-image-1.5",
+      "gpt-image-1",
+      "gpt-image-1-mini"
+    ],
+    "openai_low_cost_choice": "gpt-image-1-mini",
+    "note_openai": "OpenAI 生图下拉框新增 GPT Image 2 / 1.5 / 1 / 1 Mini；低成本可选 gpt-image-1-mini。"
+  },
+  "source_coverage_generation": {
+    "script_is_full_narration_not_summary": true,
+    "do_not_compress_in_script_stage": true,
+    "min_b_lines": {
+      "pages>=30_or_chars>=70000": 100,
+      "pages>=20_or_chars>=45000": 75,
+      "pages>=10_or_chars>=22000": 50,
+      "pages>=5_or_chars>=9000": 25,
+      "tiny": 10
+    },
+    "coverage_checklist_min": {
+      "long": 14,
+      "medium": 12,
+      "short": 10
+    },
+    "style": "全面、精彩、重视地解读原文；精彩来自具体事件、制度机制和因果推进，不靠夸张词。",
+    "target_b_lines": {
+      "pages>=30_or_chars>=70000": 120,
+      "pages>=20_or_chars>=45000": 90,
+      "pages>=10_or_chars>=22000": 60
+    },
+    "repair_rounds_default": 2,
+    "hard_fail_if_incomplete": true
+  },
+  "chapter_vs_split_policy": {
+    "chapter_script_stage": "全面覆盖原文，不限制 B 系总数，不压缩内容。",
+    "split_stage": "只在分集拆分阶段限制单条视频长度，默认 2.5-4 分钟。",
+    "split_max_seconds_default": 240,
+    "split_env_overrides": {
+      "AMP_SPLIT_PART_MIN_SECONDS": "默认150",
+      "AMP_SPLIT_PART_TARGET_SECONDS": "默认210",
+      "AMP_SPLIT_PART_MAX_SECONDS": "默认240",
+      "AMP_ALLOW_OVERLONG_SPLIT_CONFIG": "设为1时允许人工拆分配置超过上限"
+    },
+    "rule": "长脚本通过拆成更多短集解决，不在整章脚本生成或润色阶段删减原文覆盖点。"
+  },
+  "script_json_stability": {
+    "enabled": true,
+    "script_stage_image_prompts": "empty array",
+    "full_script_policy": "may be empty; auto-built from voiceover",
+    "reason": "避免整章全面覆盖时 JSON 输出过大被 Gemini 截断，导致不可解析。",
+    "coverage_field": "voiceover",
+    "scanned_pdf_note": "扫描版 PDF 如果本地文本提取过少，Gemini 阶段默认允许直接上传 PDF 读取。可用 AMP_ALLOW_GEMINI_PDF_DIRECT_FOR_SCANNED=0 关闭。"
+  },
+  "final_polish_style_examples": {
+    "enabled": true,
+    "goal": "顺、准、有力量；通俗但不口语化；保留信息量。",
+    "preferred_rewrites": {
+      "有分歧": "存在分歧",
+      "获皇帝信任": "获得皇帝信任",
+      "但难以": "却难以",
+      "不予嫉恨追究": "不记恨、不追究",
+      "考核结果，": "考核结果显示，",
+      "以……为首要原则": "将……作为首要原则",
+      "长期的搁置": "长期搁置",
+      "两相割裂": "表里割裂"
+    },
+    "c_rule": "C 结尾必须完整引用下一集标题，内容提要不能替代标题。"
+  },
+  "book_profiles": {
+    "贫穷的本质": {
+      "genre": "development_economics_social_science",
+      "english_title": "Poor Economics",
+      "authors": "Abhijit V. Banerjee / Esther Duflo",
+      "script_logic": "问题—直觉误解—案例—实验/数据—机制—政策启发",
+      "visual_style": "社会科学纪录片；自然光、低饱和、真实、尊重、不卖惨",
+      "forbidden_framing": [
+        "把贫困归因为懒惰或道德失败",
+        "把穷人描写成被动悲惨符号",
+        "用宫廷历史黑金风表现现代发展经济学内容",
+        "跳过实验/数据，只讲观点"
+      ],
+      "coverage_checklist": [
+        "核心问题",
+        "常见误解",
+        "具体案例/地点/人群",
+        "实验或调查设计",
+        "关键数据或结果",
+        "机制解释",
+        "政策启发",
+        "作者的边界与保留"
+      ]
+    }
+  },
+  "adaptive_book_mode": {
+    "enabled": true,
+    "goal": "任何书先识别类型，再选择大纲、脚本、润色、视觉和发布文案策略，避免历史书模板泛化到所有书。",
+    "supported_types": {
+      "history": "人物—事件—制度—因果链",
+      "biography": "人生阶段—关键转折—时代背景—性格选择—影响",
+      "social_science": "问题—误解—案例—实验/数据—机制—政策启发",
+      "business": "场景痛点—模型—案例—方法步骤—失败条件—适用边界",
+      "psychology": "日常困惑—心理机制—研究证据—误区—行动启发",
+      "science": "现象—概念—证据—模型—应用—限制",
+      "philosophy": "问题—概念—论证—反驳—现实意义",
+      "literature": "人物处境—关系冲突—转折—意象—主题",
+      "finance": "市场问题—原理—案例—风险—普通人启发",
+      "health": "问题—证据—机制—适用边界—就医/生活提示",
+      "general": "核心问题—作者观点—论证证据—典型例子—适用边界—现实启发"
+    },
+    "visual_rule": "根据书籍类型切换视觉，不默认宫廷历史风；非历史书优先使用现实场景、抽象图表、书桌、人物远景和类型相关物件。",
+    "safety_rule": "贫困、疾病、儿童、创伤、暴力、灾难等主题必须尊重克制，间接表达，不画猎奇、痛苦特写或可识别真人肖像。"
+  }
+}

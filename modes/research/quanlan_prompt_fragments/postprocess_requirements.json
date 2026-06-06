@@ -1,0 +1,482 @@
+{
+  "coordinate_system": {
+    "type": "relative_percent",
+    "origin": "top_left",
+    "width": "W",
+    "height": "H"
+  },
+  "data_binding": {
+    "enabled": true,
+    "required_fields": {
+      "book_title_en": "{book_name_en}",
+      "book_title_cn": "{book_name_cn}",
+      "version": "{version}",
+      "author": "{authors_en}",
+      "chapter_number": "{chapter_number}",
+      "chapter_title_en": "{chapter_title_en}",
+      "chapter_title_cn": "{chapter_title_cn}"
+    },
+    "text_render_mapping": {
+      "cover": {
+        "book_title_cn": "book_title_cn",
+        "book_title_en": "book_title_en",
+        "edition": "version",
+        "author": "author",
+        "chapter_no": "chapter_number",
+        "chapter_title_cn": "chapter_title_cn",
+        "chapter_title_en": "chapter_title_en"
+      },
+      "home": {
+        "book_title_cn": "book_title_cn",
+        "book_title_en": "book_title_en",
+        "edition": "version",
+        "author": "author",
+        "chapter_no": "chapter_number",
+        "chapter_title_cn": "chapter_title_cn",
+        "chapter_title_en": "chapter_title_en"
+      },
+      "ending": {
+        "brand_cn": "book_title_cn",
+        "brand_en": "book_title_en"
+      }
+    },
+    "source_priority": {
+      "chapter_title_cn": [
+        "chapter_title_cn",
+        "Chapter Title CN",
+        "中文章节名"
+      ],
+      "chapter_title_en": [
+        "chapter_title_en",
+        "Chapter Title EN",
+        "Chapter Title",
+        "英文章节名"
+      ],
+      "book_title_cn": [
+        "book_name_cn",
+        "Book Title CN",
+        "中文书名"
+      ],
+      "book_title_en": [
+        "book_name_en",
+        "Book Title",
+        "英文书名"
+      ],
+      "chapter_number": [
+        "chapter_number",
+        "Chapter Number",
+        "章节序号"
+      ],
+      "version": [
+        "version",
+        "Version",
+        "版本信息"
+      ],
+      "author": [
+        "authors_en",
+        "Author",
+        "作者信息"
+      ]
+    },
+    "fallback_rules": {
+      "missing_book_title_cn": "缺失",
+      "missing_book_title_en": "缺失",
+      "missing_version": "缺失",
+      "missing_author": "缺失",
+      "missing_chapter_number": "缺失",
+      "missing_chapter_title_cn": "缺失",
+      "missing_chapter_title_en": "缺失",
+      "do_not_translate_or_guess_missing_title": true,
+      "do_not_replace_cn_title_with_en_title": true,
+      "do_not_replace_en_title_with_cn_title": true
+    }
+  },
+  "brand_logo_overlay": {
+    "enabled": true,
+    "applies_to": [
+      "cover",
+      "home"
+    ],
+    "render_layer": "post_processing_only",
+    "text": "QuanLan BrainScience®",
+    "render_mode": "single_text_exact",
+    "anchor": "top_center",
+    "reference_canvas": "1024x1360",
+    "bbox_ratio": {
+      "left": 0.228,
+      "top": 0.058,
+      "width": 0.542,
+      "height": 0.037,
+      "center_x": 0.5,
+      "center_y": 0.0765
+    },
+    "position": {
+      "center_x": 0.5,
+      "top_y": 0.058,
+      "max_width_ratio_w": 0.542,
+      "visual_height_ratio_h": 0.037
+    },
+    "centering_rule": {
+      "enabled": true,
+      "center_by": "final_rendered_bbox",
+      "after_font_fallback_recalculate_bbox": true,
+      "final_group_center_x_must_equal": 0.5,
+      "horizontal_error_tolerance_ratio_w": 0.001
+    },
+    "font": {
+      "family_priority": [
+        "Avenir Next Regular",
+        "Avenir Next",
+        "Helvetica Neue",
+        "Source Sans 3",
+        "Noto Sans",
+        "Arial"
+      ],
+      "size_ratio_w": 0.043,
+      "weight": 400,
+      "letter_spacing_em": 0.055,
+      "line_height": 1.0,
+      "align": "center"
+    },
+    "color": "#2D4467",
+    "opacity": 0.96,
+    "effects": {
+      "stroke": false,
+      "shadow": false,
+      "glow": false,
+      "gradient": false,
+      "background_box": false,
+      "optional_soft_mask": {
+        "enabled": true,
+        "fill": "#FFFFFF",
+        "opacity": 0.1,
+        "blur": 14,
+        "use_only_when_background_complex": true
+      }
+    },
+    "strict_rules": [
+      "For A-series pages, render the top logo from brand_logo_overlay as the single source of truth",
+      "Render the full logo string QuanLan BrainScience® as one text object",
+      "Do not split the registered mark into a separate object",
+      "Center by the final rendered bbox of the full string",
+      "AI Image Layer must not generate the logo",
+      "Do not use legacy top-left logo placement",
+      "Do not use cover_layout.brand_y or home_layout.brand_y to override brand_logo_overlay.position.top_y",
+      "Do not use cover_font_size.brand or home_font_size.brand to override brand_logo_overlay.font.size_ratio_w",
+      "Cover and home pages must use identical logo rendering",
+      "Do not move the logo to corners or bottom",
+      "Do not shrink the logo to fit old title template rules"
+    ]
+  },
+  "coordinate_system_note": {
+    "logo_priority": "For cover and home pages, brand_logo_overlay is the only authoritative source for logo rendering. Other brand-related fields are mirror compatibility values only.",
+    "logo_text_priority": "A-series logo must render the exact full string QuanLan BrainScience® as one text object. Do not split the registered mark.",
+    "chapter_title_cn_priority": "A1 and A2 Chinese chapter title must read chapter_title_cn from data_binding. Do not translate, infer, or replace it with chapter_title_en."
+  },
+  "cover_page": {
+    "ratio": "3:4",
+    "recommended_size_token_saver": "1024x1360",
+    "recommended_size_high": "2160x2880"
+  },
+  "home_page": {
+    "ratio": "9:16",
+    "recommended_size_token_saver": "1024x1824",
+    "recommended_size_high": "2160x3840"
+  },
+  "ending_page": {
+    "ratio": "9:16",
+    "recommended_size_token_saver": "1080x1920",
+    "recommended_size_high": "1440x2560"
+  },
+  "background_opacity": {
+    "cover": 0.18,
+    "home": 0.18,
+    "ending": 0.18,
+    "range": [
+      0.1,
+      0.28
+    ]
+  },
+  "center_mask": {
+    "cover": {
+      "enabled": true,
+      "fill": "#FFFFFF",
+      "opacity": 0.56,
+      "blur": 0,
+      "mode": "full_canvas"
+    },
+    "home": {
+      "enabled": true,
+      "fill": "#FFFFFF",
+      "opacity": 0.5,
+      "blur": 0,
+      "mode": "full_canvas"
+    },
+    "ending": {
+      "enabled": true,
+      "fill": "#FFFFFF",
+      "opacity": 0.62,
+      "border_radius_ratio_w": 0.0,
+      "blur": 0,
+      "mode": "full_canvas"
+    }
+  },
+  "content_safe_zone_mask": {
+    "enabled": true,
+    "top_ratio": 0.2,
+    "bottom_ratio": 0.2,
+    "fill": "auto",
+    "opacity": 0.58,
+    "edge_fade_ratio": 0.035,
+    "boundary_line_opacity": 0.0,
+    "note": "B 内容页上下各 20% 安全区使用较淡蒙版，保留背景信息可见性；关键主体和关键机制仍应集中在中间 60%。"
+  },
+  "cover_layout": {
+    "brand_y": 0.058,
+    "brand_center_x": 0.5,
+    "book_title_cn_y": 0.25,
+    "book_title_en_y": 0.335,
+    "edition_y": 0.43,
+    "author_y": 0.475,
+    "chapter_no_y": 0.615,
+    "chapter_title_cn_y": 0.695,
+    "chapter_title_en_y": 0.78
+  },
+  "home_layout": {
+    "brand_y": 0.058,
+    "brand_center_x": 0.5,
+    "book_title_cn_y": 0.285,
+    "book_title_en_y": 0.355,
+    "edition_y": 0.43,
+    "author_y": 0.47,
+    "chapter_no_y": 0.585,
+    "chapter_title_cn_y": 0.655,
+    "chapter_title_en_y": 0.725
+  },
+  "cover_font_size": {
+    "brand": 0.043,
+    "book_title_cn": 0.073,
+    "book_title_en": 0.037,
+    "edition": 0.026,
+    "author": 0.022,
+    "chapter_no": 0.031,
+    "chapter_title_cn_max": 0.062,
+    "chapter_title_cn_min": 0.038,
+    "chapter_title_en": 0.028
+  },
+  "home_font_size": {
+    "brand": 0.043,
+    "book_title_cn": 0.056,
+    "book_title_en": 0.03,
+    "edition": 0.02,
+    "author": 0.0185,
+    "chapter_no": 0.025,
+    "chapter_title_cn_max": 0.048,
+    "chapter_title_cn_min": 0.029,
+    "chapter_title_en": 0.022
+  },
+  "chapter_title_cn_dynamic_font": {
+    "source_field": "chapter_title_cn",
+    "max_width_ratio": 0.72,
+    "line_height": 1.12,
+    "align": "center",
+    "wrap": true,
+    "max_lines": 2,
+    "missing_value": "缺失",
+    "do_not_auto_translate": true,
+    "do_not_use_english_title_as_fallback": true,
+    "shrink_font_before_truncation": true
+  },
+  "chapter_title_en_dynamic_font": {
+    "source_field": "chapter_title_en",
+    "max_width_ratio": 0.84,
+    "line_height": 1.08,
+    "align": "center",
+    "wrap": true,
+    "max_lines": 3,
+    "missing_value": "缺失",
+    "do_not_auto_translate": true,
+    "do_not_use_chinese_title_as_fallback": true,
+    "no_word_break": true,
+    "shrink_font_before_truncation": true
+  },
+  "ending_layout": {
+    "card_x": 0.14,
+    "card_y": 0.14,
+    "card_width": 0.72,
+    "card_height": 0.68,
+    "brand_cn_y": 0.345,
+    "brand_en_y": 0.418,
+    "divider_1_y": 0.47,
+    "slogan_cn_y": 0.522,
+    "slogan_en_y": 0.572,
+    "divider_2_y": 0.62,
+    "follow_text_y": 0.674,
+    "center_x": 0.5,
+    "text_align": "center"
+  },
+  "ending_font_size": {
+    "brand_cn": 0.058,
+    "brand_en": 0.03,
+    "slogan_cn": 0.036,
+    "slogan_en": 0.025,
+    "follow_text": 0.03
+  },
+  "ending_card_style": {
+    "fill": "#FFFFFF",
+    "opacity": 0.2,
+    "border_radius_ratio_w": 0.045,
+    "blur": 20,
+    "shadow": {
+      "enabled": true,
+      "opacity": 0.12,
+      "blur": 28,
+      "offset_y_ratio_h": 0.008
+    }
+  },
+  "ornaments": {
+    "cover_brand": {
+      "enabled": false,
+      "y_offset_ratio_h": 0.02,
+      "outer_margin_ratio_w": 0.06,
+      "gap_ratio_w": 0.03,
+      "dot_radius_ratio_w": 0.0032
+    },
+    "home_brand": {
+      "enabled": false,
+      "y_offset_ratio_h": 0.014,
+      "outer_margin_ratio_w": 0.15,
+      "gap_ratio_w": 0.03,
+      "dot_radius_ratio_w": 0.0032
+    },
+    "home_dividers": {
+      "enabled": true,
+      "ys": [
+        0.535
+      ],
+      "width_ratio_w": 0.28,
+      "dot_radius_ratio_w": 0.003
+    },
+    "ending_dividers": {
+      "enabled": true,
+      "width_ratio_w": 0.5,
+      "dot_radius_ratio_w": 0.0036
+    },
+    "cover_dividers": {
+      "enabled": true,
+      "ys": [
+        0.57
+      ],
+      "width_ratio_w": 0.34,
+      "dot_radius_ratio_w": 0.0032
+    }
+  },
+  "colors": {
+    "primary_text": "#132A52",
+    "secondary_text": "#223A5F",
+    "light_line": "#9CB3CC",
+    "background_tint": "#EEF5FB",
+    "brand_text": "#2D4467"
+  },
+  "font_family": {
+    "brand": [
+      "Avenir Next Regular",
+      "Avenir Next",
+      "Helvetica Neue",
+      "Source Sans 3",
+      "Noto Sans",
+      "Arial"
+    ]
+  },
+  "text_opacity": {
+    "brand": 0.96
+  },
+  "letter_spacing": {
+    "brand_em": 0.055
+  },
+  "font_weight": {
+    "brand": 400,
+    "book_title_cn": 700,
+    "book_title_en": 500,
+    "edition": 500,
+    "author": 400,
+    "chapter_no": 500,
+    "chapter_title_cn": 700,
+    "chapter_title_en": 500,
+    "ending_brand_cn": 700,
+    "ending_slogan_cn": 600
+  },
+  "content_reference_lines": {
+    "enabled": false,
+    "show_safe_boundaries": false,
+    "show_subtitle_line": false,
+    "top_y_ratio": 0.2,
+    "bottom_y_ratio": 0.8,
+    "subtitle_y_ratio": 0.8,
+    "margin_x_ratio": 0.08,
+    "width_ratio": 0.0014,
+    "dash_ratio": 0.018,
+    "gap_ratio": 0.01,
+    "color": "#6B8FAE",
+    "opacity": 0.26
+  },
+  "cover_home_required_metadata": {
+    "required_fields": [
+      "Brand",
+      "Book Title CN",
+      "Book Title EN",
+      "Version",
+      "Author",
+      "Chapter Number",
+      "Chapter Title CN",
+      "Chapter Title EN"
+    ],
+    "display_order": [
+      "Brand",
+      "Book Title CN",
+      "Book Title EN",
+      "Version",
+      "Author",
+      "Chapter Number",
+      "Chapter Title CN",
+      "Chapter Title EN"
+    ],
+    "forbidden_title_sources": [
+      "分镜图片_最终输出",
+      "分镜配图",
+      "绘图提示词",
+      "短视频总结",
+      "导读脚本最终版",
+      "images",
+      "_raw"
+    ],
+    "rule": "封面和首图必须完整显示书籍名、版本、作者名、章节序号、章节中文名、章节英文名；最终显示字段以 0_封面首页元信息.txt 为权威来源，不得从章节文件夹名、流程目录名、短视频总结或绘图提示词中兜底猜标题。"
+  },
+  "required_metadata_integrity": {
+    "cover_and_home_must_keep_complete_fields": true,
+    "chapter_title_en_must_be_complete_original_title": true,
+    "do_not_use_truncated_folder_title_to_override_full_english_toc_title": true,
+    "if_folder_title_is_truncated_use_pdf_toc_or_metadata_full_title": true
+  },
+  "cover_text_wrapping_rules": {
+    "no_latin_word_break": true,
+    "no_cjk_science_term_break": true,
+    "protected_cjk_term_examples": [
+      "感觉系统",
+      "神经系统",
+      "中枢神经系统",
+      "听觉系统",
+      "前庭系统",
+      "感受器",
+      "听觉处理",
+      "神经编码"
+    ],
+    "shrink_font_before_breaking_protected_terms": true,
+    "do_not_render_cjk_term_as_split_lines_examples": [
+      "感觉系/统",
+      "神经系/统",
+      "听觉处/理",
+      "感受/器"
+    ]
+  }
+}

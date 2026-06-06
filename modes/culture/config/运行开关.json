@@ -1,0 +1,21 @@
+{
+  "postprocess": {
+    "enable_config_override": true,
+    "enable_high_fidelity_ornaments": true
+  },
+  "email_delivery": {
+    "enabled": true,
+    "smtp_host": "smtp.qq.com",
+    "smtp_port": 465,
+    "use_ssl": true,
+    "username": "394753838@qq.com",
+    "from": "394753838@qq.com",
+    "to": [
+      "399467826@qq.com"
+    ],
+    "password_env": "AMP_SMTP_PASSWORD",
+    "password_file": "smtp_password.txt",
+    "max_attachment_mb": 500,
+    "subject_template": "素材生成完成：{part_name}"
+  }
+}

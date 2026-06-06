@@ -1,0 +1,17 @@
+{
+  "email_delivery": {
+    "enabled": true,
+    "smtp_host": "smtp.qq.com",
+    "smtp_port": 465,
+    "use_ssl": true,
+    "username": "394753838@qq.com",
+    "from": "394753838@qq.com",
+    "to": [
+      "399467826@qq.com"
+    ],
+    "password_env": "AMP_SMTP_PASSWORD",
+    "password_file": "smtp_password.txt",
+    "max_attachment_mb": 500,
+    "subject_template": "著作解读分集完成：{part_name}"
+  }
+}
