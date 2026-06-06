@@ -23,7 +23,10 @@ from .modes import ModeSpec, PROJECT_ROOT, get_mode
 RESEARCH_ROOT = PROJECT_ROOT / "modes" / "research"
 CULTURE_ROOT = PROJECT_ROOT / "modes" / "culture"
 WORKBENCH_SETTINGS = PROJECT_ROOT / "quanlan_dual_assistant_settings.json"
+MODEL_DEFAULTS = PROJECT_ROOT / "quanlan_model_defaults.json"
 RUNTIME_ROOT = PROJECT_ROOT / ".workbench_runtime"
+RELEASE_STATE = PROJECT_ROOT / "release_channel_state.json"
+RELEASE_UPDATES = PROJECT_ROOT / ".release_updates"
 
 TEXT_ENGINE_OPTIONS = [
     "GPT-5.5",
@@ -562,6 +565,7 @@ class UnifiedWorkbench(tk.Tk):
             "research_digest": [],
             "science_classic": [],
             "culture": [],
+            "auto_clip": [],
         }
         self.log_last_ts: dict[str, float] = {}
         self.running_processes: dict[str, subprocess.Popen | None] = {}
@@ -570,6 +574,7 @@ class UnifiedWorkbench(tk.Tk):
         self.last_research_output_dir = tk.StringVar(value="")
         self.last_science_output_dir = tk.StringVar(value="")
         self.last_culture_output_dir = tk.StringVar(value="")
+        self.last_auto_clip_output_dir = tk.StringVar(value="")
         self.article_list_preview: scrolledtext.ScrolledText | None = None
         self._loading_settings = False
         self._key_entries: dict[str, ttk.Entry] = {}
@@ -596,6 +601,8 @@ class UnifiedWorkbench(tk.Tk):
         else:
             detail = self._tray_icon.last_error or "未返回具体错误"
             self._put_log(f"[系统] 托盘图标初始化失败：{detail}；关闭窗口时会再次尝试。", task_key=self.active_task.get())
+        self._write_release_state()
+        self.after(2500, self._try_release_idle_upgrade)
         self.after(LOG_POLL_BUSY_MS, self._poll_logs)
 
     def _init_vars(self) -> None:
@@ -628,6 +635,10 @@ class UnifiedWorkbench(tk.Tk):
         self.culture_no_split_assets = tk.BooleanVar(value=False)
         self.culture_start_stage = tk.StringVar(value="outline")
         self.culture_test_b_limit = tk.StringVar(value="0")
+
+        self.auto_clip_image_dir = tk.StringVar(value="")
+        self.auto_clip_lrc_dir = tk.StringVar(value="")
+        self.auto_clip_output_dir = tk.StringVar(value="")
 
         self.text_engine = tk.StringVar(value="GPT-5.5")
         self.polish_engine = tk.StringVar(value="DeepSeek Chat（官方润色）")
@@ -691,7 +702,64 @@ class UnifiedWorkbench(tk.Tk):
         if password:
             self.smtp_password.set(password)
         self._load_workbench_settings()
+        self._load_model_defaults()
         self._loading_settings = False
+
+    def _model_defaults_payload(self) -> dict:
+        return {
+            "text_engine": self.text_engine.get(),
+            "polish_engine": self.polish_engine.get(),
+            "image_engine": _normalize_research_image_choice(self.image_engine.get()),
+            "culture_text_provider": self.culture_text_provider.get(),
+            "culture_text_model": self.culture_text_model.get(),
+            "culture_polish_provider": self.culture_polish_provider.get(),
+            "culture_polish_model": self.culture_polish_model.get(),
+            "culture_image_provider": self.culture_image_provider.get(),
+            "culture_image_model": self.culture_image_model.get(),
+            "foreign_base_url": self.foreign_base_url.get(),
+            "deepseek_base_url": self.deepseek_base_url.get(),
+            "keys": {name: var.get().strip() for name, var in self.key_vars.items() if var.get().strip()},
+        }
+
+    def _apply_model_defaults_payload(self, data: dict) -> None:
+        if not isinstance(data, dict):
+            return
+        for name in (
+            "text_engine", "polish_engine", "image_engine",
+            "culture_text_provider", "culture_text_model",
+            "culture_polish_provider", "culture_polish_model",
+            "culture_image_provider", "culture_image_model",
+            "foreign_base_url", "deepseek_base_url",
+        ):
+            if name in data and hasattr(self, name):
+                value = str(data.get(name) or getattr(self, name).get())
+                if name == "image_engine":
+                    value = _normalize_research_image_choice(value)
+                getattr(self, name).set(value)
+        keys = data.get("keys")
+        if isinstance(keys, dict):
+            for key_name, value in keys.items():
+                if key_name in self.key_vars and str(value or "").strip():
+                    self.key_vars[key_name].set(str(value).strip())
+        self._refresh_key_status()
+
+    def _load_model_defaults(self) -> None:
+        self._apply_model_defaults_payload(_read_json(MODEL_DEFAULTS))
+
+    def _save_model_defaults_with_log(self) -> None:
+        _write_json(MODEL_DEFAULTS, self._model_defaults_payload())
+        self._save_model_config(log=False)
+        self._put_log("模型默认配置和当前 Key 已保存；下次启动会自动加载。")
+
+    def _load_model_defaults_with_log(self) -> None:
+        data = _read_json(MODEL_DEFAULTS)
+        if not data:
+            self._put_log("尚未保存模型默认配置。")
+            return
+        self._apply_model_defaults_payload(data)
+        self._save_model_config(log=False)
+        self._save_workbench_settings()
+        self._put_log("已加载模型默认配置。")
 
     def _load_workbench_settings(self) -> None:
         data = _read_json(WORKBENCH_SETTINGS)
@@ -707,11 +775,15 @@ class UnifiedWorkbench(tk.Tk):
         self.culture_book.set(str(data.get("culture_book") or self.culture_book.get()))
         self.culture_out_dir.set(str(data.get("culture_out_dir") or self.culture_out_dir.get()))
         self.culture_continue_folder.set(str(data.get("culture_continue_folder") or self.culture_continue_folder.get()))
+        self.auto_clip_image_dir.set(str(data.get("auto_clip_image_dir") or self.auto_clip_image_dir.get()))
+        self.auto_clip_lrc_dir.set(str(data.get("auto_clip_lrc_dir") or self.auto_clip_lrc_dir.get()))
+        self.auto_clip_output_dir.set(str(data.get("auto_clip_output_dir") or self.auto_clip_output_dir.get()))
         legacy_last = str(data.get("last_output_dir") or self.last_output_dir.get())
         self.last_output_dir.set(legacy_last)
         self.last_research_output_dir.set(str(data.get("last_research_output_dir") or self.research_out_dir.get() or self.last_research_output_dir.get()))
         self.last_science_output_dir.set(str(data.get("last_science_output_dir") or self.science_out_dir.get() or self.last_science_output_dir.get()))
         self.last_culture_output_dir.set(str(data.get("last_culture_output_dir") or self.culture_out_dir.get() or self.culture_continue_folder.get() or self.last_culture_output_dir.get()))
+        self.last_auto_clip_output_dir.set(str(data.get("last_auto_clip_output_dir") or self.auto_clip_output_dir.get() or self.last_auto_clip_output_dir.get()))
         for name in (
             "research_days", "research_max_articles", "research_issue_count", "research_issue_no",
             "text_engine", "polish_engine", "image_engine",
@@ -743,6 +815,9 @@ class UnifiedWorkbench(tk.Tk):
             "culture_book": self.culture_book.get(),
             "culture_out_dir": self.culture_out_dir.get(),
             "culture_continue_folder": self.culture_continue_folder.get(),
+            "auto_clip_image_dir": self.auto_clip_image_dir.get(),
+            "auto_clip_lrc_dir": self.auto_clip_lrc_dir.get(),
+            "auto_clip_output_dir": self.auto_clip_output_dir.get(),
             "text_engine": self.text_engine.get(),
             "polish_engine": self.polish_engine.get(),
             "image_engine": _normalize_research_image_choice(self.image_engine.get()),
@@ -758,6 +833,7 @@ class UnifiedWorkbench(tk.Tk):
             "last_research_output_dir": self.last_research_output_dir.get(),
             "last_science_output_dir": self.last_science_output_dir.get(),
             "last_culture_output_dir": self.last_culture_output_dir.get(),
+            "last_auto_clip_output_dir": self.last_auto_clip_output_dir.get(),
         }
 
     def _save_workbench_settings(self) -> None:
@@ -781,6 +857,47 @@ class UnifiedWorkbench(tk.Tk):
 
     def _is_any_task_running(self) -> bool:
         return bool(self.running_processes)
+
+    def _release_state_payload(self) -> dict:
+        active = [key for key, proc in self.running_processes.items() if proc is not None or key in self.running_labels]
+        previous = _read_json(RELEASE_STATE)
+        return {
+            **previous,
+            "channel": str(previous.get("channel") or os.environ.get("XGN_ASSISTANT_CHANNEL") or "dev"),
+            "busy": bool(active),
+            "active_tasks": active,
+            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+
+    def _write_release_state(self) -> None:
+        try:
+            _write_json(RELEASE_STATE, self._release_state_payload())
+        except Exception:
+            pass
+
+    def _has_pending_release_update(self) -> bool:
+        pending = _read_json(RELEASE_UPDATES / "pending_update.json")
+        path = Path(str(pending.get("path") or ""))
+        return bool(pending and path.exists())
+
+    def _try_release_idle_upgrade(self) -> None:
+        self._write_release_state()
+        if self._is_any_task_running() or not self._has_pending_release_update():
+            return
+        script = PROJECT_ROOT / "tools" / "channel_manager.py"
+        if not script.exists():
+            return
+        cmd = [sys.executable, str(script), "apply-pending-update"]
+        try:
+            completed = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
+            message = (completed.stdout or completed.stderr or "").strip()
+            if completed.returncode == 0 and "已升级" in message:
+                self._put_log(f"[系统] 发布版已在空闲时自动升级：{message}", task_key=self.active_task.get())
+                self._put_log("[系统] 建议任务结束后重启发布版窗口，让新代码完全生效。", task_key=self.active_task.get())
+            elif message and "没有待升级包" not in message:
+                self._put_log(f"[系统] 发布版升级检查：{message}", task_key=self.active_task.get())
+        except Exception as exc:
+            self._put_log(f"[系统] 发布版自动升级检查失败：{type(exc).__name__}: {exc}", task_key=self.active_task.get())
 
     def _runtime_dir(self, task_key: str) -> Path:
         path = RUNTIME_ROOT / re.sub(r"[^A-Za-z0-9_.-]+", "_", task_key or "task")
@@ -906,12 +1023,13 @@ class UnifiedWorkbench(tk.Tk):
             self.research_journal_fuzzy, self.research_journals, self.research_out_dir, self.research_resume_dir, self.research_article_list,
             self.science_pdf, self.science_out_dir,
             self.culture_book, self.culture_out_dir, self.culture_continue_folder,
+            self.auto_clip_image_dir, self.auto_clip_lrc_dir, self.auto_clip_output_dir,
             self.text_engine, self.polish_engine, self.image_engine,
             self.culture_text_provider, self.culture_text_model,
             self.culture_polish_provider, self.culture_polish_model,
             self.culture_image_provider, self.culture_image_model,
             self.foreign_base_url, self.deepseek_base_url,
-            self.last_output_dir, self.last_research_output_dir, self.last_science_output_dir, self.last_culture_output_dir,
+            self.last_output_dir, self.last_research_output_dir, self.last_science_output_dir, self.last_culture_output_dir, self.last_auto_clip_output_dir,
         ]
         for var in vars_to_bind:
             var.trace_add("write", lambda *_: self._schedule_workbench_settings_save())
@@ -948,7 +1066,8 @@ class UnifiedWorkbench(tk.Tk):
         ttk.Label(side, text="任务、模型、邮箱统一配置；按场景切换展示", style="SideBody.TLabel", wraplength=190).pack(anchor="w", pady=(8, 20))
         ttk.Button(side, text="科研速递", style="Mode.TButton", command=lambda: self._set_task("research_digest")).pack(fill="x", pady=(0, 10))
         ttk.Button(side, text="科学经典解读", style="Mode.TButton", command=lambda: self._set_task("science_classic")).pack(fill="x", pady=(0, 10))
-        ttk.Button(side, text="文史小秘", style="Mode.TButton", command=lambda: self._set_task("culture")).pack(fill="x")
+        ttk.Button(side, text="文史小秘", style="Mode.TButton", command=lambda: self._set_task("culture")).pack(fill="x", pady=(0, 10))
+        ttk.Button(side, text="自动剪辑", style="Mode.TButton", command=lambda: self._set_task("auto_clip")).pack(fill="x")
         ttk.Separator(side, orient="horizontal").pack(fill="x", pady=20)
         ttk.Button(side, text="打开输出目录", style="Tool.TButton", command=self._open_current_output_dir).pack(fill="x", pady=(0, 8))
         ttk.Button(side, text="清空目标文件夹", style="Tool.TButton", command=self._clear_current_output_dir).pack(fill="x", pady=(0, 8))
@@ -1013,8 +1132,15 @@ class UnifiedWorkbench(tk.Tk):
         actions = ttk.Frame(self.model_page, style="Panel.TFrame")
         actions.grid(row=row, column=1, sticky="ew", pady=(12, 0))
         ttk.Button(actions, text="保存模型配置和 Key", style="Primary.TButton", command=self._save_model_config_with_log).pack(side="left")
+        ttk.Button(actions, text="保存为默认配置", style="Tool.TButton", command=self._save_model_defaults_with_log).pack(side="left", padx=(10, 0))
+        ttk.Button(actions, text="加载默认配置", style="Tool.TButton", command=self._load_model_defaults_with_log).pack(side="left", padx=(10, 0))
         ttk.Button(actions, text="测试文本模型", style="Tool.TButton", command=self._test_text_model).pack(side="left", padx=(10, 0))
         ttk.Button(actions, text="测试绘图模型", style="Tool.TButton", command=self._test_image_model).pack(side="left", padx=(10, 0))
+        ttk.Label(
+            self.model_page,
+            text="默认配置会保存模型选择、Base URL 和当前 Key 到 quanlan_model_defaults.json；下次启动自动加载。",
+            style="Subtle.TLabel",
+        ).grid(row=row + 1, column=1, sticky="w", pady=(8, 0))
         self._refresh_key_status()
 
     def _build_email_page(self) -> None:
@@ -1103,6 +1229,7 @@ class UnifiedWorkbench(tk.Tk):
             "research_digest": "科研助手｜科研速递",
             "science_classic": "科研助手｜科学经典解读",
             "culture": "文史小秘｜书籍解读",
+            "auto_clip": "小猪理｜自动剪辑",
         }
         self.title_label.configure(text=title_map.get(task, "很有脑子的小猪理"))
         if hasattr(self, "log_title_label"):
@@ -1111,6 +1238,8 @@ class UnifiedWorkbench(tk.Tk):
             self._render_research_digest()
         elif task == "science_classic":
             self._render_science_classic()
+        elif task == "auto_clip":
+            self._render_auto_clip()
         else:
             self._render_culture()
 
@@ -1161,6 +1290,26 @@ class UnifiedWorkbench(tk.Tk):
         self._entry_row(self.task_page, 3, "续跑目录", self.culture_continue_folder, browse=lambda: self._browse_dir(self.culture_continue_folder))
         self._action_row(self.task_page, 4, [("开始文史生成", self._run_culture), ("测试 B 图", self._test_culture_b_image), ("停止", self._stop_process)])
         ttk.Label(self.task_page, text="起始阶段、复用、生图、后处理、模型、邮箱和测试放在左侧“高级配置”。", style="Subtle.TLabel").grid(row=5, column=1, sticky="w", pady=(8, 0))
+
+    def _render_auto_clip(self) -> None:
+        ttk.Label(self.task_page, text="自动剪辑", style="PanelTitle.TLabel").grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 12))
+        self._entry_row(self.task_page, 1, "图片素材文件夹", self.auto_clip_image_dir, browse=lambda: self._browse_dir(self.auto_clip_image_dir))
+        self._entry_row(self.task_page, 2, "LRC 素材文件夹", self.auto_clip_lrc_dir, browse=lambda: self._browse_dir(self.auto_clip_lrc_dir))
+        self._entry_row(self.task_page, 3, "输出文件夹", self.auto_clip_output_dir, browse=lambda: self._browse_dir(self.auto_clip_output_dir))
+        self._action_row(
+            self.task_page,
+            4,
+            [
+                ("开始自动剪辑", self._run_auto_clip),
+                ("打开输出目录", lambda: self._open_path(self.auto_clip_output_dir.get())),
+                ("停止", self._stop_process),
+            ],
+        )
+        ttk.Label(
+            self.task_page,
+            text="LRC 每行可写 【B26】 或 B26；程序会在图片文件名里匹配同名编号，并为每个 LRC 输出一个 MP4 和字幕 SRT。",
+            style="Subtle.TLabel",
+        ).grid(row=5, column=1, sticky="w", pady=(8, 0))
 
     def _entry_row(self, parent: ttk.Frame, row: int, label: str, var: tk.StringVar, width: int | None = None, browse=None) -> None:
         ttk.Label(parent, text=label, background="#ffffff").grid(row=row, column=0, sticky="w", pady=6, padx=(0, 12))
@@ -1233,6 +1382,8 @@ class UnifiedWorkbench(tk.Tk):
             return self.last_science_output_dir
         if key == "culture":
             return self.last_culture_output_dir
+        if key == "auto_clip":
+            return self.last_auto_clip_output_dir
         return self.last_output_dir
 
     def _set_last_output_for_task(self, task: str, path: str) -> None:
@@ -1250,6 +1401,8 @@ class UnifiedWorkbench(tk.Tk):
             return self.science_out_dir.get().strip()
         if task == "culture":
             return self.culture_out_dir.get().strip() or self.culture_continue_folder.get().strip()
+        if task == "auto_clip":
+            return self.auto_clip_output_dir.get().strip()
         return self.last_output_dir.get().strip()
 
     def _open_current_output_dir(self) -> None:
@@ -1300,6 +1453,17 @@ class UnifiedWorkbench(tk.Tk):
         if not ok:
             return
         try:
+            preserved = []
+            if self.active_task.get() == "culture":
+                try:
+                    from modes.culture.automedia_core.outline_preserve import backup_outline_files_before_clear
+
+                    book_text = self.culture_book.get().strip().strip('"')
+                    preserved = backup_outline_files_before_clear(target, Path(book_text).expanduser() if book_text else None)
+                    if preserved:
+                        self._put_log(f"已备份文史分集大纲到：{preserved[0].parent}")
+                except Exception as exc:
+                    self._put_log(f"备份文史分集大纲失败，继续清空：{type(exc).__name__}: {exc}")
             removed = 0
             for child in target.iterdir():
                 if child.is_dir():
@@ -1932,6 +2096,40 @@ class UnifiedWorkbench(tk.Tk):
         self._put_log("文史小秘测试：只生成/处理第 1 张 B 图，用于快速检查脚本、提示词、生图和后处理链路。", task_key="culture")
         self._run_culture(test_b_image_limit=1)
 
+    def _run_auto_clip(self) -> None:
+        image_dir = self.auto_clip_image_dir.get().strip()
+        lrc_dir = self.auto_clip_lrc_dir.get().strip()
+        output_dir = self.auto_clip_output_dir.get().strip()
+        if not image_dir or not Path(image_dir).is_dir():
+            messagebox.showwarning("请选择图片素材文件夹", "请先选择一个有效的图片素材文件夹。")
+            return
+        if not lrc_dir or not Path(lrc_dir).is_dir():
+            messagebox.showwarning("请选择 LRC 素材文件夹", "请先选择一个有效的 LRC 素材文件夹。")
+            return
+        if not output_dir:
+            output_dir = str(Path(lrc_dir) / "自动剪辑输出")
+            self.auto_clip_output_dir.set(output_dir)
+        self._set_last_output_for_task("auto_clip", output_dir)
+        self._save_workbench_settings()
+        cmd = [
+            sys.executable,
+            "-m",
+            "quanlan_dual_assistant.auto_video_editor",
+            "--images",
+            image_dir,
+            "--lrc",
+            lrc_dir,
+            "--output",
+            output_dir,
+        ]
+        self._run_direct_command(
+            "auto_clip",
+            "自动剪辑",
+            cmd,
+            cwd=PROJECT_ROOT,
+            output_dir=output_dir,
+        )
+
     def _test_text_model(self) -> None:
         self._save_model_config(log=False)
         task_key = self.active_task.get()
@@ -2089,10 +2287,78 @@ class UnifiedWorkbench(tk.Tk):
         task_label = task_label or task_name
         self.running_processes[task_key] = None
         self.running_labels[task_key] = task_label
+        self._write_release_state()
         self._put_log(f"[{task_label}] 启动任务。", task_key=task_key)
         if output_dir:
             self._put_log(f"[{task_label}] 素材输出目录：{output_dir}", task_key=task_key)
         threading.Thread(target=self._process_worker, args=(task_key, task_label, mode, cmd, output_dir, refresh_article_list, env), daemon=True).start()
+
+    def _run_direct_command(
+        self,
+        task_key: str,
+        task_label: str,
+        cmd: list[str],
+        *,
+        cwd: Path,
+        output_dir: str = "",
+        env: dict | None = None,
+    ) -> None:
+        if self._is_task_running(task_key):
+            messagebox.showinfo("任务运行中", "这个任务已经在运行中。")
+            return
+        self.running_processes[task_key] = None
+        self.running_labels[task_key] = task_label
+        self._put_log("", task_key=task_key)
+        self._put_log(f"[{task_label}] 启动任务。", task_key=task_key)
+        if output_dir:
+            self._put_log(f"[{task_label}] 输出目录：{output_dir}", task_key=task_key)
+        threading.Thread(
+            target=self._direct_process_worker,
+            args=(task_key, task_label, cmd, cwd, output_dir, env),
+            daemon=True,
+        ).start()
+
+    def _direct_process_worker(
+        self,
+        task_key: str,
+        task_label: str,
+        cmd: list[str],
+        cwd: Path,
+        output_dir: str = "",
+        env: dict | None = None,
+    ) -> None:
+        try:
+            env = dict(env or os.environ.copy())
+            env.setdefault("PYTHONIOENCODING", "utf-8")
+            env.setdefault("PYTHONUTF8", "1")
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(cwd),
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+            )
+            self.running_processes[task_key] = proc
+            self._set_status(self._status_text())
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                self._put_log(f"[{task_label}] {line.rstrip(chr(10))}", task_key=task_key)
+            code = proc.wait()
+            self._put_log(f"[{task_label}] 已结束，退出码 {code}", task_key=task_key)
+            if code == 0 and output_dir:
+                self._set_last_output_for_task(task_key, output_dir)
+                self._put_log(f"[{task_label}] 正在打开输出目录：{output_dir}", task_key=task_key)
+                self.after(0, lambda p=output_dir: self._open_path(p))
+        except Exception as exc:
+            self._put_log(f"[{task_label}] 启动失败：{type(exc).__name__}: {exc}", task_key=task_key)
+        finally:
+            self.running_processes.pop(task_key, None)
+            self.running_labels.pop(task_key, None)
+            self._set_status(self._status_text())
 
     def _process_worker(self, task_key: str, task_label: str, mode: ModeSpec, cmd: list[str], output_dir: str = "", refresh_article_list: bool = False, env: dict | None = None) -> None:
         try:
@@ -2128,7 +2394,9 @@ class UnifiedWorkbench(tk.Tk):
         finally:
             self.running_processes.pop(task_key, None)
             self.running_labels.pop(task_key, None)
+            self._write_release_state()
             self._set_status(self._status_text())
+            self.after(1500, self._try_release_idle_upgrade)
 
     def _stop_process(self) -> None:
         task_key = self.active_task.get()

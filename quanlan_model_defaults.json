@@ -1,0 +1,19 @@
+{
+  "text_engine": "GPT-5.5",
+  "polish_engine": "DeepSeek Chat（官方润色）",
+  "image_engine": "生图专用｜GPT Image 2",
+  "culture_text_provider": "openai",
+  "culture_text_model": "gpt-5.5",
+  "culture_polish_provider": "deepseek",
+  "culture_polish_model": "deepseek-v4-pro",
+  "culture_image_provider": "openai",
+  "culture_image_model": "gpt-image-2",
+  "foreign_base_url": "https://greatwalllink.top/v1",
+  "deepseek_base_url": "https://api.deepseek.com",
+  "keys": {
+    "openai": "sk-LUqTKeNyzPV4yzbaZCnkLpxYFjiOnazkTgWUNbpIt0RPCMhO",
+    "image": "sk-REJchAgvsgrtMOlJJTHdDH4vmBzAJExCXTIKiMXDxbiIubTe",
+    "gemini": "sk-ZYBIYZeZARDxFOYdFOnLh8tV4txw7Wg66Vb2OR7akQOdN8Z1",
+    "deepseek": "sk-14c076f1555e40dea11b24bc90c072c8"
+  }
+}

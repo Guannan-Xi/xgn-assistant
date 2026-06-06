@@ -1,5 +1,5 @@
 {
-  "active_task": "research_digest",
+  "active_task": "culture",
   "research_days": "14",
   "research_max_articles": "5",
   "research_issue_count": "2",
@@ -11,9 +11,12 @@
   "research_article_list": "D:\\Quanlan\\全澜脑科学视频号\\科研速递\\文献清单_20260605.json",
   "science_pdf": "",
   "science_out_dir": "",
-  "culture_book": "D:/知识平权/贫穷的本质/贫穷的本质.pdf",
-  "culture_out_dir": "D:/知识平权/贫穷的本质/短视频素材",
+  "culture_book": "D:/知识/贫穷的本质/贫穷的本质.pdf",
+  "culture_out_dir": "D:\\知识\\贫穷的本质\\短视频素材",
   "culture_continue_folder": "",
+  "auto_clip_image_dir": "",
+  "auto_clip_lrc_dir": "",
+  "auto_clip_output_dir": "",
   "text_engine": "GPT-5.5",
   "polish_engine": "DeepSeek Chat（官方润色）",
   "image_engine": "生图专用｜GPT Image 2",
@@ -25,8 +28,9 @@
   "culture_image_model": "gpt-image-2",
   "foreign_base_url": "https://greatwalllink.top/v1",
   "deepseek_base_url": "https://api.deepseek.com",
-  "last_output_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递",
+  "last_output_dir": "D:\\知识\\贫穷的本质\\短视频素材",
   "last_research_output_dir": "D:\\Quanlan\\全澜脑科学视频号\\科研速递",
   "last_science_output_dir": "",
-  "last_culture_output_dir": "D:/知识平权/贫穷的本质/短视频素材"
+  "last_culture_output_dir": "D:\\知识\\贫穷的本质\\短视频素材",
+  "last_auto_clip_output_dir": ""
 }

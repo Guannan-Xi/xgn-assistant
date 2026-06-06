@@ -1093,12 +1093,60 @@ def extract_pdf_text(pdf_path: Path, max_chars: int = 180_000, use_mineru: bool 
     return "".join(chunks).strip()
 
 
+def _pdf_text_is_usable_for_outline(text: str) -> bool:
+    stripped = re.sub(r"\s+", "", str(text or ""))
+    min_chars = _int_env("AMP_MIN_USABLE_PDF_TEXT_CHARS", 3000)
+    if len(stripped) < min_chars:
+        return False
+    metadata_markers = ["GeneralInformation", "书名=", "作者", "页数=", "出版社", "出版日期", "SS号", "DX号"]
+    marker_hits = sum(1 for marker in metadata_markers if marker in stripped)
+    page_count = len(re.findall(r"\[PDF Page \d+\]", str(text or "")))
+    if marker_hits >= 4 and page_count <= 2:
+        return False
+    return True
+
+
+def _find_existing_outline_near_output(out_dir: Path) -> Path | None:
+    names = ["00_分集解读大纲.json"]
+    roots = [
+        out_dir,
+        out_dir / "短视频素材",
+        out_dir / "outputs",
+        out_dir / "output",
+    ]
+    for root in roots:
+        for name in names:
+            path = root / name
+            if path.exists():
+                data = read_json_file(path, {})
+                if isinstance(data, dict) and data.get("episodes"):
+                    return path
+    try:
+        for path in out_dir.glob("*/00_分集解读大纲.json"):
+            data = read_json_file(path, {})
+            if isinstance(data, dict) and data.get("episodes"):
+                return path
+    except Exception:
+        return None
+    return None
+
+
+def assert_usable_pdf_text(text: str, pdf_path: Path, source: str) -> None:
+    if _pdf_text_is_usable_for_outline(text):
+        return
+    nonspace_chars = len(re.sub(r"\s+", "", str(text or "")))
+    raise RuntimeError(
+        f"{source} 只提取到 {nonspace_chars} 个非空白字符，不足以生成分集大纲。"
+        f"这本 PDF 很可能是扫描/图片版或文字层损坏：{pdf_path}。"
+        "请先做 OCR，或换成可复制文字的 PDF / 手动提供已有大纲 JSON。"
+    )
+
+
 def build_pdf_text_fallback_prompt(prompt: str, pdf_path: Path, *, max_chars: int = 180_000) -> str:
     extracted = extract_pdf_text(pdf_path, max_chars=max_chars)
-    if not extracted:
-        extracted = "[PDF 文本提取为空：该 PDF 可能是扫描版或加密版。请尝试换成可复制文字的 PDF，或先导入已有大纲 JSON。]"
-    prefix = "PyMuPDF4LLM Markdown" if "PyMuPDF4LLM" in extracted else "pypdf 文本提取"
-    return f"{prompt}\n\n以下是使用 {prefix} 的内容（已保留页码标记）：\n{extracted}"
+    assert_usable_pdf_text(extracted, pdf_path, "pypdf text extraction")
+    prefix = "PyMuPDF4LLM Markdown" if "PyMuPDF4LLM" in extracted else "pypdf text extraction"
+    return f"{prompt}\n\nThe following content was extracted with {prefix} and keeps page markers:\n{extracted}"
 
 
 # =========================
@@ -1146,6 +1194,7 @@ def try_local_pdf_parse(pdf_path: Path, *, mode: str = "auto", parser: str = DEF
     if cached.exists():
         text = read_text(cached).strip()
         if text:
+            assert_usable_pdf_text(text, pdf_path, "cached PDF text")
             log(f"  ✅ 使用 PyMuPDF4LLM 缓存：{cached}")
             return text
 
@@ -1153,6 +1202,7 @@ def try_local_pdf_parse(pdf_path: Path, *, mode: str = "auto", parser: str = DEF
     parsed = extract_pdf_text(pdf_path, max_chars=max_chars)
     if not parsed.strip():
         raise RuntimeError("本地 PDF 解析未返回可用内容。")
+    assert_usable_pdf_text(parsed, pdf_path, "local PDF parsing")
     write_text(output_dir / "pymupdf4llm_parsed_context.txt", parsed)
     return parsed
 
@@ -4294,9 +4344,13 @@ def run_pipeline(args: PipelineArgs) -> None:
 
     outline_file = args.out / "00_分集解读大纲.json"
     outline_txt = args.out / "00_分集解读大纲_可读.txt"
+    nearby_outline = None if args.skip_outline else _find_existing_outline_near_output(args.out)
     if not args.skip_outline and should_reuse_existing(args, "outline", [outline_file]):
         args.skip_outline = outline_file
         log(f"① 复用已有整本书分集解读大纲：{outline_file.name}")
+    elif nearby_outline and should_reuse_existing(args, "outline", [nearby_outline]):
+        args.skip_outline = nearby_outline
+        log(f"① 自动发现并复用已有分集解读大纲：{nearby_outline}")
     else:
         outline_provider, outline_model, _ = args.stage_settings("outline")
         log(f"① 生成/读取整本书分集解读大纲｜模型：{outline_provider} / {outline_model or '默认模型'}")

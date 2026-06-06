@@ -15,6 +15,7 @@ from tkinter import filedialog, font as tkfont, messagebox, scrolledtext, ttk
 
 from .postprocess_cards import POSTPROCESS_SPEC_PATH, default_global_postprocess_spec_text
 from .email_delivery import test_email_connection
+from .outline_preserve import backup_outline_files_before_clear
 
 from .runner import (
     DEFAULT_GEMINI_FAST_MODEL,
@@ -2113,6 +2114,10 @@ SMTP：
             return
         if not messagebox.askyesno("确认清空输出目录", f"确定要清空下面目录中的全部内容吗？\n\n{target}\n\n这个操作不可撤销。"):
             return
+        book_text = self.book_var.get().strip().strip('"')
+        preserved = backup_outline_files_before_clear(target, Path(book_text).expanduser() if book_text else None)
+        if preserved:
+            self._append_log(f"🧰 已备份分集大纲到：{preserved[0].parent}")
         failed = []
         for item in items:
             try:

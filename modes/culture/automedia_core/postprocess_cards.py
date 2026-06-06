@@ -2215,15 +2215,15 @@ def _draw_refined_brand_signature(
     """Small magazine-style brand signature; avoids a heavy sticker plate."""
     x1, y1, x2, y2 = box
     h = max(1, y2 - y1)
-    icon_size = int(h * 0.74)
+    icon_size = int(h * 0.98)
     icon = _extract_logo_icon(BRAND_LOGO_PATH, icon_size)
     if icon is not None:
         img.alpha_composite(icon, (x1, y1 + (h - icon_size) // 2))
     label = _clean_text(brand_name).strip("【】")
-    font = get_font(max(15, int(h * 0.28)), role="meta")
+    font = get_font(max(18, int(h * 0.36)), role="meta")
     color = (255, 242, 214, 238)
-    text_x = x1 + icon_size + int(h * 0.14)
-    text_y = y1 + int(h * 0.32)
+    text_x = x1 + icon_size + int(h * 0.18)
+    text_y = y1 + int(h * 0.25)
     _draw_text_with_shadow(
         draw,
         (text_x, text_y),
@@ -2231,10 +2231,10 @@ def _draw_refined_brand_signature(
         font,
         color,
         anchor="la",
-        stroke=max(1, h // 80),
-        style={"text_shadow": {"enabled": True, "glow_px": max(1, h // 30), "stroke_divisor": 80}},
+        stroke=max(1, h // 64),
+        style={"text_shadow": {"enabled": True, "glow_px": max(1, h // 24), "stroke_divisor": 64}},
     )
-    draw.line((text_x, y1 + int(h * 0.70), min(x2, text_x + int(h * 2.45)), y1 + int(h * 0.70)), fill=(238, 132, 58, 210), width=max(2, h // 30))
+    draw.line((text_x, y1 + int(h * 0.74), min(x2, text_x + int(h * 2.25)), y1 + int(h * 0.74)), fill=(238, 132, 58, 190), width=max(2, h // 34))
 
 
 def _is_social_science_cover_context(*parts: str) -> bool:
@@ -2604,7 +2604,7 @@ def _render_social_science_wide_cover(
     draw.line((left, int(h * 0.702), left + int(w * 0.31), int(h * 0.702)), fill=(*warm, 218), width=max(5, unit // 145))
     draw.line((left, int(h * 0.718), left + int(w * 0.18), int(h * 0.718)), fill=(250, 230, 185, 84), width=max(1, unit // 520))
 
-    _draw_refined_brand_signature(draw, img, (int(w * 0.725), int(h * 0.790), int(w * 0.950), int(h * 0.870)), brand_name=brand_name)
+    _draw_refined_brand_signature(draw, img, (int(w * 0.705), int(h * 0.775), int(w * 0.935), int(h * 0.865)), brand_name=brand_name)
 
     img = _add_subtle_grain(img, opacity=1)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -4204,12 +4204,44 @@ def create_cover_and_endcards(
         "path": str(end_path),
     }
 
+    quality_review = {
+        "review_team": {
+            "literary_experts": 100,
+            "wechat_operators": 100,
+            "wechat_viewers": 30,
+            "total": 230,
+        },
+        "one_vote_veto": [
+            "100位文学/历史组：不得把经典讲成鸡汤、爽文、权谋八卦、现代职场段子；不得删改原书关键论证或糟蹋原书气质。",
+            "100位运营组：封面首屏必须一眼看出核心冲突；标题、封面、A1、C、发布文案必须在同一条传播主线上。",
+            "30位观众组：普通观众不读说明也要知道谁遇到什么问题；不得脏乱暗空、文字拥挤、指代不清或看完无法复述。",
+        ],
+        "visual_checklist": [
+            "A1/A2/A01/A02 的标题、书名、章节、本集名没有裁切、溢出、撞框或被 logo 遮挡。",
+            "B 系正文图保持 9:16 时间线规格，主体明确、可剪辑、无模型生成文字或水印。",
+            "C 片尾预告含义与下一集标题一致，关注/转发引导短、顺、克制。",
+            "背景服务本集核心问题，不是随机古风、空泛书桌、纯光效或无关装饰。",
+            "缩略图尺寸下仍能读出主标题，底部品牌区不贴边、不喧宾夺主。",
+            "画面不靠廉价暗黑、金边堆叠、随机宫殿和空泛光效装高级；每个元素都要能回到本集内容。",
+        ],
+        "content_checklist": [
+            "A1 前 8 秒提出清楚问题，前 45 秒出现具体冲突、人物处境或反常识点。",
+            "B 段每 2～3 句至少回到一个人物、事件、制度后果、证据或具体选择。",
+            "最后 3 条 B 与 C 连读顺畅，C 先收束本集，再自然引出下一集。",
+            "发布包能分别承担：标题抓矛盾、简介讲价值、朋友圈给转发理由、置顶评论引导讨论。",
+            "整集至少有一句普通观众能转述给朋友的清楚看点，而不是只剩专业摘要。",
+        ],
+    }
+
     spec_path = out_dir / "封面规格检查.json"
     spec_path.write_text(json.dumps(spec_rows, ensure_ascii=False, indent=2), encoding="utf-8")
+    quality_path = out_dir / "230人评审质检清单.json"
+    quality_path.write_text(json.dumps(quality_review, ensure_ascii=False, indent=2), encoding="utf-8")
     meta_path = out_dir / "封面片尾元数据.json"
     meta_to_save = {
         "meta": meta,
         "spec_check": spec_rows,
+        "quality_review": quality_review,
         "shared_ac_base": str(shared_base_copy) if shared_base_copy else "",
         "covers": cover_files,
         "endcards": end_files,
@@ -4225,5 +4257,6 @@ def create_cover_and_endcards(
         "endcards": end_files,
         "meta_path": str(meta_path),
         "spec_path": str(spec_path),
+        "quality_path": str(quality_path),
         "config_path": str(config_path),
     }

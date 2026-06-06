@@ -277,8 +277,8 @@ def _make_platform_samples(sample_dir: Path, b_path: Path, c_path: Path, base: P
     b_wx = platform_dir / "B01_微信视频号_9x16.png"
     shutil.copy2(b_path, b_wx)
     files[b_wx.stem] = str(b_wx)
-    b_bili = platform_dir / "B01_B站_16x9.png"
-    _fit_with_blur_bg(Image.open(b_path), (1920, 1080), fill_width_ratio=0.50).save(b_bili, quality=95)
+    b_bili = platform_dir / "B01_B站_9x16.png"
+    shutil.copy2(b_path, b_bili)
     files[b_bili.stem] = str(b_bili)
 
     c_wx = platform_dir / "C_微信视频号_9x16.png"
@@ -295,7 +295,7 @@ def _make_platform_samples(sample_dir: Path, b_path: Path, c_path: Path, base: P
         ("A01 B站4:3", platform_dir / "A01_B站_4x3.png"),
         ("A02 B站16:9", platform_dir / "A02_B站_16x9.png"),
         ("B 微信9:16", b_wx),
-        ("B B站16:9", b_bili),
+        ("B B站9:16", b_bili),
         ("C 微信9:16", c_wx),
         ("C B站16:9", c_bili),
     ]
