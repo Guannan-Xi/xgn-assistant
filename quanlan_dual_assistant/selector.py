@@ -28,6 +28,41 @@ RUNTIME_ROOT = PROJECT_ROOT / ".workbench_runtime"
 RELEASE_STATE = PROJECT_ROOT / "release_channel_state.json"
 RELEASE_UPDATES = PROJECT_ROOT / ".release_updates"
 
+
+def _runtime_project_roots() -> tuple[Path, ...]:
+    roots: list[Path] = []
+    env_root = os.environ.get("XGN_ASSISTANT_PROJECT_ROOT")
+    if env_root:
+        roots.append(Path(env_root))
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).resolve().parent
+        roots.append(exe_dir)
+        if exe_dir.name.lower() == "xgn-assistant" and exe_dir.parent.name.lower() == "dist":
+            roots.append(exe_dir.parent.parent)
+    roots.append(PROJECT_ROOT)
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for root in roots:
+        key = str(root.resolve()).lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(root)
+    return tuple(unique)
+
+
+RUNTIME_PROJECT_ROOTS = _runtime_project_roots()
+SELF_OPTIMIZER_BOOK_CANDIDATE_FILES = (
+    *(
+        path
+        for root in RUNTIME_PROJECT_ROOTS
+        for path in (
+            root / "modes" / "culture" / "outputs" / "self_optimizer" / "self_optimizer_book_candidates.json",
+            root / ".workbench_runtime" / "self_optimizer" / "self_optimizer_book_candidates.json",
+        )
+    ),
+    Path(os.environ.get("TEMP") or os.environ.get("TMP") or ".") / "xgn-assistant" / "self_optimizer" / "self_optimizer_book_candidates.json",
+)
+
 TEXT_ENGINE_OPTIONS = [
     "GPT-5.5",
     "GPT-5.4",
@@ -75,6 +110,10 @@ LOG_POLL_IDLE_MS = 900
 LOG_POLL_BATCH_LIMIT = 80
 SETTINGS_SAVE_DELAY_MS = 1000
 ARTICLE_PREVIEW_LIMIT = 120
+AUTO_CLIP_ASSET_PREVIEW_LIMIT = 160
+AUTO_CLIP_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+AUTO_CLIP_LRC_EXTENSIONS = {".lrc"}
+AUTO_CLIP_AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".flac"}
 
 
 def _read_json(path: Path) -> dict:
@@ -180,6 +219,15 @@ def _research_text_model_id(engine: str) -> str:
     return value or "gpt-5.5"
 
 
+def _provider_for_engine(engine: str) -> str:
+    lower = str(engine or "").lower()
+    if "deepseek" in lower:
+        return "deepseek"
+    if "gemini" in lower:
+        return "gemini"
+    return "openai"
+
+
 def _image_model_id_for_choice(engine: str) -> str:
     value = str(engine or "").strip()
     lower = value.lower()
@@ -236,6 +284,7 @@ class WindowsTrayIcon:
         self._stop = threading.Event()
         self._last_menu_at = 0.0
         self._icon_path = PROJECT_ROOT / "quanlan_dual_assistant" / "assets" / "app.ico"
+        self._pystray_icon = None
 
     def _ensure_icon_file(self) -> str:
         icon_path = self._icon_path
@@ -271,6 +320,8 @@ class WindowsTrayIcon:
     def install(self) -> bool:
         if not self.enabled or self.installed:
             return self.installed
+        if self._install_pystray():
+            return True
         if self._thread is not None and self._thread.is_alive():
             return self.installed
         self.last_error = ""
@@ -282,6 +333,37 @@ class WindowsTrayIcon:
         if not self.installed and not self.last_error:
             self._set_error("托盘线程启动超时，Shell 通知区未返回初始化结果")
         return self.installed
+
+    def _install_pystray(self) -> bool:
+        if getattr(sys, "frozen", False) and os.environ.get("XGN_ASSISTANT_USE_PYSTRAY") != "1":
+            self.last_error = "frozen exe uses native Windows tray"
+            return False
+        try:
+            import pystray
+            from PIL import Image
+        except Exception as exc:
+            self.last_error = f"pystray not available: {exc}"
+            return False
+        if self._thread is not None and self._thread.is_alive():
+            return self.installed
+        try:
+            icon_path = self._ensure_icon_file()
+            image = Image.open(icon_path) if icon_path else Image.new("RGBA", (64, 64), (19, 64, 116, 255))
+            menu = pystray.Menu(
+                pystray.MenuItem("显示主窗口", lambda icon, item: self.app._post_tray_action("show"), default=True),
+                pystray.MenuItem("退出程序", lambda icon, item: self.app._post_tray_action("exit_force")),
+            )
+            self._pystray_icon = pystray.Icon("quanlan_piglet", image, "很有脑子的小猪理", menu)
+            self._thread = threading.Thread(target=self._pystray_icon.run, daemon=True)
+            self._thread.start()
+            self.installed = True
+            self.last_error = ""
+            return True
+        except Exception as exc:
+            self._pystray_icon = None
+            self.installed = False
+            self.last_error = f"pystray failed: {type(exc).__name__}: {exc}"
+            return False
 
     def _set_error(self, message: str) -> None:
         self.last_error = str(message or "").strip()
@@ -312,6 +394,8 @@ class WindowsTrayIcon:
             WM_RBUTTONUP = 0x0205
             WM_CONTEXTMENU = 0x007B
             WM_NULL = 0x0000
+            NIN_SELECT = 0x0400
+            NIN_KEYSELECT = 0x0401
             NIM_ADD = 0x00000000
             NIM_DELETE = 0x00000002
             NIM_SETVERSION = 0x00000004
@@ -433,8 +517,8 @@ class WindowsTrayIcon:
                 try:
                     if msg == self.WM_TRAY:
                         event = int(lparam)
-                        if event in (WM_LBUTTONUP, WM_LBUTTONDBLCLK):
-                            self.app.after(0, self.app._restore_from_tray)
+                        if event in (WM_LBUTTONUP, WM_LBUTTONDBLCLK, NIN_SELECT, NIN_KEYSELECT):
+                            self.app._post_tray_action("show")
                             return 0
                         if event in (WM_RBUTTONDOWN, WM_RBUTTONUP, WM_CONTEXTMENU):
                             self._show_menu(hwnd)
@@ -533,14 +617,20 @@ class WindowsTrayIcon:
             pass
         user32.DestroyMenu(menu)
         if cmd == self.ID_SHOW:
-            self.app.after(0, self.app._restore_from_tray)
+            self.app._post_tray_action("show")
         elif cmd == self.ID_EXIT:
-            self.app.after(0, self.app._quit_from_tray)
+            self.app._post_tray_action("exit_force")
 
     def shutdown(self) -> None:
         if not self.enabled:
             return
         self._stop.set()
+        if self._pystray_icon is not None:
+            try:
+                self._pystray_icon.stop()
+            except Exception:
+                pass
+            self._pystray_icon = None
         try:
             if self._ctypes is not None and self.hwnd:
                 self._ctypes.windll.user32.PostMessageW(self.hwnd, 0x0010, 0, 0)  # WM_CLOSE
@@ -566,6 +656,7 @@ class UnifiedWorkbench(tk.Tk):
             "science_classic": [],
             "culture": [],
             "auto_clip": [],
+            "learning_books": [],
         }
         self.log_last_ts: dict[str, float] = {}
         self.running_processes: dict[str, subprocess.Popen | None] = {}
@@ -576,11 +667,15 @@ class UnifiedWorkbench(tk.Tk):
         self.last_culture_output_dir = tk.StringVar(value="")
         self.last_auto_clip_output_dir = tk.StringVar(value="")
         self.article_list_preview: scrolledtext.ScrolledText | None = None
+        self.auto_clip_assets_list: tk.Listbox | None = None
+        self.learning_books_tree: ttk.Treeview | None = None
+        self.learning_books_detail: scrolledtext.ScrolledText | None = None
         self._loading_settings = False
         self._key_entries: dict[str, ttk.Entry] = {}
         self._exiting = False
         self._settings_save_after_id: str | None = None
         self._tray_icon: WindowsTrayIcon | None = None
+        self._tray_actions: queue.Queue[str] = queue.Queue()
 
         self._init_vars()
         self._load_existing_config()
@@ -603,6 +698,7 @@ class UnifiedWorkbench(tk.Tk):
             self._put_log(f"[系统] 托盘图标初始化失败：{detail}；关闭窗口时会再次尝试。", task_key=self.active_task.get())
         self._write_release_state()
         self.after(2500, self._try_release_idle_upgrade)
+        self.after(200, self._poll_tray_actions)
         self.after(LOG_POLL_BUSY_MS, self._poll_logs)
 
     def _init_vars(self) -> None:
@@ -1067,7 +1163,8 @@ class UnifiedWorkbench(tk.Tk):
         ttk.Button(side, text="科研速递", style="Mode.TButton", command=lambda: self._set_task("research_digest")).pack(fill="x", pady=(0, 10))
         ttk.Button(side, text="科学经典解读", style="Mode.TButton", command=lambda: self._set_task("science_classic")).pack(fill="x", pady=(0, 10))
         ttk.Button(side, text="文史小秘", style="Mode.TButton", command=lambda: self._set_task("culture")).pack(fill="x", pady=(0, 10))
-        ttk.Button(side, text="自动剪辑", style="Mode.TButton", command=lambda: self._set_task("auto_clip")).pack(fill="x")
+        ttk.Button(side, text="自动剪辑", style="Mode.TButton", command=lambda: self._set_task("auto_clip")).pack(fill="x", pady=(0, 10))
+        ttk.Button(side, text="学习书单/PDF", style="Mode.TButton", command=lambda: self._set_task("learning_books")).pack(fill="x")
         ttk.Separator(side, orient="horizontal").pack(fill="x", pady=20)
         ttk.Button(side, text="打开输出目录", style="Tool.TButton", command=self._open_current_output_dir).pack(fill="x", pady=(0, 8))
         ttk.Button(side, text="清空目标文件夹", style="Tool.TButton", command=self._clear_current_output_dir).pack(fill="x", pady=(0, 8))
@@ -1136,11 +1233,22 @@ class UnifiedWorkbench(tk.Tk):
         ttk.Button(actions, text="加载默认配置", style="Tool.TButton", command=self._load_model_defaults_with_log).pack(side="left", padx=(10, 0))
         ttk.Button(actions, text="测试文本模型", style="Tool.TButton", command=self._test_text_model).pack(side="left", padx=(10, 0))
         ttk.Button(actions, text="测试绘图模型", style="Tool.TButton", command=self._test_image_model).pack(side="left", padx=(10, 0))
+        tests = ttk.Frame(self.model_page, style="Panel.TFrame")
+        tests.grid(row=row + 1, column=1, sticky="ew", pady=(10, 0))
+        for text, command in [
+            ("测文史文本", lambda: self._test_named_model("culture_text")),
+            ("测文史润色", lambda: self._test_named_model("culture_polish")),
+            ("测文史生图", lambda: self._test_named_model("culture_image")),
+            ("测科研文本", lambda: self._test_named_model("research_text")),
+            ("测科研润色", lambda: self._test_named_model("research_polish")),
+            ("测科研生图", lambda: self._test_named_model("research_image")),
+        ]:
+            ttk.Button(tests, text=text, style="Tool.TButton", command=command).pack(side="left", padx=(0, 8), pady=(0, 6))
         ttk.Label(
             self.model_page,
             text="默认配置会保存模型选择、Base URL 和当前 Key 到 quanlan_model_defaults.json；下次启动自动加载。",
             style="Subtle.TLabel",
-        ).grid(row=row + 1, column=1, sticky="w", pady=(8, 0))
+        ).grid(row=row + 2, column=1, sticky="w", pady=(8, 0))
         self._refresh_key_status()
 
     def _build_email_page(self) -> None:
@@ -1230,6 +1338,7 @@ class UnifiedWorkbench(tk.Tk):
             "science_classic": "科研助手｜科学经典解读",
             "culture": "文史小秘｜书籍解读",
             "auto_clip": "小猪理｜自动剪辑",
+            "learning_books": "自优化器｜学习书单/PDF",
         }
         self.title_label.configure(text=title_map.get(task, "很有脑子的小猪理"))
         if hasattr(self, "log_title_label"):
@@ -1240,6 +1349,8 @@ class UnifiedWorkbench(tk.Tk):
             self._render_science_classic()
         elif task == "auto_clip":
             self._render_auto_clip()
+        elif task == "learning_books":
+            self._render_learning_books()
         else:
             self._render_culture()
 
@@ -1293,8 +1404,8 @@ class UnifiedWorkbench(tk.Tk):
 
     def _render_auto_clip(self) -> None:
         ttk.Label(self.task_page, text="自动剪辑", style="PanelTitle.TLabel").grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 12))
-        self._entry_row(self.task_page, 1, "图片素材文件夹", self.auto_clip_image_dir, browse=lambda: self._browse_dir(self.auto_clip_image_dir))
-        self._entry_row(self.task_page, 2, "LRC 素材文件夹", self.auto_clip_lrc_dir, browse=lambda: self._browse_dir(self.auto_clip_lrc_dir))
+        self._entry_row(self.task_page, 1, "图片素材文件夹", self.auto_clip_image_dir, browse=lambda: self._browse_auto_clip_dir(self.auto_clip_image_dir))
+        self._entry_row(self.task_page, 2, "LRC 素材文件夹", self.auto_clip_lrc_dir, browse=lambda: self._browse_auto_clip_dir(self.auto_clip_lrc_dir))
         self._entry_row(self.task_page, 3, "输出文件夹", self.auto_clip_output_dir, browse=lambda: self._browse_dir(self.auto_clip_output_dir))
         self._action_row(
             self.task_page,
@@ -1302,6 +1413,7 @@ class UnifiedWorkbench(tk.Tk):
             [
                 ("开始自动剪辑", self._run_auto_clip),
                 ("打开输出目录", lambda: self._open_path(self.auto_clip_output_dir.get())),
+                ("刷新素材列表", self._refresh_auto_clip_assets_preview),
                 ("停止", self._stop_process),
             ],
         )
@@ -1310,6 +1422,52 @@ class UnifiedWorkbench(tk.Tk):
             text="LRC 每行可写 【B26】 或 B26；程序会在图片文件名里匹配同名编号，并为每个 LRC 输出一个 MP4 和字幕 SRT。",
             style="Subtle.TLabel",
         ).grid(row=5, column=1, sticky="w", pady=(8, 0))
+        ttk.Label(self.task_page, text="已收集素材", style="PanelTitle.TLabel").grid(row=6, column=0, columnspan=3, sticky="w", pady=(18, 8))
+        preview_frame = ttk.Frame(self.task_page, style="Panel.TFrame")
+        preview_frame.grid(row=7, column=0, columnspan=3, sticky="nsew")
+        preview_frame.columnconfigure(0, weight=1)
+        preview_frame.rowconfigure(0, weight=1)
+        self.auto_clip_assets_list = tk.Listbox(preview_frame, height=11, font=("Consolas", 10))
+        self.auto_clip_assets_list.grid(row=0, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(preview_frame, orient="vertical", command=self.auto_clip_assets_list.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self.auto_clip_assets_list.configure(yscrollcommand=scrollbar.set)
+        self.task_page.rowconfigure(7, weight=1)
+        self._refresh_auto_clip_assets_preview()
+
+    def _render_learning_books(self) -> None:
+        ttk.Label(self.task_page, text="学习书单/PDF", style="PanelTitle.TLabel").grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 12))
+        actions = ttk.Frame(self.task_page, style="Panel.TFrame")
+        actions.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(0, 10))
+        ttk.Button(actions, text="刷新书单状态", style="Primary.TButton", command=self._refresh_learning_books).pack(side="left")
+        ttk.Button(actions, text="打开PDF目录", style="Tool.TButton", command=self._open_learning_pdf_dir).pack(side="left", padx=(10, 0))
+        ttk.Button(actions, text="打开报告文件", style="Tool.TButton", command=self._open_learning_book_candidates_file).pack(side="left", padx=(10, 0))
+        ttk.Label(
+            self.task_page,
+            text="这里显示自优化器查阅到的候选书单：已找到/已下载的 PDF 会显示路径；还没有 PDF 的会标记缺失或需要合法来源。",
+            style="Subtle.TLabel",
+        ).grid(row=2, column=0, columnspan=3, sticky="w", pady=(0, 8))
+        columns = ("status", "category", "title", "author", "pdf")
+        self.learning_books_tree = ttk.Treeview(self.task_page, columns=columns, show="headings", height=14)
+        headings = {
+            "status": "PDF状态",
+            "category": "类别",
+            "title": "书名",
+            "author": "作者",
+            "pdf": "PDF/原因",
+        }
+        widths = {"status": 110, "category": 120, "title": 180, "author": 160, "pdf": 420}
+        for key in columns:
+            self.learning_books_tree.heading(key, text=headings[key])
+            self.learning_books_tree.column(key, width=widths[key], anchor="w")
+        self.learning_books_tree.grid(row=3, column=0, columnspan=3, sticky="nsew")
+        self.learning_books_tree.bind("<<TreeviewSelect>>", lambda _event: self._show_learning_book_detail())
+        ttk.Label(self.task_page, text="选中书籍详情", style="PanelTitle.TLabel").grid(row=4, column=0, columnspan=3, sticky="w", pady=(14, 6))
+        self.learning_books_detail = scrolledtext.ScrolledText(self.task_page, height=8, wrap="word", font=("Microsoft YaHei UI", 10))
+        self.learning_books_detail.grid(row=5, column=0, columnspan=3, sticky="nsew")
+        self.task_page.rowconfigure(3, weight=3)
+        self.task_page.rowconfigure(5, weight=1)
+        self._refresh_learning_books()
 
     def _entry_row(self, parent: ttk.Frame, row: int, label: str, var: tk.StringVar, width: int | None = None, browse=None) -> None:
         ttk.Label(parent, text=label, background="#ffffff").grid(row=row, column=0, sticky="w", pady=6, padx=(0, 12))
@@ -1355,6 +1513,174 @@ class UnifiedWorkbench(tk.Tk):
         if value:
             var.set(value)
             self._save_workbench_settings()
+
+    def _browse_auto_clip_dir(self, var: tk.StringVar) -> None:
+        self._browse_dir(var)
+        self._refresh_auto_clip_assets_preview()
+
+    def _preview_files(self, folder: str, extensions: set[str], label: str) -> list[str]:
+        root = Path(str(folder or "").strip())
+        if not root.is_dir():
+            return [f"{label}: 未选择或目录不存在"]
+        files = sorted(
+            (path for path in root.iterdir() if path.is_file() and path.suffix.lower() in extensions),
+            key=lambda path: path.name.lower(),
+        )
+        rows = [f"{label}: {len(files)} 个  {root}"]
+        for path in files[:AUTO_CLIP_ASSET_PREVIEW_LIMIT]:
+            rows.append(f"  - {path.name}")
+        if len(files) > AUTO_CLIP_ASSET_PREVIEW_LIMIT:
+            rows.append(f"  ... 还有 {len(files) - AUTO_CLIP_ASSET_PREVIEW_LIMIT} 个未显示")
+        return rows
+
+    def _refresh_auto_clip_assets_preview(self) -> None:
+        if self.auto_clip_assets_list is None:
+            return
+        rows: list[str] = []
+        rows.extend(self._preview_files(self.auto_clip_image_dir.get(), AUTO_CLIP_IMAGE_EXTENSIONS, "图片素材"))
+        rows.append("")
+        rows.extend(self._preview_files(self.auto_clip_lrc_dir.get(), AUTO_CLIP_LRC_EXTENSIONS, "LRC 素材"))
+        rows.append("")
+        rows.extend(self._preview_files(self.auto_clip_lrc_dir.get(), AUTO_CLIP_AUDIO_EXTENSIONS, "同目录音频"))
+        self.auto_clip_assets_list.delete(0, "end")
+        for row in rows:
+            self.auto_clip_assets_list.insert("end", row)
+
+    def _book_candidates_file(self) -> Path | None:
+        for path in SELF_OPTIMIZER_BOOK_CANDIDATE_FILES:
+            if path.exists():
+                return path
+        return None
+
+    def _load_learning_books_payload(self) -> dict:
+        path = self._book_candidates_file()
+        if not path:
+            return {}
+        return _read_json(path)
+
+    def _book_status_label(self, item: dict) -> str:
+        status = str(item.get("pdf_status") or "")
+        download = str(item.get("download_status") or "")
+        if status == "found":
+            return "已找到"
+        if status == "downloaded":
+            return "已下载"
+        if download == "legal_source_required":
+            return "缺合法PDF源"
+        if status == "missing_pdf":
+            return "未找到PDF"
+        return status or download or "未知"
+
+    def _book_pdf_summary(self, item: dict) -> str:
+        matches = item.get("pdf_matches") if isinstance(item.get("pdf_matches"), list) else []
+        if matches:
+            return str(matches[0])
+        download = item.get("download_result") if isinstance(item.get("download_result"), dict) else {}
+        reason = str(download.get("reason") or item.get("download_status") or "")
+        if reason == "legal_source_required":
+            return "没有配置合法公开 PDF 下载源"
+        if reason:
+            return reason
+        return "等待自优化器继续查找"
+
+    def _refresh_learning_books(self) -> None:
+        if self.learning_books_tree is None:
+            return
+        payload = self._load_learning_books_payload()
+        candidates = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
+        self.learning_books_tree.delete(*self.learning_books_tree.get_children())
+        if not candidates:
+            self.learning_books_tree.insert("", "end", values=("暂无书单", "", "请先启动自优化器学习", "", "未找到 self_optimizer_book_candidates.json"))
+            self._set_learning_book_detail("还没有发现自优化器书单文件。\n\n通常启动“去学习吧”或 run_self_optimizer.bat 后，会生成 self_optimizer_book_candidates.json。")
+            return
+        for index, item in enumerate(candidates):
+            if not isinstance(item, dict):
+                continue
+            self.learning_books_tree.insert(
+                "",
+                "end",
+                iid=str(index),
+                values=(
+                    self._book_status_label(item),
+                    str(item.get("category") or ""),
+                    str(item.get("title") or ""),
+                    str(item.get("author") or ""),
+                    self._book_pdf_summary(item),
+                ),
+            )
+        source = self._book_candidates_file()
+        scan = payload.get("pdf_scan") if isinstance(payload.get("pdf_scan"), dict) else {}
+        self._set_learning_book_detail(
+            "\n".join([
+                f"书单文件：{source or '未找到'}",
+                f"更新时间：{payload.get('updated_at') or '未知'}",
+                f"扫描PDF数量：{scan.get('scanned_pdfs', 0)}",
+                f"已匹配/下载：{scan.get('matched', 0)}",
+                f"未找到PDF：{scan.get('missing_pdf', 0)}",
+                f"需要合法来源：{scan.get('legal_source_required', 0)}",
+            ])
+        )
+
+    def _set_learning_book_detail(self, text: str) -> None:
+        if self.learning_books_detail is None:
+            return
+        self.learning_books_detail.configure(state="normal")
+        self.learning_books_detail.delete("1.0", "end")
+        self.learning_books_detail.insert("1.0", text)
+        self.learning_books_detail.configure(state="disabled")
+
+    def _show_learning_book_detail(self) -> None:
+        if self.learning_books_tree is None:
+            return
+        selected = self.learning_books_tree.selection()
+        if not selected:
+            return
+        payload = self._load_learning_books_payload()
+        candidates = payload.get("candidates") if isinstance(payload.get("candidates"), list) else []
+        try:
+            item = candidates[int(selected[0])]
+        except Exception:
+            return
+        if not isinstance(item, dict):
+            return
+        matches = item.get("pdf_matches") if isinstance(item.get("pdf_matches"), list) else []
+        source_pages = item.get("legal_source_pages") if isinstance(item.get("legal_source_pages"), list) else []
+        searches = item.get("search_queries") if isinstance(item.get("search_queries"), list) else []
+        lines = [
+            f"书名：{item.get('title') or ''}",
+            f"作者：{item.get('author') or ''}",
+            f"类别：{item.get('category') or ''}",
+            f"PDF状态：{self._book_status_label(item)}",
+            f"PDF路径：{matches[0] if matches else '暂无'}",
+            "",
+            f"推荐切入角度：{item.get('future_angle') or ''}",
+            f"入选原因：{item.get('reason') or ''}",
+            f"版权/来源状态：{item.get('source_status') or '未知'}",
+            "",
+            "合法来源页：",
+            *(f"  {value}" for value in source_pages[:8]),
+            "",
+            "后续搜索词：",
+            *(f"  {value}" for value in searches[:8]),
+        ]
+        self._set_learning_book_detail("\n".join(lines))
+
+    def _open_learning_book_candidates_file(self) -> None:
+        path = self._book_candidates_file()
+        if not path:
+            messagebox.showinfo("暂无书单", "还没有找到 self_optimizer_book_candidates.json。")
+            return
+        self._open_path(str(path.parent))
+
+    def _open_learning_pdf_dir(self) -> None:
+        payload = self._load_learning_books_payload()
+        scan = payload.get("pdf_scan") if isinstance(payload.get("pdf_scan"), dict) else {}
+        for key in ("download_dir", "download_fallback_dir", "download_temp_dir"):
+            value = str(scan.get(key) or "").strip()
+            if value and Path(value).exists():
+                self._open_path(value)
+                return
+        messagebox.showinfo("暂无PDF目录", "还没有找到自优化器下载 PDF 的目录。")
 
     def _open_path(self, path: str) -> None:
         value = str(path or "").strip()
@@ -1504,7 +1830,6 @@ class UnifiedWorkbench(tk.Tk):
                 value = self.key_vars[key_name].get().strip()
                 if value:
                     _write_text(root / file_name, value)
-
         scheme = _read_json(RESEARCH_ROOT / "quanlan_model_scheme.json")
         scheme.update({
             "text_engine": self.text_engine.get(),
@@ -2206,6 +2531,65 @@ class UnifiedWorkbench(tk.Tk):
         task_key = self.active_task.get()
         threading.Thread(target=self._image_test_worker, args=(task_key,), daemon=True).start()
 
+    def _test_named_model(self, target: str) -> None:
+        self._save_model_config(log=False)
+        task_key = self.active_task.get()
+        threading.Thread(target=self._named_model_test_worker, args=(target, task_key), daemon=True).start()
+
+    def _named_model_test_worker(self, target: str, task_key: str = "") -> None:
+        if target == "culture_image":
+            self._image_test_worker("culture")
+            return
+        if target == "research_image":
+            self._image_test_worker("research_digest")
+            return
+        mapping = {
+            "culture_text": (self.culture_text_provider.get(), self.culture_text_model.get(), "文史文本"),
+            "culture_polish": (self.culture_polish_provider.get(), self.culture_polish_model.get(), "文史润色"),
+            "research_text": (_provider_for_engine(self.text_engine.get()), _research_text_model_id(self.text_engine.get()), "科研文本"),
+            "research_polish": (_provider_for_engine(self.polish_engine.get() if self.polish_engine.get() != "跟随脚本模型" else self.text_engine.get()), _research_text_model_id(self.polish_engine.get() if self.polish_engine.get() != "跟随脚本模型" else self.text_engine.get()), "科研润色"),
+        }
+        provider, model, label = mapping.get(target, ("", "", target))
+        self._text_test_worker_for(provider, model, label, task_key)
+
+    def _text_test_worker_for(self, provider: str, model: str, label: str, task_key: str = "") -> None:
+        started = time.perf_counter()
+        provider = (provider or "openai").strip().lower()
+        try:
+            from openai import OpenAI
+
+            if provider == "deepseek":
+                key_name = "deepseek"
+                key = self.key_vars["deepseek"].get().strip()
+                base_url = self.deepseek_base_url.get().strip() or "https://api.deepseek.com"
+                model = model.strip() or "deepseek-v4-pro"
+            elif provider == "gemini":
+                key_name = "gemini"
+                key = self.key_vars["gemini"].get().strip()
+                base_url = self._normalized_foreign_base_url()
+                model = model.strip() or "gemini-3.1-pro-preview"
+            else:
+                key_name = "openai"
+                key = self.key_vars["openai"].get().strip()
+                base_url = self._normalized_foreign_base_url()
+                model = model.strip() or "gpt-5.5"
+            if not key:
+                self._put_log(f"{label}测试失败：provider={provider}，model={model}，key={KEY_LABELS.get(key_name, key_name)} 未填写。", task_key=task_key)
+                return
+            self._put_log(f"{label}测试开始：provider={provider}，model={model}，base={base_url}，key={KEY_LABELS.get(key_name, key_name)} {_key_hint(key)}。", task_key=task_key)
+            client = OpenAI(api_key=key, base_url=base_url, timeout=60, max_retries=0)
+            if provider == "openai":
+                response = client.responses.create(model=model, input="Connection test. Reply exactly: OK", max_output_tokens=32)
+                content = _extract_response_content(response)
+            else:
+                response = client.chat.completions.create(model=model, messages=[{"role": "user", "content": "Connection test. Reply exactly: OK"}], max_tokens=8, temperature=0)
+                content = _extract_chat_content(response)
+            if not content:
+                raise RuntimeError(f"模型返回为空或格式不可识别：{type(response).__name__}")
+            self._put_log(f"{label}测试通过：provider={provider}，model={model}，耗时 {time.perf_counter() - started:.1f}s，返回：{content[:40]}", task_key=task_key)
+        except Exception as exc:
+            self._put_log(f"{label}测试失败，耗时 {time.perf_counter() - started:.1f}s：provider={provider}，model={model}，base={locals().get('base_url', '')}，key={KEY_LABELS.get(locals().get('key_name', ''), locals().get('key_name', ''))} {_key_hint(locals().get('key', ''))}；{type(exc).__name__}: {exc}", task_key=task_key)
+
     def _image_test_worker(self, task_key: str = "") -> None:
         started = time.perf_counter()
         try:
@@ -2487,11 +2871,36 @@ class UnifiedWorkbench(tk.Tk):
         except Exception:
             pass
 
-    def _quit_from_tray(self) -> None:
+    def _post_tray_action(self, action: str) -> None:
+        try:
+            self._tray_actions.put_nowait(action)
+        except Exception:
+            pass
+
+    def _poll_tray_actions(self) -> None:
+        try:
+            while True:
+                action = self._tray_actions.get_nowait()
+                if action == "show":
+                    self._restore_from_tray()
+                elif action == "exit":
+                    self._quit_from_tray()
+                elif action == "exit_force":
+                    self._quit_from_tray(confirm=False)
+        except queue.Empty:
+            pass
+        except Exception:
+            pass
+        if not self._exiting:
+            self.after(200, self._poll_tray_actions)
+
+    def _quit_from_tray(self, confirm: bool = True) -> None:
         if self._has_running_tasks():
-            ok = messagebox.askyesno("退出程序", "当前仍有任务在运行。确定要退出并停止这些任务吗？")
-            if not ok:
-                return
+            if confirm:
+                self._restore_from_tray()
+                ok = messagebox.askyesno("退出程序", "当前仍有任务在运行。确定要退出并停止这些任务吗？", parent=self)
+                if not ok:
+                    return
             for proc in list(self.running_processes.values()):
                 try:
                     if proc is not None and proc.poll() is None:

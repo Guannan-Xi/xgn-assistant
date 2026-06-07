@@ -34,6 +34,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         description="QuanLan dual-mode assistant launcher.",
     )
     parser.add_argument("--mode", choices=sorted(MODES), help="research=科研助手, culture=文史小秘")
+    parser.add_argument("-m", "--module", choices=sorted({mode.package for mode in MODES.values()}), help="Compatibility: infer mode from a package module name.")
     parser.add_argument("--gui", action="store_true", help="Open the selected mode's GUI.")
     parser.add_argument("--cli", action="store_true", help="Run the selected mode's CLI.")
     parser.add_argument("args", nargs=argparse.REMAINDER, help="Arguments passed to the selected mode.")
@@ -42,6 +43,9 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> None:
     ns = _parse_args(argv)
+    if ns.module and not ns.mode:
+        ns.mode = next(mode.key for mode in MODES.values() if mode.package == ns.module)
+        ns.cli = True
     if not ns.mode:
         from .selector import main as selector_main
 

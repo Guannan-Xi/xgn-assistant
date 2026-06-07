@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import io
 import json
 import os
 import re
@@ -955,6 +956,57 @@ def ascii_safe_pdf_copy(pdf_path: Path) -> tuple[Path, tempfile.TemporaryDirecto
         return safe_path, tmp
 
 
+class ProgressFileReader(io.IOBase):
+    """File-like wrapper that logs upload progress while an SDK reads bytes."""
+
+    def __init__(self, path: Path, *, label: str = "PDF upload") -> None:
+        self.path = Path(path)
+        self.label = label
+        self.total = max(1, self.path.stat().st_size)
+        self.sent = 0
+        self._fh = open(self.path, "rb")
+        self._last_bucket = -1
+        self._last_log_at = 0.0
+
+    def read(self, size: int = -1) -> bytes:
+        data = self._fh.read(size)
+        if data:
+            self.sent += len(data)
+            self._log_progress()
+        return data
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        pos = self._fh.seek(offset, whence)
+        if whence == 0:
+            self.sent = max(0, pos)
+        return pos
+
+    def tell(self) -> int:
+        return self._fh.tell()
+
+    @property
+    def name(self) -> str:
+        return str(self.path)
+
+    def close(self) -> None:
+        self._fh.close()
+
+    def __enter__(self) -> "ProgressFileReader":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
+    def _log_progress(self) -> None:
+        percent = min(100, int(self.sent * 100 / self.total))
+        bucket = percent // 10
+        now = time.monotonic()
+        if bucket != self._last_bucket or now - self._last_log_at >= 5:
+            self._last_bucket = bucket
+            self._last_log_at = now
+            log(f"  {self.label}: {percent}% ({self.sent / 1024 / 1024:.1f}/{self.total / 1024 / 1024:.1f} MB)")
+
+
 def read_api_key(provider: str, explicit: str = "") -> str:
     if explicit:
         return explicit.strip()
@@ -998,6 +1050,27 @@ def count_pdf_pages(pdf_path: Path) -> int:
     ensure_pypdf()
     reader = PdfReader(str(pdf_path))
     return len(reader.pages)
+
+
+def is_image_only_pdf(pdf_path: Path, *, sample_pages: int = 5) -> bool:
+    """Fast probe for scanned/image-only PDFs; avoids slow local OCR/PyMuPDF4LLM."""
+    try:
+        import fitz  # type: ignore
+
+        doc = fitz.open(str(pdf_path))
+        if doc.page_count <= 0:
+            return False
+        limit = min(max(1, sample_pages), doc.page_count)
+        image_pages = 0
+        text_chars = 0
+        for idx in range(limit):
+            page = doc.load_page(idx)
+            text_chars += len((page.get_text("text") or "").strip())
+            if page.get_images(full=True):
+                image_pages += 1
+        return text_chars < 50 and image_pages >= max(1, limit - 1)
+    except Exception:
+        return False
 
 
 def _decode_process_output(data: bytes | str) -> str:
@@ -1205,6 +1278,104 @@ def try_local_pdf_parse(pdf_path: Path, *, mode: str = "auto", parser: str = DEF
     assert_usable_pdf_text(parsed, pdf_path, "local PDF parsing")
     write_text(output_dir / "pymupdf4llm_parsed_context.txt", parsed)
     return parsed
+
+
+
+def paddle_ocr_cache_key(pdf_path: Path, mode: str = "ppstructurev3") -> str:
+    try:
+        stat = pdf_path.stat()
+        raw = f"{pdf_path.resolve()}|{stat.st_size}|{stat.st_mtime_ns}|paddleocr|{mode}"
+    except Exception:
+        raw = f"{pdf_path}|paddleocr|{mode}"
+    return short_hash_text(raw)
+
+
+def _paddle_markdown_text(result: Any) -> str:
+    try:
+        md = getattr(result, "markdown", None)
+        if isinstance(md, dict):
+            value = md.get("markdown_texts") or md.get("text") or ""
+            if isinstance(value, list):
+                return "\n\n".join(str(x) for x in value if str(x).strip()).strip()
+            return str(value or "").strip()
+        if isinstance(md, str):
+            return md.strip()
+    except Exception:
+        pass
+    try:
+        data = result if isinstance(result, dict) else dict(result)
+        md = data.get("markdown") or {}
+        if isinstance(md, dict):
+            value = md.get("markdown_texts") or md.get("text") or ""
+            if isinstance(value, list):
+                return "\n\n".join(str(x) for x in value if str(x).strip()).strip()
+            return str(value or "").strip()
+        value = data.get("markdown_texts") or ""
+        if value:
+            return str(value).strip()
+    except Exception:
+        pass
+    return ""
+
+
+def try_paddleocr_pdf_parse(pdf_path: Path, *, cache_dir: Path | None = None, max_chars: int = 220_000) -> str:
+    """Parse scanned/image-only PDFs locally with PaddleOCR PP-StructureV3."""
+    try:
+        from paddleocr import PPStructureV3  # type: ignore
+    except Exception as exc:
+        raise RuntimeError("?? PaddleOCR/PP-StructureV3????? Python ???? paddleocr ? paddlepaddle?") from exc
+
+    cache_root = Path(cache_dir) if cache_dir else (PROJECT_ROOT / ".paddleocr_cache")
+    key = paddle_ocr_cache_key(pdf_path)
+    output_dir = cache_root / key
+    cached = output_dir / "paddleocr_ppstructurev3.md"
+    if cached.exists():
+        text = read_text(cached).strip()
+        if text:
+            log(f"  ? ?? PaddleOCR ???????{cached}")
+            return _compact_llm_context(text, max_chars=max_chars, label="PaddleOCR ??????")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    log("  ?? ?? PaddleOCR PP-StructureV3 ?????? PDF????????????????????")
+    pipeline = PPStructureV3(
+        lang=os.getenv("AMP_PADDLEOCR_LANG", "ch"),
+        use_doc_orientation_classify=_env_flag("AMP_PADDLEOCR_ORIENTATION", True),
+        use_doc_unwarping=_env_flag("AMP_PADDLEOCR_UNWARP", False),
+        use_textline_orientation=_env_flag("AMP_PADDLEOCR_TEXTLINE_ORIENTATION", True),
+        use_table_recognition=_env_flag("AMP_PADDLEOCR_TABLE", True),
+        use_formula_recognition=_env_flag("AMP_PADDLEOCR_FORMULA", False),
+        use_chart_recognition=_env_flag("AMP_PADDLEOCR_CHART", False),
+    )
+    results = pipeline.predict(str(pdf_path))
+    markdown_pages: list[Any] = []
+    page_texts: list[str] = []
+    total = len(results) if hasattr(results, "__len__") else 0
+    for idx, result in enumerate(results, start=1):
+        log(f"  PaddleOCR ?????? {idx}/{total or '?'} ?")
+        try:
+            md = result.markdown
+            if isinstance(md, dict):
+                markdown_pages.append(md)
+        except Exception:
+            pass
+        page_text = _paddle_markdown_text(result)
+        if page_text:
+            page_texts.append(f"\n\n[PDF Page {idx}]\n{page_text}")
+
+    combined = ""
+    if markdown_pages:
+        try:
+            merged = pipeline.concatenate_markdown_pages(markdown_pages)
+            combined = _paddle_markdown_text(merged)
+        except Exception as exc:
+            log(f"  ?? PaddleOCR Markdown ????????????{exc}")
+    if not combined:
+        combined = "\n".join(page_texts).strip()
+    if not combined:
+        raise RuntimeError("PaddleOCR PP-StructureV3 ????? Markdown?")
+    write_text(cached, combined)
+    log(f"  ? PaddleOCR ??????????{cached}")
+    return _compact_llm_context(combined, max_chars=max_chars, label="PaddleOCR ??????")
 
 
 def build_local_pdf_context_prompt(prompt: str, pdf_path: Path, local_text: str, *, max_chars: int = 48_000) -> str:
@@ -1566,32 +1737,47 @@ class LLMClient:
         if self.is_dry_run():
             return self._dry_run_text(prompt, pdf_path=pdf_path, task_name=task_name)
 
-        # PDF 永不直传给任何大模型。只允许本地解析为 Markdown/文本后再提交。
-        # 即使旧配置写了 off/disabled，也会被强制改为 auto，避免误上传原始 PDF。
+        # Prefer local PDF parsing. If every local parser/text fallback fails,
+        # keep pdf_path so providers that support files can upload the original PDF.
         if pdf_path and pdf_path.exists():
-            parse_mode = (self.config.local_parse_mode or "auto").lower().strip()
-            if parse_mode in {"off", "none", "disabled", "false", "0"}:
-                log("  ⚠️ 已禁止 PDF 直传：local_parse_mode=off 被强制改为 auto。")
-                parse_mode = "auto"
-            try:
+            if is_image_only_pdf(pdf_path):
+                log("  ⚠️ 检测到纯图片/扫描版 PDF，跳过 PyMuPDF4LLM/pypdf，直接使用 PaddleOCR PP-StructureV3 本地解析。")
                 cache_dir = Path(self.config.mineru_cache_dir) if self.config.mineru_cache_dir else None
-                context_budget = _task_context_char_budget(task_name)
-                local_text = try_local_pdf_parse(
+                paddle_text = try_paddleocr_pdf_parse(
                     pdf_path,
-                    mode=parse_mode,
-                    parser=self.config.mineru_backend,
-                    cache_dir=cache_dir,
-                    max_chars=max(context_budget + 20_000, 80_000),
+                    cache_dir=(cache_dir / "paddleocr") if cache_dir else None,
+                    max_chars=max(_task_context_char_budget(task_name) + 20_000, 80_000),
                 )
-                prompt = build_local_pdf_context_prompt(prompt, pdf_path, local_text, max_chars=context_budget)
-                log("  ✅ 已使用本地解析 Markdown/文本，本次不会上传 PDF。")
-            except Exception as local_exc:
-                log(f"  ⚠️ PyMuPDF4LLM 本地解析失败，改用 pypdf 文本提取；不会上传 PDF。原因：{local_exc}")
+                prompt = build_mineru_context_prompt(prompt, pdf_path, paddle_text, max_chars=_task_context_char_budget(task_name))
+                log("  ✅ 已使用 PaddleOCR 本地解析 Markdown，本次不上传原始 PDF。")
+                pdf_path = None
+            else:
+                parse_mode = (self.config.local_parse_mode or "auto").lower().strip()
+                if parse_mode in {"off", "none", "disabled", "false", "0"}:
+                    log("  ⚠️ 已禁止 PDF 直传：local_parse_mode=off 被强制改为 auto。")
+                    parse_mode = "auto"
                 try:
-                    prompt = build_pdf_text_fallback_prompt(prompt, pdf_path, max_chars=_task_context_char_budget(task_name))
-                except Exception as fallback_exc:
-                    raise RuntimeError(f"PDF 本地解析失败，且已禁止 PDF 直传：{fallback_exc}") from fallback_exc
-            pdf_path = None
+                    cache_dir = Path(self.config.mineru_cache_dir) if self.config.mineru_cache_dir else None
+                    context_budget = _task_context_char_budget(task_name)
+                    local_text = try_local_pdf_parse(
+                        pdf_path,
+                        mode=parse_mode,
+                        parser=self.config.mineru_backend,
+                        cache_dir=cache_dir,
+                        max_chars=max(context_budget + 20_000, 80_000),
+                    )
+                    prompt = build_local_pdf_context_prompt(prompt, pdf_path, local_text, max_chars=context_budget)
+                    log("  ✅ 已使用本地解析 Markdown/文本，本次不会上传 PDF。")
+                except Exception as local_exc:
+                    log(f"  ⚠️ 本地 PDF 解析失败，改用 pypdf 文本提取。原因：{local_exc}")
+                    try:
+                        prompt = build_pdf_text_fallback_prompt(prompt, pdf_path, max_chars=_task_context_char_budget(task_name))
+                    except Exception as fallback_exc:
+                        log(f"  ⚠️ pypdf 文本 fallback 也失败，将把原始 PDF 直传给支持文件的大模型：{fallback_exc}")
+                    else:
+                        pdf_path = None
+                else:
+                    pdf_path = None
 
         prompt_tokens = _approx_token_count(prompt)
         model_name = self.config.text_model or "默认模型"
@@ -1629,6 +1815,8 @@ class LLMClient:
                 return result
             except Exception as exc:
                 last_error = exc
+                if pdf_path and "PDF file upload through the relay failed" in str(exc):
+                    break
                 if attempt > self.config.max_retries:
                     break
                 wait = min(30, 2 ** attempt)
@@ -1828,10 +2016,45 @@ class LLMClient:
                 raise
 
         if pdf_path and pdf_path.exists():
-            log("⚠️ 已禁止 OpenAI PDF 直传，改用本地文本提取结果。")
-            prompt = build_pdf_text_fallback_prompt(prompt, pdf_path, max_chars=_task_context_char_budget(str(getattr(self, "_current_task_name", "text") or "text")))
+            if not _env_flag("AMP_ALLOW_OPENAI_PDF_FILES", False):
+                raise RuntimeError(
+                    "PDF 文件直传到 OpenAI-compatible 中转站已默认禁用；当前 relay 不兼容 Files API。"
+                    "请先使用本地解析结果，或显式设置 AMP_ALLOW_OPENAI_PDF_FILES=1 后自行承担兼容性风险。"
+                )
+            log("  Local parsing failed; uploading PDF by Files API as final fallback.")
+            file_ref: dict[str, str]
+            try:
+                upload_path, tmp_upload = ascii_safe_pdf_copy(pdf_path)
+                try:
+                    with ProgressFileReader(upload_path, label="OpenAI Files PDF 上传") as fh:
+                        uploaded = client.files.create(file=fh, purpose="assistants")
+                    file_id = str(getattr(uploaded, "id", "") or "")
+                    if not file_id:
+                        raise RuntimeError(f"Files API returned no file id: {uploaded!r}")
+                    file_ref = {"type": "input_file", "file_id": file_id}
+                    log(f"  PDF uploaded through Files API: {file_id}")
+                finally:
+                    if tmp_upload is not None:
+                        tmp_upload.cleanup()
+            except Exception as upload_exc:
+                raise RuntimeError(
+                    "PDF file upload through the relay failed, and this scanned PDF is too large for base64 inline upload. "
+                    "Use local OCR first, or a relay/provider that supports Files API. "
+                    f"Upload error: {upload_exc}"
+                ) from upload_exc
+            model_input: Any = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": prompt},
+                        file_ref,
+                    ],
+                }
+            ]
+        else:
+            model_input = prompt
 
-        payload: dict[str, Any] = {"model": model, "input": prompt}
+        payload: dict[str, Any] = {"model": model, "input": model_input}
         task_name = str(getattr(self, "_current_task_name", "text") or "text")
         max_output = _openai_output_budget(task_name)
         if max_output:

@@ -14,6 +14,9 @@
     "openai": "sk-LUqTKeNyzPV4yzbaZCnkLpxYFjiOnazkTgWUNbpIt0RPCMhO",
     "image": "sk-REJchAgvsgrtMOlJJTHdDH4vmBzAJExCXTIKiMXDxbiIubTe",
     "gemini": "sk-ZYBIYZeZARDxFOYdFOnLh8tV4txw7Wg66Vb2OR7akQOdN8Z1",
-    "deepseek": "sk-14c076f1555e40dea11b24bc90c072c8"
+    "deepseek": "sk-14c076f1555e40dea11b24bc90c072c8",
+    "mineru_api_token": "jxlzgaewnm80gbrjnyqejmw9qxky1wvar4q6opye",
+    "mineru_access_key_id": "ezkjvpvnma1wjompyv0r",
+    "mineru_secret_access_key": "jxlzgaewnm80gbrjnyqejmw9qxky1wvar4q6opye"
   }
 }

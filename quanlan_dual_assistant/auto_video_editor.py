@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import re
@@ -8,6 +9,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -171,6 +175,133 @@ def _audio_duration(ffprobe: str, audio_path: Path) -> float:
         return 0.0
 
 
+def _audio_mean_volume(ffmpeg: str, audio_path: Path) -> float | None:
+    result = _run([ffmpeg, "-hide_banner", "-i", str(audio_path), "-af", "volumedetect", "-f", "null", "-"], check=False)
+    match = re.search(r"mean_volume:\s*(-?\d+(?:\.\d+)?)\s*dB", result.stdout or "")
+    if not match:
+        return None
+    try:
+        return float(match.group(1))
+    except Exception:
+        return None
+
+
+def _resolve_bgm_for_lrc(args: argparse.Namespace, lrc_path: Path) -> Path | None:
+    value = str(getattr(args, "bgm", "") or "").strip()
+    if not value:
+        return None
+    path = Path(value).expanduser().resolve()
+    if path.is_file():
+        return path
+    if path.is_dir():
+        candidates = [p for p in sorted(path.iterdir()) if p.is_file() and p.suffix.lower() in AUDIO_EXTS]
+        if not candidates:
+            return None
+        for candidate in candidates:
+            if candidate.stem.lower() == lrc_path.stem.lower():
+                return candidate
+        return candidates[0]
+    return None
+
+
+def _bgm_volume_expr(ffmpeg: str, voice_path: Path, bgm_path: Path, *, duck_db: float) -> tuple[str, dict[str, float | None]]:
+    voice_mean = _audio_mean_volume(ffmpeg, voice_path)
+    bgm_mean = _audio_mean_volume(ffmpeg, bgm_path)
+    if voice_mean is None or bgm_mean is None:
+        gain_db = -18.0
+    else:
+        gain_db = max(-34.0, min(-8.0, voice_mean - abs(float(duck_db)) - bgm_mean))
+    factor = 10 ** (gain_db / 20.0)
+    return f"{factor:.6f}", {"voice_mean_db": voice_mean, "bgm_mean_db": bgm_mean, "bgm_gain_db": gain_db}
+
+
+def _clean_tts_text(text: str) -> str:
+    text = _strip_image_ids(text or "").strip()
+    return re.sub(r"[\u3002\uff01\uff1f.!?]+(?=\s|$)", "", text).strip()
+
+
+def _voice_style_prompt(style: str) -> str:
+    styles = {
+        "calm_story": "Read in Mandarin Chinese with a calm, steady storytelling narrator voice. Clear diction, warm but not dramatic.",
+        "excited_research": "Read in Mandarin Chinese with an energetic research-progress narrator voice. Clear diction, lively discovery feeling, not shouting.",
+        "documentary": "Read in Mandarin Chinese with a restrained documentary narrator voice. Clear, credible, measured pacing.",
+    }
+    return styles.get(str(style or "").strip(), styles["calm_story"])
+
+
+def _gemini_voice_name(style: str) -> str:
+    voices = {
+        "calm_story": "Charon",
+        "excited_research": "Puck",
+        "documentary": "Kore",
+    }
+    return voices.get(str(style or "").strip(), "Charon")
+
+
+def _wav_header(pcm: bytes, *, channels: int = 1, sample_rate: int = 24000, bits_per_sample: int = 16) -> bytes:
+    byte_rate = sample_rate * channels * bits_per_sample // 8
+    block_align = channels * bits_per_sample // 8
+    data_size = len(pcm)
+    return (
+        b"RIFF" + (36 + data_size).to_bytes(4, "little") + b"WAVEfmt " + (16).to_bytes(4, "little")
+        + (1).to_bytes(2, "little") + channels.to_bytes(2, "little") + sample_rate.to_bytes(4, "little")
+        + byte_rate.to_bytes(4, "little") + block_align.to_bytes(2, "little") + bits_per_sample.to_bytes(2, "little")
+        + b"data" + data_size.to_bytes(4, "little")
+    )
+
+
+def _extract_inline_audio(response) -> tuple[bytes, str]:
+    for candidate in getattr(response, "candidates", []) or []:
+        content = getattr(candidate, "content", None)
+        for part in getattr(content, "parts", []) or []:
+            inline = getattr(part, "inline_data", None)
+            if inline:
+                data = getattr(inline, "data", b"") or b""
+                mime = getattr(inline, "mime_type", "") or ""
+                if isinstance(data, str):
+                    data = base64.b64decode(data)
+                if data:
+                    return data, mime
+    raise RuntimeError("Gemini TTS did not return inline audio")
+
+
+def synthesize_voice_from_lrc(args: argparse.Namespace, lrc_path: Path, output_dir: Path) -> Path | None:
+    if not bool(getattr(args, "synthesize_voice", False)):
+        return None
+    key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    if not key:
+        raise RuntimeError("GEMINI_API_KEY/GOOGLE_API_KEY is required for LRC voice synthesis")
+    events = parse_lrc(lrc_path)
+    text = "\n".join(_clean_tts_text(event.text) for event in events if _clean_tts_text(event.text))
+    if not text:
+        raise RuntimeError(f"LRC has no text to synthesize: {lrc_path}")
+    from google import genai
+    from google.genai import types
+
+    model = str(getattr(args, "tts_model", "") or "gemini-2.5-flash-preview-tts")
+    style = str(getattr(args, "voice_style", "") or "calm_story")
+    client = genai.Client(api_key=key)
+    response = client.models.generate_content(
+        model=model,
+        contents=f"{_voice_style_prompt(style)}\n\n{text}",
+        config=types.GenerateContentConfig(
+            response_modalities=["AUDIO"],
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=_gemini_voice_name(style))
+                )
+            ),
+        ),
+    )
+    audio, mime = _extract_inline_audio(response)
+    out = output_dir / f"{lrc_path.stem}_gemini_voice.wav"
+    if "wav" in mime.lower():
+        out.write_bytes(audio)
+    else:
+        out.write_bytes(_wav_header(audio) + audio)
+    return out
+
+
 def _find_audio_for_lrc(lrc_path: Path) -> Path | None:
     for ext in AUDIO_EXTS:
         candidate = lrc_path.with_suffix(ext)
@@ -241,10 +372,13 @@ def render_video(
     output_video: Path,
     *,
     audio_path: Path | None,
+    subtitle_path: Path | None,
     size: str,
     fps: int,
     crf: int,
     preset: str,
+    bgm_path: Path | None = None,
+    bgm_duck_db: float = 18.0,
 ) -> None:
     width, height = _parse_size(size)
     vf = (
@@ -292,30 +426,22 @@ def render_video(
         _concat_file(concat_path, segments)
         _run([ffmpeg, "-hide_banner", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_path), "-c", "copy", str(video_tmp)])
 
-        if audio_path:
-            _run(
-                [
-                    ffmpeg,
-                    "-hide_banner",
-                    "-y",
-                    "-i",
-                    str(video_tmp),
-                    "-i",
-                    str(audio_path),
-                    "-map",
-                    "0:v:0",
-                    "-map",
-                    "1:a:0",
-                    "-c:v",
-                    "copy",
-                    "-c:a",
-                    "aac",
-                    "-shortest",
-                    str(output_video),
-                ]
-            )
+        video_source = video_tmp
+        if subtitle_path and subtitle_path.exists():
+            subtitled_tmp = tmp / "subtitled.mp4"
+            subtitle_filter = str(subtitle_path).replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
+            style = "FontName=Microsoft YaHei,FontSize=13,PrimaryColour=&H00000000,BackColour=&HC0FFFFFF,BorderStyle=4,Outline=0,Shadow=0,Alignment=2,MarginV=384"
+            _run([ffmpeg, "-hide_banner", "-y", "-i", str(video_tmp), "-vf", f"subtitles='{subtitle_filter}':force_style='{style}'", "-c:v", "libx264", "-preset", preset, "-crf", str(crf), "-pix_fmt", "yuv420p", "-an", str(subtitled_tmp)])
+            video_source = subtitled_tmp
+
+        if audio_path and bgm_path:
+            bgm_volume, meta = _bgm_volume_expr(ffmpeg, audio_path, bgm_path, duck_db=bgm_duck_db)
+            print(f"  BGM auto volume: voice={meta['voice_mean_db']}dB bgm={meta['bgm_mean_db']}dB gain={meta['bgm_gain_db']}dB", flush=True)
+            _run([ffmpeg, "-hide_banner", "-y", "-i", str(video_source), "-i", str(audio_path), "-stream_loop", "-1", "-i", str(bgm_path), "-filter_complex", f"[2:a]volume={bgm_volume},asetpts=PTS-STARTPTS[bgm];[1:a][bgm]amix=inputs=2:duration=first:dropout_transition=0[aout]", "-map", "0:v:0", "-map", "[aout]", "-c:v", "copy", "-c:a", "aac", "-shortest", str(output_video)])
+        elif audio_path:
+            _run([ffmpeg, "-hide_banner", "-y", "-i", str(video_source), "-i", str(audio_path), "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-shortest", str(output_video)])
         else:
-            shutil.copy2(video_tmp, output_video)
+            shutil.copy2(video_source, output_video)
 
 
 def _parse_size(size: str) -> tuple[int, int]:
@@ -337,7 +463,8 @@ def process_lrc_file(args: argparse.Namespace, lrc_path: Path, image_index: dict
     if not events:
         raise RuntimeError(f"未从 LRC 识别到带画面编号的时间轴：{lrc_path}")
 
-    audio_path = _find_audio_for_lrc(lrc_path)
+    audio_path = synthesize_voice_from_lrc(args, lrc_path, output_dir) or _find_audio_for_lrc(lrc_path)
+    bgm_path = _resolve_bgm_for_lrc(args, lrc_path)
     final_end = _audio_duration(ffprobe, audio_path) if audio_path else 0.0
     scenes, missing = build_scenes(
         events,
@@ -356,15 +483,19 @@ def process_lrc_file(args: argparse.Namespace, lrc_path: Path, image_index: dict
         scenes,
         out_video,
         audio_path=audio_path,
+        subtitle_path=out_srt if bool(args.burn_subtitles) else None,
         size=args.size,
         fps=int(args.fps),
         crf=int(args.crf),
         preset=args.preset,
+        bgm_path=bgm_path,
+        bgm_duck_db=float(args.bgm_duck_db),
     )
 
     report = {
         "lrc": str(lrc_path),
         "audio": str(audio_path) if audio_path else "",
+        "background_music": str(bgm_path) if bgm_path else "",
         "output_video": str(out_video),
         "subtitle": str(out_srt),
         "scene_count": len(scenes),
@@ -386,21 +517,196 @@ def process_lrc_file(args: argparse.Namespace, lrc_path: Path, image_index: dict
     return report
 
 
+def _read_book_context(root: Path) -> str:
+    readable_outline = "00_\u5206\u96c6\u89e3\u8bfb\u5927\u7eb2_\u53ef\u8bfb.txt"
+    json_outline = "00_\u5206\u96c6\u89e3\u8bfb\u5927\u7eb2.json"
+    run_readme = "README_\u672c\u6b21\u8f93\u51fa.md"
+    candidates = [
+        root / readable_outline,
+        root / json_outline,
+        root / run_readme,
+    ]
+    try:
+        candidates.extend(sorted(root.rglob(readable_outline))[:5])
+        candidates.extend(sorted(root.rglob(json_outline))[:5])
+        candidates.extend(sorted(root.rglob(run_readme))[:5])
+    except Exception:
+        pass
+    chunks: list[str] = []
+    seen: set[Path] = set()
+    for path in candidates:
+        if path in seen or not path.exists() or not path.is_file():
+            continue
+        seen.add(path)
+        text = path.read_text(encoding="utf-8", errors="replace").strip()
+        if text:
+            chunks.append(f"[{path.name}]\n{text[:6000]}")
+    return "\n\n".join(chunks)[:12000]
+
+
+def _build_bgm_prompt(book_context: str, user_prompt: str = "") -> str:
+    base = (
+        "Create a 30-second instrumental-only background music bed for a Chinese book explainer short video. "
+        "No vocals, no lyrics, no spoken words. It must sit quietly under narration, with a restrained documentary tone, "
+        "warm low piano or soft marimba, subtle strings, light pulse, no sudden drops, no loud percussion, loop-friendly ending. "
+        "Mood should follow the book context: thoughtful, humane, analytical, with gentle tension and hope. "
+        "Mix target: background underscore, not a standalone song."
+    )
+    if user_prompt.strip():
+        base += " Extra direction: " + user_prompt.strip()
+    if book_context.strip():
+        base += "\n\nBook outline/summary context:\n" + book_context.strip()
+    return base
+
+
+def _extract_inline_audio_parts(response) -> tuple[bytes, str, str]:
+    notes: list[str] = []
+    parts = getattr(response, "parts", None)
+    if parts is None:
+        parts = []
+        for candidate in getattr(response, "candidates", []) or []:
+            content = getattr(candidate, "content", None)
+            parts.extend(getattr(content, "parts", []) or [])
+    for part in parts:
+        text = getattr(part, "text", None)
+        if text:
+            notes.append(str(text))
+        inline = getattr(part, "inline_data", None)
+        if inline:
+            data = getattr(inline, "data", b"") or b""
+            mime = getattr(inline, "mime_type", "") or ""
+            if isinstance(data, str):
+                data = base64.b64decode(data)
+            if data:
+                return data, mime, "\n\n".join(notes)
+    raise RuntimeError("Gemini/Lyria did not return inline audio")
+
+
+def _extract_inline_audio_from_json(payload: dict) -> tuple[bytes, str, str]:
+    notes: list[str] = []
+    for candidate in payload.get("candidates", []) or []:
+        content = candidate.get("content") or {}
+        for part in content.get("parts", []) or []:
+            text = part.get("text")
+            if text:
+                notes.append(str(text))
+            inline = part.get("inlineData") or part.get("inline_data") or {}
+            data = inline.get("data")
+            if data:
+                mime = str(inline.get("mimeType") or inline.get("mime_type") or "")
+                return base64.b64decode(data), mime, "\n\n".join(notes)
+    raise RuntimeError("Gemini/Lyria relay did not return inline audio")
+
+
+def _normalized_relay_base_url() -> str:
+    base = (
+        os.environ.get("NEWAPI_BASE_URL")
+        or os.environ.get("FOREIGN_MODEL_BASE_URL")
+        or "https://greatwalllink.top/v1"
+    ).replace("greatwallink.top", "greatwalllink.top").rstrip("/")
+    if not base.endswith("/v1"):
+        base += "/v1"
+    return base
+
+
+def _generate_bgm_with_relay(key: str, model: str, prompt: str) -> tuple[bytes, str, str]:
+    relay_root = _normalized_relay_base_url().rsplit("/v1", 1)[0].rstrip("/")
+    url = f"{relay_root}/v1beta/models/{model}:generateContent"
+    payload = json.dumps(
+        {
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {"responseModalities": ["AUDIO"]},
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    last_error = ""
+    for attempt in range(1, 4):
+        try:
+            with urllib.request.urlopen(req, timeout=240) as resp:
+                data = json.loads(resp.read().decode("utf-8", errors="replace"))
+            return _extract_inline_audio_from_json(data)
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")[:1200]
+            last_error = f"HTTP {exc.code} {exc.reason}: {body or '<empty body>'}"
+            if exc.code in {502, 503, 504} and attempt < 3:
+                print(f"Relay BGM request got HTTP {exc.code}; retrying {attempt}/3...", flush=True)
+                time.sleep(3 * attempt)
+                continue
+            raise RuntimeError(
+                f"Gemini/Lyria relay request failed via {_normalized_relay_base_url()} model={model}: {last_error}. "
+                "If this relay does not expose Lyria audio generation, switch BGM model or use an existing BGM file."
+            ) from exc
+        except urllib.error.URLError as exc:
+            last_error = str(exc)
+            if attempt < 3:
+                print(f"Relay BGM request failed; retrying {attempt}/3: {last_error}", flush=True)
+                time.sleep(3 * attempt)
+                continue
+            raise RuntimeError(f"Gemini/Lyria relay request failed via {_normalized_relay_base_url()} model={model}: {last_error}") from exc
+    raise RuntimeError(f"Gemini/Lyria relay request failed via {_normalized_relay_base_url()} model={model}: {last_error}")
+
+
+def generate_bgm_with_gemini(args: argparse.Namespace) -> Path:
+    key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    if not key:
+        raise RuntimeError("BGM generation requires Gemini Key in GEMINI_API_KEY/GOOGLE_API_KEY.")
+    output_dir = Path(args.bgm_output or args.output or PROJECT_ROOT / "_temp" / "bgm_library").expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    summary_root = Path(args.summary_root or args.output or output_dir).expanduser().resolve()
+    book_context = _read_book_context(summary_root) if summary_root.exists() else ""
+    prompt = _build_bgm_prompt(book_context, str(args.bgm_prompt or ""))
+
+    model = str(args.bgm_model or "lyria-3-clip-preview")
+    audio, mime, notes = _generate_bgm_with_relay(key, model, prompt)
+    suffix = ".mp3" if "mpeg" in mime.lower() or "mp3" in mime.lower() or model.startswith("lyria") else ".bin"
+    safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", summary_root.name or "book")[:40].strip("_") or "book"
+    out = output_dir / f"bgm_{safe_name}_{len(list(output_dir.glob('bgm_*.mp3'))) + 1:03d}{suffix}"
+    out.write_bytes(audio)
+    out.with_suffix(".prompt.txt").write_text(prompt, encoding="utf-8")
+    if notes.strip():
+        out.with_suffix(".notes.txt").write_text(notes, encoding="utf-8")
+    print(f"Generated BGM: {out}", flush=True)
+    return out
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="按 LRC 里的画面编号自动匹配图片并合成视频。")
-    parser.add_argument("--images", required=True, help="图片素材文件夹，文件名需包含 B26、B027 等画面编号")
-    parser.add_argument("--lrc", required=True, help="LRC 素材文件夹")
-    parser.add_argument("--output", required=True, help="输出文件夹")
+    parser.add_argument("--images", default="", help="图片素材文件夹，文件名需包含 B26、B027 等画面编号")
+    parser.add_argument("--lrc", default="", help="LRC 素材文件夹")
+    parser.add_argument("--output", default="", help="输出文件夹")
     parser.add_argument("--size", default="1080x1920", help="输出尺寸，默认 1080x1920")
     parser.add_argument("--fps", default="30", help="输出帧率，默认 30")
     parser.add_argument("--last-seconds", default="4", help="没有同名音频时，最后一张图默认停留秒数")
     parser.add_argument("--crf", default="20", help="H.264 质量，越小越清晰")
     parser.add_argument("--preset", default="veryfast", help="x264 编码预设")
+    parser.add_argument("--bgm", default="", help="Background music file or folder")
+    parser.add_argument("--bgm-duck-db", default="18", help="Target BGM loudness below voice mean volume, in dB")
+    parser.add_argument("--synthesize-voice", action="store_true", help="Synthesize narration audio from LRC text")
+    parser.add_argument("--voice-style", default="calm_story", help="TTS voice style: calm_story, excited_research, documentary")
+    parser.add_argument("--tts-model", default="", help="Gemini TTS model override")
+    parser.add_argument("--burn-subtitles", action="store_true", help="Burn readable subtitles into the video")
+    parser.add_argument("--generate-bgm", action="store_true", help="Generate one Gemini/Lyria BGM clip and exit")
+    parser.add_argument("--bgm-output", default="", help="BGM library/output folder for --generate-bgm")
+    parser.add_argument("--summary-root", default="", help="Folder containing full-book outline/summary for BGM prompting")
+    parser.add_argument("--bgm-prompt", default="", help="Extra music direction appended to the generated BGM prompt")
+    parser.add_argument("--bgm-model", default="lyria-3-clip-preview", help="Gemini/Lyria music generation model")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if bool(getattr(args, "generate_bgm", False)):
+        generate_bgm_with_gemini(args)
+        return 0
+
+    if not args.images or not args.lrc or not args.output:
+        raise SystemExit("--images, --lrc and --output are required unless --generate-bgm is used")
     image_dir = Path(args.images).expanduser().resolve()
     lrc_dir = Path(args.lrc).expanduser().resolve()
     if not image_dir.is_dir():

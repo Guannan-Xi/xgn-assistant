@@ -6,6 +6,7 @@ import re
 import time
 import urllib.parse
 import urllib.request
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +19,12 @@ PROMPTS_DIR = PROJECT_ROOT / "prompts"
 DEFAULT_BOT_DIR = PROJECT_ROOT / "outputs" / "audience_test_bot"
 SETTINGS_FILE = REPO_ROOT / "quanlan_dual_assistant_settings.json"
 BOOK_REPORT_FOLDER = "小猪理观众测试"
+
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
 AUDIENCE_QUERIES = [
     "名著解读 视频号 观众 评论 读书",
@@ -145,6 +152,10 @@ def _settings_book_pdf() -> Path | None:
 def resolve_report_paths(book_pdf_arg: str | None) -> dict[str, Path | None]:
     book_pdf = _candidate_book_pdf(book_pdf_arg) or _settings_book_pdf()
     report_dir = book_pdf.parent / BOOK_REPORT_FOLDER if book_pdf else DEFAULT_BOT_DIR
+    try:
+        report_dir.relative_to(REPO_ROOT)
+    except ValueError:
+        report_dir = DEFAULT_BOT_DIR
     return {
         "book_pdf": book_pdf,
         "report_dir": report_dir,
@@ -167,11 +178,13 @@ def collect_public_signals(*, online: bool = False, limit: int = 5) -> list[dict
     signals: list[dict[str, str]] = []
     if not online:
         for persona in PERSONAS:
-            signals.append({
-                "source": "built_in_persona",
-                "query": persona["name"],
-                "summary": f"{persona['pain']} 必须满足：{'、'.join(persona['must'])}",
-            })
+            signals.append(
+                {
+                    "source": "built_in_persona",
+                    "query": persona["name"],
+                    "summary": f"{persona['pain']} 必须满足：{'、'.join(persona['must'])}",
+                }
+            )
         return signals
 
     for query in AUDIENCE_QUERIES[:limit]:
@@ -228,6 +241,178 @@ def _count_lrc_lines(text: str) -> int:
     return len([line for line in text.splitlines() if re.search(r"[ABC]\d*|【[ABC]", line)])
 
 
+def _postprocess_data(texts: dict[str, str]) -> tuple[dict[str, Any], dict[str, Any]]:
+    quality = _load_json_from_text(texts.get("quality", ""))
+    if not isinstance(quality, dict):
+        quality = {}
+    meta = _load_json_from_text(texts.get("meta", ""))
+    if not isinstance(meta, dict):
+        meta = {}
+    return quality, meta
+
+
+def _evaluate_postprocess(material_dir: Path, texts: dict[str, str]) -> list[Finding]:
+    findings: list[Finding] = []
+    quality, meta = _postprocess_data(texts)
+    target = str(material_dir)
+
+    if not quality and not meta:
+        return findings
+
+    review_team = quality.get("review_team") if isinstance(quality.get("review_team"), dict) else {}
+    if review_team.get("total") != 230:
+        findings.append(
+            Finding(
+                "medium",
+                "postprocess_review",
+                "后处理质检清单没有明确体现 230 人评审团总人数。",
+                target,
+                "在 230 人评审质检清单里补上 total=230，并明确三组人数。",
+                True,
+            )
+        )
+
+    if not isinstance(quality.get("one_vote_veto"), list) or len(quality.get("one_vote_veto") or []) < 3:
+        findings.append(
+            Finding(
+                "medium",
+                "postprocess_review",
+                "后处理质检清单缺少明确的一票否决规则。",
+                target,
+                "补足文学/运营/观众三组的一票否决标准。",
+                True,
+            )
+        )
+
+    if not isinstance(quality.get("visual_checklist"), list) or len(quality.get("visual_checklist") or []) < 4:
+        findings.append(
+            Finding(
+                "medium",
+                "postprocess_review",
+                "后处理视觉检查项太少，难以覆盖封面、片尾和品牌区。",
+                target,
+                "补充 A1/A2/A01/A02/C、品牌区、缩略图可读性的检查项。",
+                True,
+            )
+        )
+
+    if not isinstance(quality.get("content_checklist"), list) or len(quality.get("content_checklist") or []) < 4:
+        findings.append(
+            Finding(
+                "medium",
+                "postprocess_review",
+                "后处理内容检查项太少，无法兜住标题、C 预告和转发理由。",
+                target,
+                "补充 A1、B 段、C、发布包联动检查项。",
+                True,
+            )
+        )
+
+    covers = meta.get("covers") if isinstance(meta.get("covers"), dict) else {}
+    endcards = meta.get("endcards") if isinstance(meta.get("endcards"), dict) else {}
+    if not covers:
+        findings.append(
+            Finding(
+                "medium",
+                "postprocess_assets",
+                "后处理元数据里没有封面产物列表。",
+                target,
+                "在封面片尾元数据中保留 A1/A2/A01/A02 的输出路径。",
+                True,
+            )
+        )
+    if not endcards:
+        findings.append(
+            Finding(
+                "medium",
+                "postprocess_assets",
+                "后处理元数据里没有片尾产物列表。",
+                target,
+                "在封面片尾元数据中保留 C 片尾的输出路径。",
+                True,
+            )
+        )
+
+    for asset_group, assets in (("covers", covers), ("endcards", endcards)):
+        for asset_id, asset_info in assets.items():
+            if not isinstance(asset_info, dict):
+                findings.append(
+                    Finding(
+                        "medium",
+                        "postprocess_assets",
+                        f"{asset_group} 里的 {asset_id} 元数据结构不完整。",
+                        target,
+                        "把输出路径和尺寸信息写成字典。",
+                        True,
+                    )
+                )
+                continue
+            path_text = str(asset_info.get("path") or "")
+            if not path_text:
+                findings.append(
+                    Finding(
+                        "medium",
+                        "postprocess_assets",
+                        f"{asset_group} 里的 {asset_id} 没有输出路径。",
+                        target,
+                        "把该图片的 path 写入封面片尾元数据。",
+                        True,
+                    )
+                )
+                continue
+            if not Path(path_text).exists():
+                findings.append(
+                    Finding(
+                        "high",
+                        "postprocess_assets",
+                        f"{asset_group} 里的 {asset_id} 输出文件不存在。",
+                        path_text,
+                        "检查后处理是否真的生成了该图片。",
+                        False,
+                    )
+                )
+
+    config_path = str(meta.get("config_path") or "")
+    if config_path and not Path(config_path).exists():
+        findings.append(
+            Finding(
+                "medium",
+                "postprocess_assets",
+                "后处理配置文件路径存在，但文件本身不存在。",
+                config_path,
+                "确认封面片尾配置已经写盘。",
+                False,
+            )
+        )
+
+    quality_path = str(meta.get("quality_path") or "")
+    if quality_path and not Path(quality_path).exists():
+        findings.append(
+            Finding(
+                "medium",
+                "postprocess_assets",
+                "后处理质检清单路径存在，但文件本身不存在。",
+                quality_path,
+                "确认 230 人评审质检清单已经写盘。",
+                False,
+            )
+        )
+
+    if findings:
+        return findings
+
+    findings.append(
+        Finding(
+            "pass",
+            "postprocess_overall",
+            "后处理评审项已覆盖封面、片尾和内容联动。",
+            target,
+            "继续在真实产物上复测。",
+        )
+    )
+    return findings
+
+
 def evaluate_material(material_dir: Path, signals: list[dict[str, str]]) -> list[Finding]:
     texts = _material_text(material_dir)
     findings: list[Finding] = []
@@ -237,41 +422,141 @@ def evaluate_material(material_dir: Path, signals: list[dict[str, str]]) -> list
     target = str(material_dir)
 
     if not texts:
-        findings.append(Finding("high", "missing_material", "没有找到可评测的台词、简介或封面元数据。", target, "先生成分集素材或指向正确输出目录。"))
+        findings.append(
+            Finding(
+                "high",
+                "missing_material",
+                "没有找到可评测的台词、简介或封面元数据。",
+                target,
+                "先生成分集素材或指向正确输出目录。",
+            )
+        )
         return findings
 
     if lrc and _count_lrc_lines(lrc) < 12:
-        findings.append(Finding("medium", "retention", "台词行数过少，可能像摘要而不是完整短视频。", target, "检查分集是否过短，必要时补足 B 段正文覆盖。"))
+        findings.append(
+            Finding(
+                "medium",
+                "retention",
+                "台词行数过少，可能像摘要而不是完整短视频。",
+                target,
+                "检查分集是否过短，必要时补足 B 段正文覆盖。",
+            )
+        )
 
     first_lines = [line for line in lrc.splitlines() if line.strip()][:4]
     first_blob = " ".join(first_lines)
     if first_blob and re.search(r"本章|本文|这一节|主要讲|接下来我们", first_blob):
-        findings.append(Finding("high", "opening", "开头像课程目录或摘要，普通观众首屏不容易停留。", target, "重写 A1：先给人物困境、制度矛盾或具体问题，再自然亮书名。", True))
+        findings.append(
+            Finding(
+                "high",
+                "opening",
+                "开头像课程目录或摘要，普通观众首屏不容易停留。",
+                target,
+                "重写 A1：先给人物困境、制度矛盾或具体问题，再自然亮书名。",
+                True,
+            )
+        )
     if first_blob and len(re.findall(r"制度|机制|结构|逻辑|治理|背景|体系", first_blob)) >= 3:
-        findings.append(Finding("high", "opening", "前几句抽象名词过密，观众可能听不懂。", target, "前 8 秒改成“谁遇到什么麻烦、被什么规则卡住”。", True))
+        findings.append(
+            Finding(
+                "high",
+                "opening",
+                "前几句抽象名词过密，观众可能听不懂。",
+                target,
+                "前 8 秒改成“谁遇到什么麻烦、被什么规则卡住”。",
+                True,
+            )
+        )
 
     if intro:
         publish_title = str(intro.get("publish_title") or "")
         if len(publish_title) > 28 or len(publish_title) < 8:
-            findings.append(Finding("medium", "publish_title", "视频号标题长度不稳，可能影响停留。", target, "标题控制在 16-24 个中文字符，写成具体问题或冲突。", True))
+            findings.append(
+                Finding(
+                    "medium",
+                    "publish_title",
+                    "视频号标题长度不稳，可能影响停留。",
+                    target,
+                    "标题控制在 16-24 个中文字符，写成具体问题或冲突。",
+                    True,
+                )
+            )
         if not re.search(r"[？?]|为什么|为何|怎么|谁|困|难|穷|卡|人情|矛盾|选择|规则|代价|后果", publish_title):
-            findings.append(Finding("medium", "publish_title", "标题缺少问题、冲突或处境压力。", target, "标题补一个具体矛盾，不要只写章节名。", True))
+            findings.append(
+                Finding(
+                    "medium",
+                    "publish_title",
+                    "标题缺少问题、冲突或处境压力。",
+                    target,
+                    "标题补一个具体矛盾，不要只写章节名。",
+                    True,
+                )
+            )
         if not str(intro.get("pinned_comment") or ""):
-            findings.append(Finding("medium", "comments", "缺少置顶评论，浪费互动入口。", target, "补一个普通观众能马上回答的选择题或处境题。", True))
+            findings.append(
+                Finding(
+                    "medium",
+                    "comments",
+                    "缺少置顶评论，浪费互动入口。",
+                    target,
+                    "补一个普通观众能马上回答的选择题或处境题。",
+                    True,
+                )
+            )
         share_text = str(intro.get("moments_text") or "") + str(intro.get("group_text") or "")
         if share_text and not re.search(r"适合|转给|正在|遇到|被.*卡住|看懂|关心", share_text):
-            findings.append(Finding("medium", "share", "朋友圈/微信群文案没有明确转发对象或转发理由。", target, "写清适合谁看、帮谁看懂什么问题。", True))
+            findings.append(
+                Finding(
+                    "medium",
+                    "share",
+                    "朋友圈/微信群文案没有明确转发对象或转发理由。",
+                    target,
+                    "写清适合谁看、帮谁看懂什么问题。",
+                    True,
+                )
+            )
 
     bad_words = ["底层逻辑", "认知升级", "命运齿轮", "时代洪流", "封神", "天花板", "狠狠共鸣", "值得深思"]
     hits = [word for word in bad_words if word in combined]
     if hits:
-        findings.append(Finding("medium", "language", f"发现空泛爆款词：{'、'.join(hits)}。", target, "替换为具体人物处境、规则压力或选择后果。", True))
+        findings.append(
+            Finding(
+                "medium",
+                "language",
+                f"发现空泛爆款词：{'、'.join(hits)}。",
+                target,
+                "替换为具体人物处境、规则压力或选择后果。",
+                True,
+            )
+        )
 
-    if not any("转发" in signal.get("summary", "") or "评论" in signal.get("summary", "") or "想看" in signal.get("summary", "") for signal in signals):
-        findings.append(Finding("low", "audience_signal", "本轮公开观众信号较弱，无法确认外部需求。", target, "保留问题单；下轮开启 --online 或补充真实评论样本。"))
+    if not any(
+        "转发" in signal.get("summary", "") or "评论" in signal.get("summary", "") or "想看" in signal.get("summary", "")
+        for signal in signals
+    ):
+        findings.append(
+            Finding(
+                "low",
+                "audience_signal",
+                "本轮公开观众信号较弱，无法确认外部需求。",
+                target,
+                "保留问题单；下轮开启 --online 或补充真实评论样本。",
+            )
+        )
+
+    findings.extend(_evaluate_postprocess(material_dir, texts))
 
     if not findings:
-        findings.append(Finding("pass", "overall", "本轮自动观众评测未发现硬伤。", target, "继续积累真实数据后复测。"))
+        findings.append(
+            Finding(
+                "pass",
+                "overall",
+                "本轮自动观众评测未发现硬伤。",
+                target,
+                "继续积累真实数据后复测。",
+            )
+        )
     return findings
 
 
@@ -329,7 +614,15 @@ def run_bot(args: argparse.Namespace) -> int:
     for material_dir in material_dirs:
         all_findings.extend(evaluate_material(material_dir, signals))
     if not material_dirs:
-        all_findings.append(Finding("high", "missing_material", f"未在 {root} 找到可评测素材。", str(root), "生成文史素材后再运行，或用 --material-root 指定输出目录。"))
+        all_findings.append(
+            Finding(
+                "high",
+                "missing_material",
+                f"未在 {root} 找到可评测素材。",
+                str(root),
+                "生成文史素材后再运行，或用 --material-root 指定输出目录。",
+            )
+        )
 
     changed = auto_patch_prompts(all_findings, apply=bool(args.apply), patch_log=patch_log)
     report = {
@@ -343,7 +636,11 @@ def run_bot(args: argparse.Namespace) -> int:
         "materials": [str(path) for path in material_dirs],
         "findings": [finding.as_dict() for finding in all_findings],
         "auto_patches": changed,
-        "unfixed": [finding.as_dict() for finding in all_findings if finding.severity in {"high", "medium"} and not finding.auto_fixable],
+        "unfixed": [
+            finding.as_dict()
+            for finding in all_findings
+            if finding.severity in {"high", "medium"} and not finding.auto_fixable
+        ],
     }
     _write_json(report_file, report)
     for finding in all_findings:
