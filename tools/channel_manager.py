@@ -15,6 +15,8 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_RELEASE_ROOT = PROJECT_ROOT.parent / "xgn-assistant-release"
+DEFAULT_DEV_ROOT = PROJECT_ROOT
+DEFAULT_TEST_ROOT = PROJECT_ROOT.parent / "xgn-assistant-test"
 UPDATE_DIR_NAME = ".release_updates"
 STATE_FILE_NAME = "release_channel_state.json"
 UPDATE_LOCK_NAME = "release_upgrade.lock"
@@ -133,8 +135,19 @@ def _update_dir(root: Path) -> Path:
     return root / UPDATE_DIR_NAME
 
 
+def _target_root(args: argparse.Namespace, *, default_channel: str = "test") -> Path:
+    channel = str(getattr(args, "channel", "") or default_channel).strip().lower()
+    if getattr(args, "release_root", ""):
+        return Path(args.release_root)
+    if channel == "dev":
+        return DEFAULT_DEV_ROOT
+    if channel == "test":
+        return DEFAULT_TEST_ROOT
+    return DEFAULT_RELEASE_ROOT
+
+
 def init_release(args: argparse.Namespace) -> int:
-    release_root = Path(args.release_root or DEFAULT_RELEASE_ROOT)
+    release_root = _target_root(args, default_channel="test")
     if release_root.exists() and any(release_root.iterdir()) and not args.force:
         print(f"发布版已存在：{release_root}")
     else:
@@ -144,8 +157,9 @@ def init_release(args: argparse.Namespace) -> int:
         print(f"已初始化发布版：{release_root}")
     _set_state(
         release_root,
-        channel="release",
+        channel=str(args.channel or "test"),
         dev_root=str(PROJECT_ROOT),
+        explicit_update_required=True,
         busy=False,
         active_tasks=[],
         last_init_at=_now(),
@@ -155,17 +169,20 @@ def init_release(args: argparse.Namespace) -> int:
 
 
 def package_update(args: argparse.Namespace) -> int:
-    release_root = Path(args.release_root or DEFAULT_RELEASE_ROOT)
+    release_root = _target_root(args, default_channel="test")
     update_dir = _update_dir(release_root)
     update_dir.mkdir(parents=True, exist_ok=True)
-    package_name = f"xgn-assistant-dev-update-{_stamp()}.zip"
+    channel = str(args.channel or "test").strip().lower()
+    package_name = f"xgn-assistant-{channel}-update-{_stamp()}.zip"
     package_path = update_dir / package_name
     manifest = {
         "created_at": _now(),
         "dev_root": str(PROJECT_ROOT),
         "release_root": str(release_root),
+        "channel": channel,
         "package": package_name,
         "note": str(args.note or ""),
+        "requires_explicit_apply": True,
     }
     with tempfile.TemporaryDirectory(prefix="xgn_update_") as tmp:
         tmp_root = Path(tmp) / "payload"

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
 import base64
@@ -1738,7 +1738,7 @@ class LLMClient:
             return self._dry_run_text(prompt, pdf_path=pdf_path, task_name=task_name)
 
         # Prefer local PDF parsing. If every local parser/text fallback fails,
-        # keep pdf_path so providers that support files can upload the original PDF.
+        # fail fast because outline/script stages must not upload the original PDF.
         if pdf_path and pdf_path.exists():
             if is_image_only_pdf(pdf_path):
                 log("  ⚠️ 检测到纯图片/扫描版 PDF，跳过 PyMuPDF4LLM/pypdf，直接使用 PaddleOCR PP-StructureV3 本地解析。")
@@ -1773,7 +1773,11 @@ class LLMClient:
                     try:
                         prompt = build_pdf_text_fallback_prompt(prompt, pdf_path, max_chars=_task_context_char_budget(task_name))
                     except Exception as fallback_exc:
-                        log(f"  ⚠️ pypdf 文本 fallback 也失败，将把原始 PDF 直传给支持文件的大模型：{fallback_exc}")
+                        log(f"  ⚠️ pypdf 文本 fallback 也失败，已禁止 PDF 直传：{fallback_exc}")
+                        raise RuntimeError(
+                            "本地 PDF 解析和 pypdf 文本提取都失败，已按本地解析策略禁止 PDF 直传。"
+                            f"请先做 OCR，或换成可复制文字的 PDF / 手动提供已有大纲 JSON。PDF：{pdf_path}"
+                        ) from fallback_exc
                     else:
                         pdf_path = None
                 else:
