@@ -12,8 +12,9 @@ from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageFo
 
 BRAND_NAME = "知识慢炖"
 BRAND_SLOGAN = "让经典不再高冷，让智慧人人可用"
-DEFAULT_FOLLOW_TEXT = "想看完整论证，可以回到原书。"
-DEFAULT_CTA_TEXT = "如果这一集说到你关心的问题，欢迎点赞、评论、转发，也可以关注【知识慢炖】"
+DEFAULT_FOLLOW_TEXT = "创作不易，欢迎在下方链接购买原书支持我们"
+DEFAULT_CTA_TEXT = "关注【知识慢炖】，下一集继续把问题讲透"
+BEST_POSTPROCESS_ENGINE = "playwright_html"
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PROMPTS_DIR = PROJECT_ROOT / "prompts"
 CONFIG_DIR = PROJECT_ROOT / "config"
@@ -352,8 +353,8 @@ DEFAULT_GLOBAL_POSTPROCESS_SPEC: dict[str, Any] = {
         }
     },
     "rendering": {
-        "engine": "pillow",
-        "fallback_engine": "pillow",
+        "engine": BEST_POSTPROCESS_ENGINE,
+        "fallback_engine": "",
         "device_scale_factor": 1.0
     }
 }
@@ -390,30 +391,22 @@ def _runtime_value(path: str, default: Any = None) -> Any:
 
 
 def _postprocess_engine(config_payload: dict[str, Any] | None = None) -> str:
-    runtime_engine = str(_runtime_value("postprocess.render_engine", "") or "").strip().lower()
-    if runtime_engine:
-        return runtime_engine
-    if isinstance(config_payload, dict):
-        config_engine = str(_get_nested(config_payload, "rendering.engine", "") or "").strip().lower()
-        if config_engine:
-            return config_engine
-    global_spec = load_global_postprocess_spec(create_if_missing=True)
-    return str(_get_nested(global_spec, "rendering.engine", "playwright_html") or "playwright_html").strip().lower()
+    return BEST_POSTPROCESS_ENGINE
 
 
 def _render_with_playwright(kind: str, base_path: Path | None, out_path: Path, meta: dict[str, Any], spec: dict[str, Any], config_payload: dict[str, Any]) -> bool:
     try:
         from .postprocess_playwright import render_cover_with_playwright, render_end_card_with_playwright
-    except Exception:
-        return False
+    except Exception as exc:
+        raise RuntimeError("Playwright/HTML renderer is unavailable; other renderers are disabled.") from exc
     try:
         if kind == "cover":
             render_cover_with_playwright(base_path, out_path, meta, spec, config_payload)
         else:
             render_end_card_with_playwright(base_path, out_path, meta, spec, config_payload)
         return True
-    except Exception:
-        return False
+    except Exception as exc:
+        raise RuntimeError(f"Playwright/HTML {kind} renderer failed for {out_path}; other renderers are disabled.") from exc
 
 
 def _brand_override_from_copywriting_config() -> dict[str, Any]:
@@ -1689,15 +1682,24 @@ def _editorial_grade(
 
 
 def _draw_editorial_pill(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], text: str, *, unit: int, fill=(250, 244, 229, 232), outline=(219, 171, 105, 210), color=(236, 112, 45)) -> None:
+    text = _clean_text(text)
+    if not text:
+        return
     x1, y1, x2, y2 = box
+    text_box = _inset_box(box, int(unit * 0.025), int(unit * 0.004))
+    max_size = max(18, int(unit * 0.026))
+    min_size = max(12, int(unit * 0.015))
+    _, wrapped, _ = _fit_text(draw, text, text_box, max_size=max_size, min_size=min_size, max_lines=1, font_role="meta")
+    if not str(wrapped or "").strip():
+        return
     draw.rounded_rectangle(box, radius=max(12, (y2 - y1) // 2), fill=fill, outline=outline, width=max(2, unit // 540))
     _draw_centered(
         draw,
-        text,
-        _inset_box(box, int(unit * 0.025), int(unit * 0.004)),
+        wrapped,
+        text_box,
         fill=color,
-        max_size=max(18, int(unit * 0.026)),
-        min_size=max(12, int(unit * 0.015)),
+        max_size=max_size,
+        min_size=min_size,
         max_lines=1,
         style={"text_shadow": {"enabled": False, "glow_px": 0, "stroke_divisor": 9999}},
         font_role="meta",
@@ -3294,19 +3296,17 @@ def _render_editorial_cover(base_path: Path | None, out_path: Path, meta: dict[s
         draw.rectangle((0, 0, w, h), fill=(10, 9, 8, 16))
         left = int(w * 0.095)
         right = int(w * 0.905)
-        if marketing_tag:
-            _draw_editorial_pill(draw, (left, int(h * 0.046), left + int(w * 0.32), int(h * 0.096)), marketing_tag, unit=unit, fill=(30, 22, 18, 222), outline=(236, 112, 45, 205), color=(250, 226, 194))
         _draw_left(draw, book_author_line or _cover_main_title_text(book_title), (left, int(h * 0.112), right, int(h * 0.150)), fill=(234, 207, 166), max_size=int(unit * 0.023), min_size=int(unit * 0.014), max_lines=1, style=plain, font_role="book")
-        pill_text = chapter_episode_line or "本集"
-        _draw_editorial_pill(
-            draw,
-            (left, int(h * 0.168), min(right, left + int(w * 0.66)), int(h * 0.216)),
-            pill_text,
-            unit=unit,
-            fill=(28, 22, 18, 205),
-            outline=(236, 112, 45, 210),
-            color=(250, 226, 194),
-        )
+        if chapter_episode_line:
+            _draw_editorial_pill(
+                draw,
+                (left, int(h * 0.168), min(right, left + int(w * 0.66)), int(h * 0.216)),
+                chapter_episode_line,
+                unit=unit,
+                fill=(28, 22, 18, 205),
+                outline=(236, 112, 45, 210),
+                color=(250, 226, 194),
+            )
         title_lines = [line.strip() for line in str(display_title).splitlines() if line.strip()]
         if len(title_lines) < 2:
             title_lines = [part.strip() for part in re.split(r"[，,]", str(display_title), maxsplit=1) if part.strip()]
@@ -3803,10 +3803,8 @@ def _cover_text_conf(style: dict[str, Any], platform: str) -> dict[str, Any]:
 
 
 def render_cover(base_path: Path | None, out_path: Path, meta: dict[str, Any], spec: dict[str, Any], config_payload: dict[str, Any]) -> None:
-    engine = _postprocess_engine(config_payload)
-    if engine in {"playwright", "playwright_html", "html", "html_css"}:
-        if _render_with_playwright("cover", base_path, out_path, meta, spec, config_payload):
-            return
+    _render_with_playwright("cover", base_path, out_path, meta, spec, config_payload)
+    return
     if _render_editorial_cover(base_path, out_path, meta, spec, config_payload):
         return
     size = spec["size"]
@@ -3953,10 +3951,8 @@ def _polish_teaser_title(text: str, *, style: dict[str, Any] | None = None) -> s
 
 
 def render_end_card(base_path: Path | None, out_path: Path, meta: dict[str, Any], spec: dict[str, Any], config_payload: dict[str, Any]) -> None:
-    engine = _postprocess_engine(config_payload)
-    if engine in {"playwright", "playwright_html", "html", "html_css"}:
-        if _render_with_playwright("endcard", base_path, out_path, meta, spec, config_payload):
-            return
+    _render_with_playwright("endcard", base_path, out_path, meta, spec, config_payload)
+    return
     if _render_editorial_end_card(base_path, out_path, meta, spec, config_payload):
         return
     size = spec["size"]

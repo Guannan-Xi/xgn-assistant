@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import os
@@ -65,7 +65,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SETTINGS_PATH = PROJECT_ROOT / "gui_settings.json"
 PROMPTS_DIR = PROJECT_ROOT / "prompts"
 CONFIG_DIR = PROJECT_ROOT / "config"
-RUNTIME_SWITCHES_CONFIG_PATH = CONFIG_DIR / "运行开关.json"
+RUNTIME_SWITCHES_CONFIG_PATH = CONFIG_DIR / "杩愯寮€鍏?json"
 
 
 def _is_project_outputs_path(path_text: str) -> bool:
@@ -80,7 +80,7 @@ def _is_project_outputs_path(path_text: str) -> bool:
 
 
 TEXT_MODEL_OPTIONS = {
-    "dry-run": [""],  # 仅用于“一键测试 dry-run”，正常流程只显示 Gemini / OpenAI。
+    "dry-run": [""],  # 浠呯敤浜庘€滀竴閿祴璇?dry-run鈥濓紝姝ｅ父娴佺▼鍙樉绀?Gemini / OpenAI銆?
     "gemini": GEMINI_TEXT_MODEL_OPTIONS,
     "openai": OPENAI_TEXT_MODEL_OPTIONS,
     "doubao": DOUBAO_TEXT_MODEL_OPTIONS,
@@ -91,8 +91,7 @@ IMAGE_MODEL_OPTIONS = {
     "none": [""],
     "dry-run": [""],
     "openai": OPENAI_IMAGE_MODEL_OPTIONS,
-    # Gemini 低成本优先：Nano Banana / Gemini 2.5 Flash Image。
-    "gemini": [
+    # Gemini 浣庢垚鏈紭鍏堬細Nano Banana / Gemini 2.5 Flash Image銆?    "gemini": [
         "gemini-3-pro-image-preview",
         "gemini-3.1-flash-image-preview",
     ],
@@ -138,9 +137,9 @@ def _extract_chat_content(response) -> str:
     return ""
 
 TEXT_STAGES = [
-    ("outline", "大纲生成", "优先本地识别章节并切成3-4分钟短集；识别失败才调用模型。"),
-    ("script", "脚本生成", "生成分集提示词、分镜、台词和绘图提示词；默认 GPT-5.5。"),
-    ("polish", "台词润色", "按图号逐句润色台词，并供承接、拆分润色、终稿和总结复用。"),
+    ("outline", "澶х翰鐢熸垚", "浼樺厛鏈湴璇嗗埆绔犺妭骞跺垏鎴?-4鍒嗛挓鐭泦锛涜瘑鍒け璐ユ墠璋冪敤妯″瀷銆?),
+    ("script", "鑴氭湰鐢熸垚", "鐢熸垚鍒嗛泦鎻愮ず璇嶃€佸垎闀溿€佸彴璇嶅拰缁樺浘鎻愮ず璇嶏紱榛樿 GPT-5.5銆?),
+    ("polish", "鍙拌瘝娑﹁壊", "鎸夊浘鍙烽€愬彞娑﹁壊鍙拌瘝锛屽苟渚涙壙鎺ャ€佹媶鍒嗘鼎鑹层€佺粓绋垮拰鎬荤粨澶嶇敤銆?),
 ]
 
 STAGE_SETTINGS_KEYS = {
@@ -193,7 +192,7 @@ class ToolTip:
 class AutoMediaGUI(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("AutoMediaProducer｜书籍解读短视频自动生成")
+        self.title("AutoMediaProducer锝滀功绫嶈В璇荤煭瑙嗛鑷姩鐢熸垚")
         self.geometry("1280x840")
         self.minsize(1180, 760)
         self.log_queue: queue.Queue[tuple] = queue.Queue()
@@ -219,7 +218,7 @@ class AutoMediaGUI(tk.Tk):
         self.notebook: ttk.Notebook | None = None
         self.prompt_tab: ttk.Frame | None = None
         self.visual_tab: ttk.Frame | None = None
-        self.status_var = tk.StringVar(value="准备就绪")
+        self.status_var = tk.StringVar(value="鍑嗗灏辩华")
         self._init_prompt_files()
 
         self._init_style()
@@ -245,12 +244,12 @@ class AutoMediaGUI(tk.Tk):
     def _init_style(self) -> None:
         self.configure(bg="#f6f3ec")
 
-        # Tk 的字体字符串里如果字体名包含空格，必须用大括号包起来。
-        # 之前直接写成 "Microsoft YaHei UI 10"，在部分 Windows/Tcl 环境中会被解析成：
-        # family=Microsoft, size=YaHei，从而报错：expected integer but got "YaHei"。
+        # Tk 鐨勫瓧浣撳瓧绗︿覆閲屽鏋滃瓧浣撳悕鍖呭惈绌烘牸锛屽繀椤荤敤澶ф嫭鍙峰寘璧锋潵銆?
+        # 涔嬪墠鐩存帴鍐欐垚 "Microsoft YaHei UI 10"锛屽湪閮ㄥ垎 Windows/Tcl 鐜涓細琚В鏋愭垚锛?
+        # family=Microsoft, size=YaHei锛屼粠鑰屾姤閿欙細expected integer but got "YaHei"銆?
         available_fonts = set(tkfont.families(self))
         font_family = next(
-            (name for name in ("Microsoft YaHei UI", "Microsoft YaHei", "微软雅黑", "SimSun", "Arial") if name in available_fonts),
+            (name for name in ("Microsoft YaHei UI", "Microsoft YaHei", "寰蒋闆呴粦", "SimSun", "Arial") if name in available_fonts),
             "TkDefaultFont",
         )
 
@@ -315,11 +314,11 @@ class AutoMediaGUI(tk.Tk):
             "outline": tk.StringVar(value=DEFAULT_GEMINI_FAST_MODEL),
             "episode_prompt": tk.StringVar(value=DEFAULT_OPENAI_TEXT_MODEL),
             "script": tk.StringVar(value=DEFAULT_OPENAI_TEXT_MODEL),
-            "polish": tk.StringVar(value="deepseek-v4-pro"),
-            "transition": tk.StringVar(value="deepseek-v4-pro"),
-            "split_polish": tk.StringVar(value="deepseek-v4-pro"),
-            "final_polish": tk.StringVar(value="deepseek-v4-pro"),
-            "book_summary": tk.StringVar(value="deepseek-v4-pro"),
+            "polish": tk.StringVar(value="deepseek-chat"),
+            "transition": tk.StringVar(value="deepseek-chat"),
+            "split_polish": tk.StringVar(value="deepseek-chat"),
+            "final_polish": tk.StringVar(value="deepseek-chat"),
+            "book_summary": tk.StringVar(value="deepseek-chat"),
         }
         self.stage_model_combos: dict[str, ttk.Combobox] = {}
         self.foreign_base_url_var = tk.StringVar(value=DEFAULT_FOREIGN_MODEL_BASE_URL)
@@ -372,7 +371,7 @@ class AutoMediaGUI(tk.Tk):
         self.email_password_env_var = tk.StringVar(value="AMP_SMTP_PASSWORD")
         self.email_password_file_var = tk.StringVar(value="smtp_password.txt")
         self.email_max_mb_var = tk.StringVar(value="20")
-        self.email_subject_template_var = tk.StringVar(value="著作解读分集完成：{part_name}")
+        self.email_subject_template_var = tk.StringVar(value="钁椾綔瑙ｈ鍒嗛泦瀹屾垚锛歿part_name}")
         self.vc_progress_var = tk.BooleanVar(value=True)
         self.vc_particle_var = tk.BooleanVar(value=True)
         self.vc_orb_var = tk.BooleanVar(value=True)
@@ -381,118 +380,118 @@ class AutoMediaGUI(tk.Tk):
         return [
             {
                 "key": "outline",
-                "filename": "01_大纲生成提示词.md",
-                "title": "大纲生成",
-                "desc": "控制整本书如何拆成分集大纲。可用变量：{episode_count}、{image_interval_seconds}。",
+                "filename": "01_澶х翰鐢熸垚鎻愮ず璇?md",
+                "title": "澶х翰鐢熸垚",
+                "desc": "鎺у埗鏁存湰涔﹀浣曟媶鎴愬垎闆嗗ぇ绾层€傚彲鐢ㄥ彉閲忥細{episode_count}銆亄image_interval_seconds}銆?,
                 "default": OUTLINE_PROMPT,
             },
             {
                 "key": "episode_builder",
-                "filename": "02_脚本生成提示词.md",
-                "title": "脚本生成提示词",
-                "desc": "控制每一集脚本生成的叙事要求、画面节奏、A1/C 规则。可用变量：{episode_json}、{image_interval_seconds}、{book_title}。",
+                "filename": "02_鑴氭湰鐢熸垚鎻愮ず璇?md",
+                "title": "鑴氭湰鐢熸垚鎻愮ず璇?,
+                "desc": "鎺у埗姣忎竴闆嗚剼鏈敓鎴愮殑鍙欎簨瑕佹眰銆佺敾闈㈣妭濂忋€丄1/C 瑙勫垯銆傚彲鐢ㄥ彉閲忥細{episode_json}銆亄image_interval_seconds}銆亄book_title}銆?,
                 "default": EPISODE_PROMPT_BUILDER,
             },
             {
                 "key": "script_requirement",
-                "filename": "03_脚本生成_JSON规范.md",
-                "title": "脚本 JSON / 分镜规范",
-                "desc": "控制脚本输出结构、voiceover 与 image_prompts 的字段规范。可用变量：{image_interval_seconds}。",
+                "filename": "03_鑴氭湰鐢熸垚_JSON瑙勮寖.md",
+                "title": "鑴氭湰 JSON / 鍒嗛暅瑙勮寖",
+                "desc": "鎺у埗鑴氭湰杈撳嚭缁撴瀯銆乿oiceover 涓?image_prompts 鐨勫瓧娈佃鑼冦€傚彲鐢ㄥ彉閲忥細{image_interval_seconds}銆?,
                 "default": SCRIPT_JSON_REQUIREMENT,
             },
             {
                 "key": "voiceover_polish",
-                "filename": "04_台词润色提示词.md",
-                "title": "台词润色提示词",
-                "desc": "控制台词如何变得更通俗、地道，同时保留图号、结构和原意。可用变量：{episode_json}、{script_json}、{voiceover_text}。",
+                "filename": "04_鍙拌瘝娑﹁壊鎻愮ず璇?md",
+                "title": "鍙拌瘝娑﹁壊鎻愮ず璇?,
+                "desc": "鎺у埗鍙拌瘝濡備綍鍙樺緱鏇撮€氫織銆佸湴閬擄紝鍚屾椂淇濈暀鍥惧彿銆佺粨鏋勫拰鍘熸剰銆傚彲鐢ㄥ彉閲忥細{episode_json}銆亄script_json}銆亄voiceover_text}銆?,
                 "default": VOICEOVER_POLISH_PROMPT,
             },
             {
                 "key": "postprocess_spec",
-                "filename": "05_后处理规范.json",
-                "title": "后处理规范",
-                "desc": "控制封面/片尾/分集封面的完整后处理参数：品牌文案、尺寸规格、坐标、字号、颜色、阴影、边框、暗角、裁剪、品牌栏、片尾 CTA。保存后重跑后处理即可生效。",
+                "filename": "05_鍚庡鐞嗚鑼?json",
+                "title": "鍚庡鐞嗚鑼?,
+                "desc": "鎺у埗灏侀潰/鐗囧熬/鍒嗛泦灏侀潰鐨勫畬鏁村悗澶勭悊鍙傛暟锛氬搧鐗屾枃妗堛€佸昂瀵歌鏍笺€佸潗鏍囥€佸瓧鍙枫€侀鑹层€侀槾褰便€佽竟妗嗐€佹殫瑙掋€佽鍓€佸搧鐗屾爮銆佺墖灏?CTA銆備繚瀛樺悗閲嶈窇鍚庡鐞嗗嵆鍙敓鏁堛€?,
                 "default": default_global_postprocess_spec_text(),
             },
             {
                 "key": "transition_summary_prompt",
-                "filename": "06_承接预告总结提示词.md",
-                "title": "承接预告提示词",
-                "desc": "控制拆分后 A1 开头承接、C 结尾预告如何由大模型总结。",
+                "filename": "06_鎵挎帴棰勫憡鎬荤粨鎻愮ず璇?md",
+                "title": "鎵挎帴棰勫憡鎻愮ず璇?,
+                "desc": "鎺у埗鎷嗗垎鍚?A1 寮€澶存壙鎺ャ€丆 缁撳熬棰勫憡濡備綍鐢卞ぇ妯″瀷鎬荤粨銆?,
                 "default": _default_transition_prompt(),
             },
             {
                 "key": "split_title_prompt",
-                "filename": "07_分集本集名提示词.md",
-                "title": "分集本集名提示词",
-                "desc": "控制每个 3~5 分钟分集如何根据本集 LRC/台词生成封面与首页显示的本集名。可用变量：{book_title}、{chapter_label}、{part_no}、{current_summary}、{lrc_payload}。",
+                "filename": "07_鍒嗛泦鏈泦鍚嶆彁绀鸿瘝.md",
+                "title": "鍒嗛泦鏈泦鍚嶆彁绀鸿瘝",
+                "desc": "鎺у埗姣忎釜 3~5 鍒嗛挓鍒嗛泦濡備綍鏍规嵁鏈泦 LRC/鍙拌瘝鐢熸垚灏侀潰涓庨椤垫樉绀虹殑鏈泦鍚嶃€傚彲鐢ㄥ彉閲忥細{book_title}銆亄chapter_label}銆亄part_no}銆亄current_summary}銆亄lrc_payload}銆?,
                 "default": default_split_title_prompt(),
             },
             {
                 "key": "split_voiceover_polish_prompt",
-                "filename": "08_分集台词润色提示词.md",
-                "title": "分集台词润色提示词",
-                "desc": "控制拆分后每个分集的一次润色、A1/C 简化、33%/67% 留存钩子。可用变量：{title}、{part_no}、{prev_summary}、{current_summary}、{next_title}、{next_summary}、{previous_context}、{next_context}、{hook_target_payload}、{payload}。",
+                "filename": "08_鍒嗛泦鍙拌瘝娑﹁壊鎻愮ず璇?md",
+                "title": "鍒嗛泦鍙拌瘝娑﹁壊鎻愮ず璇?,
+                "desc": "鎺у埗鎷嗗垎鍚庢瘡涓垎闆嗙殑涓€娆℃鼎鑹层€丄1/C 绠€鍖栥€?3%/67% 鐣欏瓨閽╁瓙銆傚彲鐢ㄥ彉閲忥細{title}銆亄part_no}銆亄prev_summary}銆亄current_summary}銆亄next_title}銆亄next_summary}銆亄previous_context}銆亄next_context}銆亄hook_target_payload}銆亄payload}銆?,
                 "default": default_split_polish_prompt(),
             },
             {
                 "key": "split_final_polish_prompt",
-                "filename": "12_DeepSeek终稿润色提示词.md",
-                "title": "DeepSeek 终稿润色提示词",
-                "desc": "最终检查每集钩子、开篇、主题、结尾预告的整体过渡；保留 no、image_id 与图片文件名对应。可用变量：{book_title}、{chapter_label}、{title}、{part_no}、{prev_summary}、{current_summary}、{next_title}、{next_summary}、{previous_context}、{next_context}、{opening_context}、{closing_context}、{payload}。",
+                "filename": "12_DeepSeek缁堢娑﹁壊鎻愮ず璇?md",
+                "title": "DeepSeek 缁堢娑﹁壊鎻愮ず璇?,
+                "desc": "鏈€缁堟鏌ユ瘡闆嗛挬瀛愩€佸紑绡囥€佷富棰樸€佺粨灏鹃鍛婄殑鏁翠綋杩囨浮锛涗繚鐣?no銆乮mage_id 涓庡浘鐗囨枃浠跺悕瀵瑰簲銆傚彲鐢ㄥ彉閲忥細{book_title}銆亄chapter_label}銆亄title}銆亄part_no}銆亄prev_summary}銆亄current_summary}銆亄next_title}銆亄next_summary}銆亄previous_context}銆亄next_context}銆亄opening_context}銆亄closing_context}銆亄payload}銆?,
                 "default": default_final_polish_prompt(),
             },
             {
                 "key": "book_final_summary_prompt",
-                "filename": "09_全书结尾总结提示词.md",
-                "title": "全书结尾总结提示词",
-                "desc": "控制全书最后一集 C 结尾如何生成全书总结。可用变量：{book_title}、{current_summary}、{payload}。",
+                "filename": "09_鍏ㄤ功缁撳熬鎬荤粨鎻愮ず璇?md",
+                "title": "鍏ㄤ功缁撳熬鎬荤粨鎻愮ず璇?,
+                "desc": "鎺у埗鍏ㄤ功鏈€鍚庝竴闆?C 缁撳熬濡備綍鐢熸垚鍏ㄤ功鎬荤粨銆傚彲鐢ㄥ彉閲忥細{book_title}銆亄current_summary}銆亄payload}銆?,
                 "default": default_book_final_summary_prompt(),
             },
             {
                 "key": "ac_master_prompt",
-                "filename": "10_封面母图提示词.md",
-                "title": "封面母图提示词",
-                "desc": "控制 A/C 共用母图的生图提示词。可用变量：{manuscript}、{book_title}、{episode_title}、{chapter_summary}。",
+                "filename": "10_灏侀潰姣嶅浘鎻愮ず璇?md",
+                "title": "灏侀潰姣嶅浘鎻愮ず璇?,
+                "desc": "鎺у埗 A/C 鍏辩敤姣嶅浘鐨勭敓鍥炬彁绀鸿瘝銆傚彲鐢ㄥ彉閲忥細{manuscript}銆亄book_title}銆亄episode_title}銆亄chapter_summary}銆?,
                 "default": default_ac_master_prompt(),
             },
             {
                 "key": "deterministic_episode_prompt",
-                "filename": "14_本地确定性脚本提示词模板.md",
-                "title": "本地确定性脚本模板",
-                "desc": "当分集提示词模型关闭、dry-run 或模型失败回退时使用。可用变量：{book_title}、{episode_no}、{episode_title}、{source_labels}、{hook}、{main_points}、{image_interval_seconds}。",
+                "filename": "14_鏈湴纭畾鎬ц剼鏈彁绀鸿瘝妯℃澘.md",
+                "title": "鏈湴纭畾鎬ц剼鏈ā鏉?,
+                "desc": "褰撳垎闆嗘彁绀鸿瘝妯″瀷鍏抽棴銆乨ry-run 鎴栨ā鍨嬪け璐ュ洖閫€鏃朵娇鐢ㄣ€傚彲鐢ㄥ彉閲忥細{book_title}銆亄episode_no}銆亄episode_title}銆亄source_labels}銆亄hook}銆亄main_points}銆亄image_interval_seconds}銆?,
                 "default": default_deterministic_episode_prompt_template(),
             },
             {
                 "key": "generation_rules",
-                "filename": "生成规则配置.json",
+                "filename": "鐢熸垚瑙勫垯閰嶇疆.json",
                 "folder": "config",
-                "title": "生成规则配置",
-                "desc": "控制程序自动追加给脚本生成、覆盖补救、绘图提示词的规则。优先级高于程序兜底默认值。",
+                "title": "鐢熸垚瑙勫垯閰嶇疆",
+                "desc": "鎺у埗绋嬪簭鑷姩杩藉姞缁欒剼鏈敓鎴愩€佽鐩栬ˉ鏁戙€佺粯鍥炬彁绀鸿瘝鐨勮鍒欍€備紭鍏堢骇楂樹簬绋嬪簭鍏滃簳榛樿鍊笺€?,
                 "default": json.dumps(default_generation_rules(), ensure_ascii=False, indent=2),
             },
             {
                 "key": "copywriting_config",
-                "filename": "文案风格配置.json",
+                "filename": "鏂囨椋庢牸閰嶇疆.json",
                 "folder": "config",
-                "title": "文案风格配置",
-                "desc": "控制品牌名、关注语、分集开头/结尾模板、是否显示前缀等。保存后重新拆分脚本即可生效。",
+                "title": "鏂囨椋庢牸閰嶇疆",
+                "desc": "鎺у埗鍝佺墝鍚嶃€佸叧娉ㄨ銆佸垎闆嗗紑澶?缁撳熬妯℃澘銆佹槸鍚︽樉绀哄墠缂€绛夈€備繚瀛樺悗閲嶆柊鎷嗗垎鑴氭湰鍗冲彲鐢熸晥銆?,
                 "default": "{}",
             },
             {
                 "key": "postprocess_override",
-                "filename": "后处理风格覆盖.json",
+                "filename": "鍚庡鐞嗛鏍艰鐩?json",
                 "folder": "config",
-                "title": "后处理风格覆盖",
-                "desc": "后处理局部覆盖配置。优先级高于 05_后处理规范.json，适合临时微调字体、颜色、边框、装饰开关。",
+                "title": "鍚庡鐞嗛鏍艰鐩?,
+                "desc": "鍚庡鐞嗗眬閮ㄨ鐩栭厤缃€備紭鍏堢骇楂樹簬 05_鍚庡鐞嗚鑼?json锛岄€傚悎涓存椂寰皟瀛椾綋銆侀鑹层€佽竟妗嗐€佽楗板紑鍏炽€?,
                 "default": "{}",
             },
             {
                 "key": "runtime_switches",
-                "filename": "运行开关.json",
+                "filename": "杩愯寮€鍏?json",
                 "folder": "config",
-                "title": "运行开关",
-                "desc": "控制是否启用配置覆盖、高保真装饰等运行开关。",
+                "title": "杩愯寮€鍏?,
+                "desc": "鎺у埗鏄惁鍚敤閰嶇疆瑕嗙洊銆侀珮淇濈湡瑁呴グ绛夎繍琛屽紑鍏炽€?,
                 "default": "{}",
             },
         ]
@@ -549,7 +548,7 @@ class AutoMediaGUI(tk.Tk):
                     json.loads(text or "{}")
                 except Exception as exc:
                     title = str(spec.get("title") or key)
-                    messagebox.showerror("JSON 格式有误", f"请先修正“{title}”的 JSON 格式。\n\n{exc}")
+                    messagebox.showerror("JSON 鏍煎紡鏈夎", f"璇峰厛淇鈥渰title}鈥濈殑 JSON 鏍煎紡銆俓n\n{exc}")
                     return False
             if key == "postprocess_spec":
                 self.postprocess_spec_text = text
@@ -568,12 +567,12 @@ class AutoMediaGUI(tk.Tk):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(str(text or "").strip() + "\n", encoding="utf-8")
         if show_log:
-            self._append_log(f"提示词与配置已保存：{PROMPTS_DIR}；{CONFIG_DIR}")
+            self._append_log(f"鎻愮ず璇嶄笌閰嶇疆宸蹭繚瀛橈細{PROMPTS_DIR}锛泏CONFIG_DIR}")
 
     def _save_prompt_editor_files(self) -> None:
         if self._sync_prompt_editors_to_memory(save_files=True, show_log=True):
             self._save_settings()
-            messagebox.showinfo("已保存", f"提示词和配置已保存到：\n{PROMPTS_DIR}\n{CONFIG_DIR}")
+            messagebox.showinfo("宸蹭繚瀛?, f"鎻愮ず璇嶅拰閰嶇疆宸蹭繚瀛樺埌锛歕n{PROMPTS_DIR}\n{CONFIG_DIR}")
 
     def _restore_current_prompt_default(self) -> None:
         if not self.prompt_notebook or not self.prompt_tabs:
@@ -599,7 +598,7 @@ class AutoMediaGUI(tk.Tk):
             else:
                 subprocess.Popen(["xdg-open", str(PROMPTS_DIR)])
         except Exception as exc:
-            messagebox.showerror("无法打开提示词目录", str(exc))
+            messagebox.showerror("鏃犳硶鎵撳紑鎻愮ず璇嶇洰褰?, str(exc))
 
     def _build_ui(self) -> None:
         self.geometry("1320x900")
@@ -613,33 +612,33 @@ class AutoMediaGUI(tk.Tk):
         header = ttk.Frame(root)
         header.grid(row=0, column=0, sticky="ew")
         header.columnconfigure(1, weight=1)
-        ttk.Label(header, text="书籍解读短视频自动生成", style="Title.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(header, text="涔︾睄瑙ｈ鐭棰戣嚜鍔ㄧ敓鎴?, style="Title.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Label(
             header,
-            text="PDF → 大纲 → 脚本 → 润色 → 绘图 → 后处理",
+            text="PDF 鈫?澶х翰 鈫?鑴氭湰 鈫?娑﹁壊 鈫?缁樺浘 鈫?鍚庡鐞?,
             foreground="#555",
         ).grid(row=0, column=1, sticky="w", padx=(18, 0))
 
-        action_bar = ttk.LabelFrame(root, text="运行", style="Section.TLabelframe")
+        action_bar = ttk.LabelFrame(root, text="杩愯", style="Section.TLabelframe")
         action_bar.grid(row=1, column=0, sticky="ew", pady=(10, 10))
         action_bar.columnconfigure(9, weight=1)
 
-        self.run_button_top = ttk.Button(action_bar, text="开始运行", command=self._run, style="Run.TButton", width=14)
+        self.run_button_top = ttk.Button(action_bar, text="寮€濮嬭繍琛?, command=self._run, style="Run.TButton", width=14)
         self.run_button_top.grid(row=0, column=0, padx=(12, 8), pady=9)
-        self.test_button_top = ttk.Button(action_bar, text="测试运行", command=self._run_quick_test, width=12)
+        self.test_button_top = ttk.Button(action_bar, text="娴嬭瘯杩愯", command=self._run_quick_test, width=12)
         self.test_button_top.grid(row=0, column=1, padx=(0, 8), pady=9)
-        self.stop_button_top = ttk.Button(action_bar, text="停止", command=self._stop, style="Stop.TButton", state="disabled", width=10)
+        self.stop_button_top = ttk.Button(action_bar, text="鍋滄", command=self._stop, style="Stop.TButton", state="disabled", width=10)
         self.stop_button_top.grid(row=0, column=2, padx=(0, 8), pady=9)
-        self.open_button = ttk.Button(action_bar, text="打开输出", command=self._open_output_dir, width=12)
+        self.open_button = ttk.Button(action_bar, text="鎵撳紑杈撳嚭", command=self._open_output_dir, width=12)
         self.open_button.grid(row=0, column=3, padx=(0, 8), pady=9)
-        self.clear_button = ttk.Button(action_bar, text="清空输出", command=self._clear_output_dir, width=12)
+        self.clear_button = ttk.Button(action_bar, text="娓呯┖杈撳嚭", command=self._clear_output_dir, width=12)
         self.clear_button.grid(row=0, column=4, padx=(0, 8), pady=9)
 
         ttk.Separator(action_bar, orient="vertical").grid(row=0, column=5, sticky="ns", padx=(4, 12), pady=7)
-        ttk.Button(action_bar, text="提示词", command=self._show_prompts, width=10).grid(row=0, column=6, padx=(0, 8), pady=9)
-        ttk.Button(action_bar, text="视觉", command=self._show_visual, width=10).grid(row=0, column=7, padx=(0, 8), pady=9)
+        ttk.Button(action_bar, text="鎻愮ず璇?, command=self._show_prompts, width=10).grid(row=0, column=6, padx=(0, 8), pady=9)
+        ttk.Button(action_bar, text="瑙嗚", command=self._show_visual, width=10).grid(row=0, column=7, padx=(0, 8), pady=9)
         ttk.Button(action_bar, text="Key", command=self._show_key_manager, width=8).grid(row=0, column=8, padx=(0, 12), pady=9)
-        ttk.Label(action_bar, text="测试运行：先生成全文故事线大纲，B图只画一张，仍执行拆分/打包/邮件。", foreground="#555").grid(row=0, column=9, sticky="w", padx=(0, 10))
+        ttk.Label(action_bar, text="娴嬭瘯杩愯锛氬厛鐢熸垚鍏ㄦ枃鏁呬簨绾垮ぇ绾诧紝B鍥惧彧鐢讳竴寮狅紝浠嶆墽琛屾媶鍒?鎵撳寘/閭欢銆?, foreground="#555").grid(row=0, column=9, sticky="w", padx=(0, 10))
 
         # Keep old attribute names used by _set_running_state.
         self.run_button = self.run_button_top
@@ -691,11 +690,11 @@ class AutoMediaGUI(tk.Tk):
         control_panel.columnconfigure(0, weight=1)
         control_panel.rowconfigure(1, weight=1)
 
-        input_box = ttk.LabelFrame(control_panel, text="输入", style="Section.TLabelframe")
+        input_box = ttk.LabelFrame(control_panel, text="杈撳叆", style="Section.TLabelframe")
         input_box.grid(row=0, column=0, sticky="ew", pady=(0, 10))
         input_box.columnconfigure(1, weight=1)
-        self._path_row(input_box, 0, "书籍 PDF", self.book_var, self._browse_book, "选择一本 PDF 书籍。大纲和脚本都会基于这本书生成。")
-        self._path_row(input_box, 1, "输出目录", self.out_var, self._browse_out, "所有结果都会保存到这个目录，不会覆盖原 PDF。", folder=True)
+        self._path_row(input_box, 0, "涔︾睄 PDF", self.book_var, self._browse_book, "閫夋嫨涓€鏈?PDF 涔︾睄銆傚ぇ绾插拰鑴氭湰閮戒細鍩轰簬杩欐湰涔︾敓鎴愩€?)
+        self._path_row(input_box, 1, "杈撳嚭鐩綍", self.out_var, self._browse_out, "鎵€鏈夌粨鏋滈兘浼氫繚瀛樺埌杩欎釜鐩綍锛屼笉浼氳鐩栧師 PDF銆?, folder=True)
 
         config_stack = ttk.Frame(control_panel)
         config_stack.grid(row=1, column=0, sticky="nsew")
@@ -704,19 +703,19 @@ class AutoMediaGUI(tk.Tk):
         config_stack.rowconfigure(1, weight=0)
         config_stack.rowconfigure(2, weight=1)
 
-        model_box = ttk.LabelFrame(config_stack, text="模型", style="Section.TLabelframe")
+        model_box = ttk.LabelFrame(config_stack, text="妯″瀷", style="Section.TLabelframe")
         model_box.grid(row=0, column=0, sticky="ew", pady=(0, 10))
         self._build_models(model_box)
 
-        email_box = ttk.LabelFrame(config_stack, text="邮箱发送", style="Section.TLabelframe")
+        email_box = ttk.LabelFrame(config_stack, text="閭鍙戦€?, style="Section.TLabelframe")
         email_box.grid(row=1, column=0, sticky="ew", pady=(0, 10))
         self._build_email_config(email_box)
 
-        param_box = ttk.LabelFrame(config_stack, text="运行选项", style="Section.TLabelframe")
+        param_box = ttk.LabelFrame(config_stack, text="杩愯閫夐」", style="Section.TLabelframe")
         param_box.grid(row=2, column=0, sticky="nsew")
         self._build_params(param_box)
 
-        log_box = ttk.LabelFrame(right, text="日志", style="Section.TLabelframe")
+        log_box = ttk.LabelFrame(right, text="鏃ュ織", style="Section.TLabelframe")
         log_box.grid(row=0, column=0, sticky="nsew")
         log_box.rowconfigure(1, weight=1)
         log_box.columnconfigure(0, weight=1)
@@ -724,13 +723,13 @@ class AutoMediaGUI(tk.Tk):
         log_toolbar = ttk.Frame(log_box)
         log_toolbar.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 4))
         log_toolbar.columnconfigure(1, weight=1)
-        ttk.Button(log_toolbar, text="清空日志", command=self._clear_log).grid(row=0, column=0, padx=(0, 8))
-        ttk.Label(log_toolbar, text="运行状态和错误会显示在这里", foreground="#666").grid(row=0, column=1, sticky="e")
+        ttk.Button(log_toolbar, text="娓呯┖鏃ュ織", command=self._clear_log).grid(row=0, column=0, padx=(0, 8))
+        ttk.Label(log_toolbar, text="杩愯鐘舵€佸拰閿欒浼氭樉绀哄湪杩欓噷", foreground="#666").grid(row=0, column=1, sticky="e")
 
         self.log_text = scrolledtext.ScrolledText(log_box, wrap="word", font=("Consolas", 10), height=22)
         self.log_text.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
-        self.log_text.insert("end", "准备就绪。默认模型：大纲 Gemini，脚本 GPT-5.5，绘图 GPT-image2，台词润色 DeepSeek V4 Pro。\n")
-        self.log_text.insert("end", "高级设置可通过顶部“提示词”和“视觉”打开。\n")
+        self.log_text.insert("end", "鍑嗗灏辩华銆傞粯璁ゆā鍨嬶細澶х翰 Gemini锛岃剼鏈?GPT-5.5锛岀粯鍥?GPT-image2锛屽彴璇嶆鼎鑹?DeepSeek V4 Pro銆俓n")
+        self.log_text.insert("end", "楂樼骇璁剧疆鍙€氳繃椤堕儴鈥滄彁绀鸿瘝鈥濆拰鈥滆瑙夆€濇墦寮€銆俓n")
         self.log_text.configure(state="disabled")
 
         status_bar = ttk.Frame(root)
@@ -744,11 +743,11 @@ class AutoMediaGUI(tk.Tk):
         toolbar = ttk.Frame(parent)
         toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         toolbar.columnconfigure(4, weight=1)
-        ttk.Button(toolbar, text="保存到提示词文件", command=self._save_prompt_editor_files, style="Run.TButton").grid(row=0, column=0, padx=(0, 8))
-        ttk.Button(toolbar, text="从文件重新加载", command=lambda: self._reload_prompt_files(update_editors=True)).grid(row=0, column=1, padx=(0, 8))
-        ttk.Button(toolbar, text="恢复当前页默认", command=self._restore_current_prompt_default).grid(row=0, column=2, padx=(0, 8))
-        ttk.Button(toolbar, text="打开提示词文件夹", command=self._open_prompts_dir).grid(row=0, column=3, padx=(0, 8))
-        ttk.Label(toolbar, text="保存后不需要改程序；重跑对应步骤即可生效。", style="Muted.TLabel").grid(row=0, column=4, sticky="e")
+        ttk.Button(toolbar, text="淇濆瓨鍒版彁绀鸿瘝鏂囦欢", command=self._save_prompt_editor_files, style="Run.TButton").grid(row=0, column=0, padx=(0, 8))
+        ttk.Button(toolbar, text="浠庢枃浠堕噸鏂板姞杞?, command=lambda: self._reload_prompt_files(update_editors=True)).grid(row=0, column=1, padx=(0, 8))
+        ttk.Button(toolbar, text="鎭㈠褰撳墠椤甸粯璁?, command=self._restore_current_prompt_default).grid(row=0, column=2, padx=(0, 8))
+        ttk.Button(toolbar, text="鎵撳紑鎻愮ず璇嶆枃浠跺す", command=self._open_prompts_dir).grid(row=0, column=3, padx=(0, 8))
+        ttk.Label(toolbar, text="淇濆瓨鍚庝笉闇€瑕佹敼绋嬪簭锛涢噸璺戝搴旀楠ゅ嵆鍙敓鏁堛€?, style="Muted.TLabel").grid(row=0, column=4, sticky="e")
 
         self.prompt_notebook = ttk.Notebook(parent)
         self.prompt_notebook.grid(row=1, column=0, sticky="nsew")
@@ -759,7 +758,7 @@ class AutoMediaGUI(tk.Tk):
             frame = ttk.Frame(self.prompt_notebook, padding=8)
             frame.rowconfigure(1, weight=1)
             frame.columnconfigure(0, weight=1)
-            desc = f"{spec['desc']}\n文件：{self._prompt_file_path(key)}"
+            desc = f"{spec['desc']}\n鏂囦欢锛歿self._prompt_file_path(key)}"
             ttk.Label(frame, text=desc, justify="left", wraplength=710, style="Muted.TLabel").grid(row=0, column=0, sticky="ew", pady=(0, 6))
             editor = scrolledtext.ScrolledText(frame, wrap="word", font=("Consolas", 10), undo=True, height=18)
             editor.grid(row=1, column=0, sticky="nsew")
@@ -772,35 +771,35 @@ class AutoMediaGUI(tk.Tk):
     def _visual_presets(self) -> dict[str, dict]:
         return {
             "magazine_prime": {
-                "label": "顶刊杂志",
+                "label": "椤跺垔鏉傚織",
                 "background": {"brightness": 0.92, "saturation": 0.98, "blur_px": 3, "vignette": 0.34, "top_darken": 0.18, "bottom_darken": 0.30},
                 "glass": {"opacity": 0.68, "blur_px": 14, "glow": 0.22},
                 "title": {"scale": 1.18, "glow": 0.18},
                 "ornaments": {"frame": True, "corner": False, "scanline": False, "progress_bar": False, "particle": False, "orb": False},
             },
             "warm_paper": {
-                "label": "暖纸书房",
+                "label": "鏆栫焊涔︽埧",
                 "background": {"brightness": 1.04, "saturation": 0.94, "blur_px": 2, "vignette": 0.15, "top_darken": 0.02, "bottom_darken": 0.07},
                 "glass": {"opacity": 0.90, "blur_px": 10, "glow": 0.16},
                 "title": {"scale": 1.08, "glow": 0.10},
                 "ornaments": {"frame": True, "corner": False, "scanline": False, "progress_bar": False, "particle": False, "orb": False},
             },
             "rational_social": {
-                "label": "理性社会",
+                "label": "鐞嗘€хぞ浼?,
                 "background": {"brightness": 0.86, "saturation": 0.90, "blur_px": 3, "vignette": 0.34, "top_darken": 0.14, "bottom_darken": 0.22},
                 "glass": {"opacity": 0.86, "blur_px": 12, "glow": 0.22},
                 "title": {"scale": 1.10, "glow": 0.12},
                 "ornaments": {"frame": True, "corner": False, "scanline": False, "progress_bar": False, "particle": False, "orb": False},
             },
             "olive_reading": {
-                "label": "草木书香",
+                "label": "鑽夋湪涔﹂",
                 "background": {"brightness": 1.02, "saturation": 0.88, "blur_px": 2, "vignette": 0.16, "top_darken": 0.02, "bottom_darken": 0.06},
                 "glass": {"opacity": 0.88, "blur_px": 10, "glow": 0.14},
                 "title": {"scale": 1.06, "glow": 0.10},
                 "ornaments": {"frame": True, "corner": False, "scanline": False, "progress_bar": False, "particle": False, "orb": False},
             },
             "humanities_paper": {
-                "label": "人文旧书",
+                "label": "浜烘枃鏃т功",
                 "background": {"brightness": 0.98, "saturation": 0.86, "blur_px": 2, "vignette": 0.22, "top_darken": 0.06, "bottom_darken": 0.10},
                 "glass": {"opacity": 0.88, "blur_px": 10, "glow": 0.18},
                 "title": {"scale": 1.06, "glow": 0.10},
@@ -909,9 +908,9 @@ class AutoMediaGUI(tk.Tk):
         if editor is not None:
             editor.delete("1.0", "end")
             editor.insert("1.0", self.postprocess_spec_text)
-        self._append_log("已保存视觉后处理参数；勾选‘只重做封面/片尾后处理’后运行即可批量重渲染 A/C。")
+        self._append_log("宸蹭繚瀛樿瑙夊悗澶勭悊鍙傛暟锛涘嬀閫夆€樺彧閲嶅仛灏侀潰/鐗囧熬鍚庡鐞嗏€欏悗杩愯鍗冲彲鎵归噺閲嶆覆鏌?A/C銆?)
         if show_message:
-            messagebox.showinfo("视觉后处理已保存", "已写入 prompts/05_后处理规范.json。\n重跑后处理即可生成新 A/C 图片。")
+            messagebox.showinfo("瑙嗚鍚庡鐞嗗凡淇濆瓨", "宸插啓鍏?prompts/05_鍚庡鐞嗚鑼?json銆俓n閲嶈窇鍚庡鐞嗗嵆鍙敓鎴愭柊 A/C 鍥剧墖銆?)
 
     def _apply_visual_preset(self, _event=None) -> None:
         preset = self._visual_presets().get(self.visual_preset_var.get(), self._visual_presets()["magazine_prime"])
@@ -946,13 +945,13 @@ class AutoMediaGUI(tk.Tk):
         toolbar = ttk.Frame(parent)
         toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         toolbar.columnconfigure(4, weight=1)
-        ttk.Label(toolbar, text="风格预设").grid(row=0, column=0, sticky="w", padx=(0, 8))
+        ttk.Label(toolbar, text="椋庢牸棰勮").grid(row=0, column=0, sticky="w", padx=(0, 8))
         preset_combo = ttk.Combobox(toolbar, textvariable=self.visual_preset_var, values=list(self._visual_presets().keys()), state="readonly", width=18)
         preset_combo.grid(row=0, column=1, sticky="w", padx=(0, 8))
         preset_combo.bind("<<ComboboxSelected>>", self._apply_visual_preset)
-        ttk.Button(toolbar, text="应用预设", command=self._apply_visual_preset).grid(row=0, column=2, padx=(0, 8))
-        ttk.Button(toolbar, text="保存视觉参数", command=self._save_visual_controls_from_vars, style="Run.TButton").grid(row=0, column=3, padx=(0, 8))
-        ttk.Button(toolbar, text="从规范重新加载", command=self._load_visual_controls_to_vars).grid(row=0, column=4, sticky="e")
+        ttk.Button(toolbar, text="搴旂敤棰勮", command=self._apply_visual_preset).grid(row=0, column=2, padx=(0, 8))
+        ttk.Button(toolbar, text="淇濆瓨瑙嗚鍙傛暟", command=self._save_visual_controls_from_vars, style="Run.TButton").grid(row=0, column=3, padx=(0, 8))
+        ttk.Button(toolbar, text="浠庤鑼冮噸鏂板姞杞?, command=self._load_visual_controls_to_vars).grid(row=0, column=4, sticky="e")
 
         grid = ttk.Frame(parent)
         grid.grid(row=1, column=0, sticky="nsew")
@@ -960,41 +959,41 @@ class AutoMediaGUI(tk.Tk):
             grid.columnconfigure(col, weight=1)
         grid.rowconfigure(0, weight=1)
 
-        bg_box = ttk.LabelFrame(grid, text="背景 / 母图", style="Section.TLabelframe")
+        bg_box = ttk.LabelFrame(grid, text="鑳屾櫙 / 姣嶅浘", style="Section.TLabelframe")
         bg_box.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
         bg_box.columnconfigure(1, weight=1)
-        self._scale_row(bg_box, 0, "亮度", self.vc_bg_brightness_var, 0.30, 1.00, "提高后母图更清楚；太高会压低文字对比。")
-        self._scale_row(bg_box, 1, "饱和度", self.vc_bg_saturation_var, 0.70, 1.45, "控制母图色彩浓度。")
-        self._scale_row(bg_box, 2, "背景模糊", self.vc_bg_blur_var, 0.0, 24.0, "只影响辅助模糊层，让画面更有电影纵深。")
-        self._scale_row(bg_box, 3, "暗角", self.vc_vignette_var, 0.0, 0.90, "提高后边缘更暗，中心更聚焦。")
-        self._scale_row(bg_box, 4, "顶部压暗", self.vc_top_darken_var, 0.0, 0.90, "保护顶部书名和标签可读性。")
-        self._scale_row(bg_box, 5, "底部压暗", self.vc_bottom_darken_var, 0.0, 0.95, "保护底部品牌栏和 C 图 CTA。")
+        self._scale_row(bg_box, 0, "浜害", self.vc_bg_brightness_var, 0.30, 1.00, "鎻愰珮鍚庢瘝鍥炬洿娓呮锛涘お楂樹細鍘嬩綆鏂囧瓧瀵规瘮銆?)
+        self._scale_row(bg_box, 1, "楗卞拰搴?, self.vc_bg_saturation_var, 0.70, 1.45, "鎺у埗姣嶅浘鑹插僵娴撳害銆?)
+        self._scale_row(bg_box, 2, "鑳屾櫙妯＄硦", self.vc_bg_blur_var, 0.0, 24.0, "鍙奖鍝嶈緟鍔╂ā绯婂眰锛岃鐢婚潰鏇存湁鐢靛奖绾垫繁銆?)
+        self._scale_row(bg_box, 3, "鏆楄", self.vc_vignette_var, 0.0, 0.90, "鎻愰珮鍚庤竟缂樻洿鏆楋紝涓績鏇磋仛鐒︺€?)
+        self._scale_row(bg_box, 4, "椤堕儴鍘嬫殫", self.vc_top_darken_var, 0.0, 0.90, "淇濇姢椤堕儴涔﹀悕鍜屾爣绛惧彲璇绘€с€?)
+        self._scale_row(bg_box, 5, "搴曢儴鍘嬫殫", self.vc_bottom_darken_var, 0.0, 0.95, "淇濇姢搴曢儴鍝佺墝鏍忓拰 C 鍥?CTA銆?)
 
-        glass_box = ttk.LabelFrame(grid, text="玻璃控件 / 面板", style="Section.TLabelframe")
+        glass_box = ttk.LabelFrame(grid, text="鐜荤拑鎺т欢 / 闈㈡澘", style="Section.TLabelframe")
         glass_box.grid(row=0, column=1, sticky="nsew", padx=8)
         glass_box.columnconfigure(1, weight=1)
-        self._scale_row(glass_box, 0, "透明度", self.vc_glass_opacity_var, 0.25, 0.85, "越低越能露出母图；越高文字更稳。")
-        self._scale_row(glass_box, 1, "玻璃模糊", self.vc_glass_blur_var, 0.0, 32.0, "控制毛玻璃质感。")
-        self._scale_row(glass_box, 2, "发光强度", self.vc_glass_glow_var, 0.0, 1.00, "控制面板边缘的金色光晕。")
-        self._scale_row(glass_box, 3, "标题字号", self.vc_title_scale_var, 0.80, 1.45, "A2/C 主标题冲击力；长标题会自动缩字。")
-        self._scale_row(glass_box, 4, "标题辉光", self.vc_title_glow_var, 0.0, 1.00, "控制主标题描边和外发光。")
+        self._scale_row(glass_box, 0, "閫忔槑搴?, self.vc_glass_opacity_var, 0.25, 0.85, "瓒婁綆瓒婅兘闇插嚭姣嶅浘锛涜秺楂樻枃瀛楁洿绋炽€?)
+        self._scale_row(glass_box, 1, "鐜荤拑妯＄硦", self.vc_glass_blur_var, 0.0, 32.0, "鎺у埗姣涚幓鐠冭川鎰熴€?)
+        self._scale_row(glass_box, 2, "鍙戝厜寮哄害", self.vc_glass_glow_var, 0.0, 1.00, "鎺у埗闈㈡澘杈圭紭鐨勯噾鑹插厜鏅曘€?)
+        self._scale_row(glass_box, 3, "鏍囬瀛楀彿", self.vc_title_scale_var, 0.80, 1.45, "A2/C 涓绘爣棰樺啿鍑诲姏锛涢暱鏍囬浼氳嚜鍔ㄧ缉瀛椼€?)
+        self._scale_row(glass_box, 4, "鏍囬杈夊厜", self.vc_title_glow_var, 0.0, 1.00, "鎺у埗涓绘爣棰樻弿杈瑰拰澶栧彂鍏夈€?)
 
-        fx_box = ttk.LabelFrame(grid, text="炫酷控件", style="Section.TLabelframe")
+        fx_box = ttk.LabelFrame(grid, text="鐐叿鎺т欢", style="Section.TLabelframe")
         fx_box.grid(row=0, column=2, sticky="nsew", padx=(8, 0))
         checks = [
-            ("极简外框", self.vc_frame_var, "只保留一层金色外框；角标默认关闭，避免重复装饰。"),
-            ("扫描线", self.vc_scanline_var, "增加高级控件感，但不影响文字。"),
-            ("C 图进度条", self.vc_progress_var, "C 片尾 NEXT EPISODE 进度条。"),
-            ("粒子", self.vc_particle_var, "细小金色粒子，增加画面精致度。"),
-            ("光斑", self.vc_orb_var, "背景金色光斑，提升氛围。"),
+            ("鏋佺畝澶栨", self.vc_frame_var, "鍙繚鐣欎竴灞傞噾鑹插妗嗭紱瑙掓爣榛樿鍏抽棴锛岄伩鍏嶉噸澶嶈楗般€?),
+            ("鎵弿绾?, self.vc_scanline_var, "澧炲姞楂樼骇鎺т欢鎰燂紝浣嗕笉褰卞搷鏂囧瓧銆?),
+            ("C 鍥捐繘搴︽潯", self.vc_progress_var, "C 鐗囧熬 NEXT EPISODE 杩涘害鏉°€?),
+            ("绮掑瓙", self.vc_particle_var, "缁嗗皬閲戣壊绮掑瓙锛屽鍔犵敾闈㈢簿鑷村害銆?),
+            ("鍏夋枒", self.vc_orb_var, "鑳屾櫙閲戣壊鍏夋枒锛屾彁鍗囨皼鍥淬€?),
         ]
         for i, (text, var, tip) in enumerate(checks):
             cb = ttk.Checkbutton(fx_box, text=text, variable=var)
             cb.grid(row=i, column=0, sticky="w", padx=10, pady=7)
             ToolTip(cb, tip)
         note = (
-            "推荐流程：选择预设 → 微调亮度/透明度/标题字号 → 保存视觉参数 → 勾选‘只重做封面/片尾后处理’运行。\n"
-            "本页参数会直接写入 prompts/05_后处理规范.json 的 visual_controls。"
+            "鎺ㄨ崘娴佺▼锛氶€夋嫨棰勮 鈫?寰皟浜害/閫忔槑搴?鏍囬瀛楀彿 鈫?淇濆瓨瑙嗚鍙傛暟 鈫?鍕鹃€夆€樺彧閲嶅仛灏侀潰/鐗囧熬鍚庡鐞嗏€欒繍琛屻€俓n"
+            "鏈〉鍙傛暟浼氱洿鎺ュ啓鍏?prompts/05_鍚庡鐞嗚鑼?json 鐨?visual_controls銆?
         )
         ttk.Label(fx_box, text=note, justify="left", wraplength=300, style="Muted.TLabel").grid(row=len(checks), column=0, sticky="ew", padx=10, pady=(18, 8))
         self._load_visual_controls_to_vars()
@@ -1004,7 +1003,7 @@ class AutoMediaGUI(tk.Tk):
         entry = ttk.Entry(parent, textvariable=var)
         entry.grid(row=row, column=1, sticky="ew", padx=8, pady=7)
         ToolTip(entry, tip)
-        ttk.Button(parent, text="选择文件夹" if folder else "选择文件", command=command).grid(row=row, column=2, padx=10, pady=7)
+        ttk.Button(parent, text="閫夋嫨鏂囦欢澶? if folder else "閫夋嫨鏂囦欢", command=command).grid(row=row, column=2, padx=10, pady=7)
 
     def _default_out_for_book_text(self, book_text: str) -> str:
         book_text = str(book_text or "").strip().strip('"')
@@ -1049,34 +1048,34 @@ class AutoMediaGUI(tk.Tk):
 
     def _build_params(self, parent: ttk.Frame) -> None:
         parent.columnconfigure(1, weight=1)
-        ttk.Label(parent, text="重试次数").grid(row=0, column=0, sticky="w", padx=10, pady=7)
+        ttk.Label(parent, text="閲嶈瘯娆℃暟").grid(row=0, column=0, sticky="w", padx=10, pady=7)
         retry_spin = ttk.Spinbox(parent, from_=0, to=10, textvariable=self.max_retries_var, width=10)
         retry_spin.grid(row=0, column=1, sticky="w", padx=8, pady=7)
-        ToolTip(retry_spin, "模型接口偶发断开时自动重试的次数。")
+        ToolTip(retry_spin, "妯″瀷鎺ュ彛鍋跺彂鏂紑鏃惰嚜鍔ㄩ噸璇曠殑娆℃暟銆?)
 
-        ttk.Label(parent, text="配图节奏").grid(row=1, column=0, sticky="w", padx=10, pady=7)
+        ttk.Label(parent, text="閰嶅浘鑺傚").grid(row=1, column=0, sticky="w", padx=10, pady=7)
         cadence_entry = ttk.Entry(parent, textvariable=self.image_interval_var, width=12)
         cadence_entry.grid(row=1, column=1, sticky="w", padx=8, pady=7)
-        ToolTip(cadence_entry, "默认 3-8，表示每句台词尽量对应 1 幕画面。")
+        ToolTip(cadence_entry, "榛樿 3-8锛岃〃绀烘瘡鍙ュ彴璇嶅敖閲忓搴?1 骞曠敾闈€?)
 
-        check = ttk.Checkbutton(parent, text="跳过生图，只输出绘图提示词", variable=self.skip_images_var)
+        check = ttk.Checkbutton(parent, text="璺宠繃鐢熷浘锛屽彧杈撳嚭缁樺浘鎻愮ず璇?, variable=self.skip_images_var)
         check.grid(row=2, column=0, columnspan=2, sticky="w", padx=10, pady=7)
-        ToolTip(check, "只生成文本和绘图提示词，不调用绘图接口。")
+        ToolTip(check, "鍙敓鎴愭枃鏈拰缁樺浘鎻愮ず璇嶏紝涓嶈皟鐢ㄧ粯鍥炬帴鍙ｃ€?)
 
-        ttk.Checkbutton(parent, text="自动断点续跑", variable=self.auto_resume_var).grid(row=3, column=0, sticky="w", padx=10, pady=7)
-        ttk.Checkbutton(parent, text="跳过已生成内容", variable=self.skip_existing_text_var).grid(row=3, column=1, sticky="w", padx=8, pady=7)
-        ttk.Checkbutton(parent, text="只补缺失图片", variable=self.only_missing_images_var).grid(row=4, column=0, sticky="w", padx=10, pady=7)
-        ttk.Checkbutton(parent, text="只重做后处理", variable=self.only_postprocess_var).grid(row=4, column=1, sticky="w", padx=8, pady=7)
+        ttk.Checkbutton(parent, text="鑷姩鏂偣缁窇", variable=self.auto_resume_var).grid(row=3, column=0, sticky="w", padx=10, pady=7)
+        ttk.Checkbutton(parent, text="璺宠繃宸茬敓鎴愬唴瀹?, variable=self.skip_existing_text_var).grid(row=3, column=1, sticky="w", padx=8, pady=7)
+        ttk.Checkbutton(parent, text="鍙ˉ缂哄け鍥剧墖", variable=self.only_missing_images_var).grid(row=4, column=0, sticky="w", padx=10, pady=7)
+        ttk.Checkbutton(parent, text="鍙噸鍋氬悗澶勭悊", variable=self.only_postprocess_var).grid(row=4, column=1, sticky="w", padx=8, pady=7)
 
-        advanced = ttk.LabelFrame(parent, text="高级续作", style="Section.TLabelframe")
+        advanced = ttk.LabelFrame(parent, text="楂樼骇缁綔", style="Section.TLabelframe")
         advanced.grid(row=5, column=0, columnspan=2, sticky="ew", padx=10, pady=(10, 6))
         advanced.columnconfigure(1, weight=1)
-        ttk.Checkbutton(advanced, text="从已有文件夹继续", variable=self.continue_from_existing_folder_var).grid(row=0, column=0, sticky="w", padx=8, pady=5)
-        self._path_row(advanced, 1, "续作文件夹", self.continue_folder_var, self._browse_continue_folder, "可选择整个输出目录或某一集目录。", folder=True)
-        self._path_row(advanced, 2, "已有大纲 JSON", self.outline_json_var, self._browse_outline, "已有结构化大纲时使用；留空则先生成大纲。")
-        ttk.Label(advanced, text="起始集").grid(row=3, column=0, sticky="w", padx=8, pady=5)
+        ttk.Checkbutton(advanced, text="浠庡凡鏈夋枃浠跺す缁х画", variable=self.continue_from_existing_folder_var).grid(row=0, column=0, sticky="w", padx=8, pady=5)
+        self._path_row(advanced, 1, "缁綔鏂囦欢澶?, self.continue_folder_var, self._browse_continue_folder, "鍙€夋嫨鏁翠釜杈撳嚭鐩綍鎴栨煇涓€闆嗙洰褰曘€?, folder=True)
+        self._path_row(advanced, 2, "宸叉湁澶х翰 JSON", self.outline_json_var, self._browse_outline, "宸叉湁缁撴瀯鍖栧ぇ绾叉椂浣跨敤锛涚暀绌哄垯鍏堢敓鎴愬ぇ绾层€?)
+        ttk.Label(advanced, text="璧峰闆?).grid(row=3, column=0, sticky="w", padx=8, pady=5)
         ttk.Spinbox(advanced, from_=1, to=999, textvariable=self.start_episode_var, width=10).grid(row=3, column=1, sticky="w", padx=8, pady=5)
-        ttk.Label(advanced, text="起始步骤").grid(row=4, column=0, sticky="w", padx=8, pady=5)
+        ttk.Label(advanced, text="璧峰姝ラ").grid(row=4, column=0, sticky="w", padx=8, pady=5)
         stage_combo = ttk.Combobox(advanced, textvariable=self.start_stage_var, values=["outline", "split_pdf", "episode_prompt", "script", "polish", "images", "postprocess", "split_assets"], state="readonly", width=18)
         stage_combo.grid(row=4, column=1, sticky="w", padx=8, pady=5)
 
@@ -1084,64 +1083,64 @@ class AutoMediaGUI(tk.Tk):
         parent.columnconfigure(1, weight=1)
         parent.columnconfigure(3, weight=1)
 
-        enable = ttk.Checkbutton(parent, text="每集完成后打包发送邮件", variable=self.email_enabled_var)
+        enable = ttk.Checkbutton(parent, text="姣忛泦瀹屾垚鍚庢墦鍖呭彂閫侀偖浠?, variable=self.email_enabled_var)
         enable.grid(row=0, column=0, columnspan=4, sticky="w", padx=10, pady=(8, 5))
-        ToolTip(enable, "开启后，分集素材生成完成时会打包为 zip 并发送到指定邮箱。")
+        ToolTip(enable, "寮€鍚悗锛屽垎闆嗙礌鏉愮敓鎴愬畬鎴愭椂浼氭墦鍖呬负 zip 骞跺彂閫佸埌鎸囧畾閭銆?)
 
-        ttk.Label(parent, text="收件邮箱").grid(row=1, column=0, sticky="w", padx=10, pady=5)
+        ttk.Label(parent, text="鏀朵欢閭").grid(row=1, column=0, sticky="w", padx=10, pady=5)
         to_entry = ttk.Entry(parent, textvariable=self.email_to_var)
         to_entry.grid(row=1, column=1, columnspan=3, sticky="ew", padx=8, pady=5)
-        ToolTip(to_entry, "多个收件人用英文逗号分隔。默认测试邮箱：399467826@qq.com。")
+        ToolTip(to_entry, "澶氫釜鏀朵欢浜虹敤鑻辨枃閫楀彿鍒嗛殧銆傞粯璁ゆ祴璇曢偖绠憋細399467826@qq.com銆?)
 
         ttk.Label(parent, text="SMTP").grid(row=2, column=0, sticky="w", padx=10, pady=5)
         host_entry = ttk.Entry(parent, textvariable=self.email_smtp_host_var, width=18)
         host_entry.grid(row=2, column=1, sticky="ew", padx=8, pady=5)
-        ttk.Label(parent, text="端口").grid(row=2, column=2, sticky="w", padx=(6, 0), pady=5)
+        ttk.Label(parent, text="绔彛").grid(row=2, column=2, sticky="w", padx=(6, 0), pady=5)
         port_entry = ttk.Entry(parent, textvariable=self.email_smtp_port_var, width=8)
         port_entry.grid(row=2, column=3, sticky="w", padx=8, pady=5)
-        ToolTip(host_entry, "QQ 邮箱一般使用 smtp.qq.com。")
-        ToolTip(port_entry, "QQ 邮箱 SSL 端口通常为 465。")
+        ToolTip(host_entry, "QQ 閭涓€鑸娇鐢?smtp.qq.com銆?)
+        ToolTip(port_entry, "QQ 閭 SSL 绔彛閫氬父涓?465銆?)
 
-        ssl_check = ttk.Checkbutton(parent, text="使用 SSL", variable=self.email_use_ssl_var)
+        ssl_check = ttk.Checkbutton(parent, text="浣跨敤 SSL", variable=self.email_use_ssl_var)
         ssl_check.grid(row=3, column=0, sticky="w", padx=10, pady=5)
-        ttk.Label(parent, text="登录账号").grid(row=3, column=1, sticky="w", padx=8, pady=5)
+        ttk.Label(parent, text="鐧诲綍璐﹀彿").grid(row=3, column=1, sticky="w", padx=8, pady=5)
         user_entry = ttk.Entry(parent, textvariable=self.email_username_var)
         user_entry.grid(row=3, column=2, columnspan=2, sticky="ew", padx=8, pady=5)
-        ToolTip(user_entry, "通常填写发件邮箱完整地址，例如 你的QQ号@qq.com。")
+        ToolTip(user_entry, "閫氬父濉啓鍙戜欢閭瀹屾暣鍦板潃锛屼緥濡?浣犵殑QQ鍙稝qq.com銆?)
 
-        ttk.Label(parent, text="发件人").grid(row=4, column=0, sticky="w", padx=10, pady=5)
+        ttk.Label(parent, text="鍙戜欢浜?).grid(row=4, column=0, sticky="w", padx=10, pady=5)
         from_entry = ttk.Entry(parent, textvariable=self.email_from_var)
         from_entry.grid(row=4, column=1, sticky="ew", padx=8, pady=5)
-        ttk.Label(parent, text="附件上限MB").grid(row=4, column=2, sticky="w", padx=(6, 0), pady=5)
+        ttk.Label(parent, text="闄勪欢涓婇檺MB").grid(row=4, column=2, sticky="w", padx=(6, 0), pady=5)
         max_entry = ttk.Entry(parent, textvariable=self.email_max_mb_var, width=8)
         max_entry.grid(row=4, column=3, sticky="w", padx=8, pady=5)
-        ToolTip(from_entry, "可留空；留空时默认使用登录账号。")
-        ToolTip(max_entry, "超过此大小会跳过发送，避免邮箱拒收。")
+        ToolTip(from_entry, "鍙暀绌猴紱鐣欑┖鏃堕粯璁や娇鐢ㄧ櫥褰曡处鍙枫€?)
+        ToolTip(max_entry, "瓒呰繃姝ゅぇ灏忎細璺宠繃鍙戦€侊紝閬垮厤閭鎷掓敹銆?)
 
-        ttk.Label(parent, text="密码变量").grid(row=5, column=0, sticky="w", padx=10, pady=5)
+        ttk.Label(parent, text="瀵嗙爜鍙橀噺").grid(row=5, column=0, sticky="w", padx=10, pady=5)
         env_entry = ttk.Entry(parent, textvariable=self.email_password_env_var)
         env_entry.grid(row=5, column=1, sticky="ew", padx=8, pady=5)
-        ttk.Label(parent, text="密码文件").grid(row=5, column=2, sticky="w", padx=(6, 0), pady=5)
+        ttk.Label(parent, text="瀵嗙爜鏂囦欢").grid(row=5, column=2, sticky="w", padx=(6, 0), pady=5)
         file_entry = ttk.Entry(parent, textvariable=self.email_password_file_var)
         file_entry.grid(row=5, column=3, sticky="ew", padx=8, pady=5)
-        ToolTip(env_entry, "只保存环境变量名，不保存邮箱授权码本身。")
-        ToolTip(file_entry, "只保存文件路径。默认读取项目根目录 smtp_password.txt。")
+        ToolTip(env_entry, "鍙繚瀛樼幆澧冨彉閲忓悕锛屼笉淇濆瓨閭鎺堟潈鐮佹湰韬€?)
+        ToolTip(file_entry, "鍙繚瀛樻枃浠惰矾寰勩€傞粯璁よ鍙栭」鐩牴鐩綍 smtp_password.txt銆?)
 
-        ttk.Label(parent, text="邮件标题").grid(row=6, column=0, sticky="w", padx=10, pady=5)
+        ttk.Label(parent, text="閭欢鏍囬").grid(row=6, column=0, sticky="w", padx=10, pady=5)
         subject_entry = ttk.Entry(parent, textvariable=self.email_subject_template_var)
         subject_entry.grid(row=6, column=1, columnspan=3, sticky="ew", padx=8, pady=5)
-        ToolTip(subject_entry, "可用变量：{part_name}、{title}、{part_no}。")
+        ToolTip(subject_entry, "鍙敤鍙橀噺锛歿part_name}銆亄title}銆亄part_no}銆?)
 
         buttons = ttk.Frame(parent)
         buttons.grid(row=7, column=0, columnspan=4, sticky="e", padx=10, pady=(4, 8))
-        ttk.Button(buttons, text="重新读取", command=self._load_email_config_vars).pack(side="right", padx=(8, 0))
-        ttk.Button(buttons, text="保存邮箱配置", command=lambda: self._save_email_config_from_vars(show_message=True)).pack(side="right")
-        ttk.Button(buttons, text="测试邮件", command=self._test_email_connection).pack(side="right", padx=(0, 8))
-        ttk.Button(buttons, text="设置说明", command=self._show_email_help).pack(side="right", padx=(0, 8))
+        ttk.Button(buttons, text="閲嶆柊璇诲彇", command=self._load_email_config_vars).pack(side="right", padx=(8, 0))
+        ttk.Button(buttons, text="淇濆瓨閭閰嶇疆", command=lambda: self._save_email_config_from_vars(show_message=True)).pack(side="right")
+        ttk.Button(buttons, text="娴嬭瘯閭欢", command=self._test_email_connection).pack(side="right", padx=(0, 8))
+        ttk.Button(buttons, text="璁剧疆璇存槑", command=self._show_email_help).pack(side="right", padx=(0, 8))
 
     def _show_email_help(self) -> None:
         win = tk.Toplevel(self)
-        win.title("邮箱设置说明")
+        win.title("閭璁剧疆璇存槑")
         win.geometry("760x560")
         win.transient(self)
 
@@ -1152,74 +1151,39 @@ class AutoMediaGUI(tk.Tk):
 
         text = scrolledtext.ScrolledText(frame, wrap="word", font=self._font_tuple(10), height=26)
         text.grid(row=0, column=0, sticky="nsew")
-        help_text = """邮箱发送设置说明
+        help_text = """閭鍙戦€佽缃鏄?
+涓€銆佸厛璁剧疆鍙戜欢绠憋紙浠?QQ 閭涓轰緥锛?1. 鎵撳紑 QQ 閭缃戦〉鐗堬紝杩涘叆鈥滆缃€濄€?2. 鎵惧埌鈥滆处鎴封€濇垨鈥淧OP3/IMAP/SMTP/Exchange/CardDAV/CalDAV 鏈嶅姟鈥濄€?3. 寮€鍚?SMTP 鏈嶅姟銆俀Q 閭閫氬父浼氳姹傜煭淇￠獙璇併€?4. 寮€鍚悗浼氱敓鎴愨€滄巿鏉冪爜鈥濄€傝繖閲岃鐢ㄦ巿鏉冪爜鐧诲綍 SMTP锛屼笉瑕佸～鍐?QQ 瀵嗙爜銆?
+浜屻€佷富鐣岄潰鍙傛暟鎬庝箞濉?鏀朵欢閭锛?  鎺ユ敹绱犳潗鍖呯殑閭銆傚涓偖绠辩敤鑻辨枃閫楀彿鍒嗛殧銆?  褰撳墠榛樿娴嬭瘯閭锛?99467826@qq.com
 
-一、先设置发件箱（以 QQ 邮箱为例）
-1. 打开 QQ 邮箱网页版，进入“设置”。
-2. 找到“账户”或“POP3/IMAP/SMTP/Exchange/CardDAV/CalDAV 服务”。
-3. 开启 SMTP 服务。QQ 邮箱通常会要求短信验证。
-4. 开启后会生成“授权码”。这里要用授权码登录 SMTP，不要填写 QQ 密码。
+SMTP锛?  QQ 閭涓€鑸～ smtp.qq.com銆?
+绔彛锛?  鍕鹃€夆€滀娇鐢?SSL鈥濇椂锛孮Q 閭涓€鑸～ 465銆?  濡傛灉涓嶇敤 SSL锛屽父瑙佺鍙ｆ槸 587锛屼絾鏈伐鍏烽粯璁ゆ帹鑽?SSL + 465銆?
+鐧诲綍璐﹀彿锛?  鍙戜欢閭瀹屾暣鍦板潃锛屼緥濡?浣犵殑QQ鍙稝qq.com銆?
+鍙戜欢浜猴細
+  閫氬父鍜岀櫥褰曡处鍙风浉鍚岋紱鐣欑┖鏃剁▼搴忎細鑷姩浣跨敤鐧诲綍璐﹀彿銆?
+瀵嗙爜鍙橀噺 / 瀵嗙爜鏂囦欢锛?  涓轰簡瀹夊叏锛屼富鐣岄潰涓嶄繚瀛樻巿鏉冪爜鏈韩锛屽彧淇濆瓨璇诲彇浣嶇疆銆?  鏂瑰紡 A锛氳缃幆澧冨彉閲?AMP_SMTP_PASSWORD锛屽€煎～ QQ 閭鎺堟潈鐮併€?  鏂瑰紡 B锛氬湪椤圭洰鏍圭洰褰曞垱寤?smtp_password.txt锛屾枃浠堕噷鍙斁鎺堟潈鐮併€?
+闄勪欢涓婇檺 MB锛?  姣忛泦绱犳潗鍖呰秴杩囪繖涓ぇ灏忔椂浼氳烦杩囧彂閫侊紝閬垮厤閭鎷掓敹銆傞粯璁?20MB銆?
+閭欢鏍囬锛?  鍙互浣跨敤鍙橀噺 {part_name}銆亄title}銆亄part_no}銆?  渚嬪锛氳憲浣滆В璇诲垎闆嗗畬鎴愶細{part_name}
 
-二、主界面参数怎么填
-收件邮箱：
-  接收素材包的邮箱。多个邮箱用英文逗号分隔。
-  当前默认测试邮箱：399467826@qq.com
-
-SMTP：
-  QQ 邮箱一般填 smtp.qq.com。
-
-端口：
-  勾选“使用 SSL”时，QQ 邮箱一般填 465。
-  如果不用 SSL，常见端口是 587，但本工具默认推荐 SSL + 465。
-
-登录账号：
-  发件邮箱完整地址，例如 你的QQ号@qq.com。
-
-发件人：
-  通常和登录账号相同；留空时程序会自动使用登录账号。
-
-密码变量 / 密码文件：
-  为了安全，主界面不保存授权码本身，只保存读取位置。
-  方式 A：设置环境变量 AMP_SMTP_PASSWORD，值填 QQ 邮箱授权码。
-  方式 B：在项目根目录创建 smtp_password.txt，文件里只放授权码。
-
-附件上限 MB：
-  每集素材包超过这个大小时会跳过发送，避免邮箱拒收。默认 20MB。
-
-邮件标题：
-  可以使用变量 {part_name}、{title}、{part_no}。
-  例如：著作解读分集完成：{part_name}
-
-三、开启发送
-1. 填好参数后，点击“保存邮箱配置”。
-2. 勾选“每集完成后打包发送邮件”。
-3. 开始运行。每个分集完成后，程序会自动打包 zip 并发送邮件。
-
-四、排查
-如果发送失败，先检查：
-1. 是否开启了 SMTP 服务。
-2. 是否使用“授权码”，而不是 QQ 密码。
-3. smtp_password.txt 是否放在项目根目录。
-4. 收件邮箱是否填写正确。
-5. 附件是否超过邮箱限制。
-"""
+涓夈€佸紑鍚彂閫?1. 濉ソ鍙傛暟鍚庯紝鐐瑰嚮鈥滀繚瀛橀偖绠遍厤缃€濄€?2. 鍕鹃€夆€滄瘡闆嗗畬鎴愬悗鎵撳寘鍙戦€侀偖浠垛€濄€?3. 寮€濮嬭繍琛屻€傛瘡涓垎闆嗗畬鎴愬悗锛岀▼搴忎細鑷姩鎵撳寘 zip 骞跺彂閫侀偖浠躲€?
+鍥涖€佹帓鏌?濡傛灉鍙戦€佸け璐ワ紝鍏堟鏌ワ細
+1. 鏄惁寮€鍚簡 SMTP 鏈嶅姟銆?2. 鏄惁浣跨敤鈥滄巿鏉冪爜鈥濓紝鑰屼笉鏄?QQ 瀵嗙爜銆?3. smtp_password.txt 鏄惁鏀惧湪椤圭洰鏍圭洰褰曘€?4. 鏀朵欢閭鏄惁濉啓姝ｇ‘銆?5. 闄勪欢鏄惁瓒呰繃閭闄愬埗銆?"""
         text.insert("1.0", help_text)
         text.configure(state="disabled")
 
         footer = ttk.Frame(frame)
         footer.grid(row=1, column=0, sticky="e", pady=(10, 0))
-        ttk.Button(footer, text="关闭", command=win.destroy).pack(side="right")
+        ttk.Button(footer, text="鍏抽棴", command=win.destroy).pack(side="right")
 
     def _build_models(self, parent: ttk.Frame) -> None:
         parent.columnconfigure(2, weight=1)
         parent.columnconfigure(3, weight=0)
-        ttk.Label(parent, text="四个大模型设置", font=self._font_tuple(10, "bold")).grid(
+        ttk.Label(parent, text="鍥涗釜澶фā鍨嬭缃?, font=self._font_tuple(10, "bold")).grid(
             row=0, column=0, columnspan=4, sticky="w", padx=10, pady=(8, 4)
         )
-        ttk.Label(parent, text="阶段", foreground="#555").grid(row=1, column=0, sticky="w", padx=10, pady=(0, 4))
-        ttk.Label(parent, text="来源", foreground="#555").grid(row=1, column=1, sticky="w", padx=8, pady=(0, 4))
-        ttk.Label(parent, text="模型名", foreground="#555").grid(row=1, column=2, sticky="w", padx=8, pady=(0, 4))
-        ttk.Label(parent, text="连接", foreground="#555").grid(row=1, column=3, sticky="w", padx=8, pady=(0, 4))
+        ttk.Label(parent, text="闃舵", foreground="#555").grid(row=1, column=0, sticky="w", padx=10, pady=(0, 4))
+        ttk.Label(parent, text="鏉ユ簮", foreground="#555").grid(row=1, column=1, sticky="w", padx=8, pady=(0, 4))
+        ttk.Label(parent, text="妯″瀷鍚?, foreground="#555").grid(row=1, column=2, sticky="w", padx=8, pady=(0, 4))
+        ttk.Label(parent, text="杩炴帴", foreground="#555").grid(row=1, column=3, sticky="w", padx=8, pady=(0, 4))
 
         for idx, (stage, title, tip) in enumerate(TEXT_STAGES, start=2):
             label = ttk.Label(parent, text=title)
@@ -1235,7 +1199,7 @@ SMTP：
             )
             provider.grid(row=idx, column=1, sticky="ew", padx=8, pady=5)
             provider.bind("<<ComboboxSelected>>", lambda _event, st=stage: self._on_stage_provider_change(st))
-            ToolTip(provider, "只保留大纲、脚本、台词润色三个文本模型；绘图模型在下方设置。")
+            ToolTip(provider, "鍙繚鐣欏ぇ绾层€佽剼鏈€佸彴璇嶆鼎鑹蹭笁涓枃鏈ā鍨嬶紱缁樺浘妯″瀷鍦ㄤ笅鏂硅缃€?)
 
             combo = ttk.Combobox(
                 parent,
@@ -1245,35 +1209,35 @@ SMTP：
             )
             combo.grid(row=idx, column=2, sticky="ew", padx=8, pady=5)
             self.stage_model_combos[stage] = combo
-            ToolTip(combo, "默认：大纲 Gemini，脚本 GPT-5.5，台词润色 DeepSeek V4 Pro。")
-            ttk.Button(parent, text="测试", command=lambda st=stage: self._test_text_stage_connection(st), width=8).grid(
+            ToolTip(combo, "榛樿锛氬ぇ绾?Gemini锛岃剼鏈?GPT-5.5锛屽彴璇嶆鼎鑹?DeepSeek V4 Pro銆?)
+            ttk.Button(parent, text="娴嬭瘯", command=lambda st=stage: self._test_text_stage_connection(st), width=8).grid(
                 row=idx, column=3, sticky="ew", padx=(0, 10), pady=5
             )
 
-        ttk.Label(parent, text="默认：大纲 Gemini；脚本 GPT-5.5；绘图 GPT-image2；台词润色 DeepSeek V4 Pro。", foreground="#555").grid(
+        ttk.Label(parent, text="榛樿锛氬ぇ绾?Gemini锛涜剼鏈?GPT-5.5锛涚粯鍥?GPT-image2锛涘彴璇嶆鼎鑹?DeepSeek V4 Pro銆?, foreground="#555").grid(
             row=5, column=0, columnspan=4, sticky="w", padx=10, pady=(4, 8)
         )
 
         save_frame = ttk.Frame(parent)
         save_frame.grid(row=6, column=0, columnspan=4, sticky="ew", padx=8, pady=(0, 7))
-        ttk.Checkbutton(save_frame, text="运行时保存 Key", variable=self.save_keys_var).pack(side="left", padx=(2, 10))
-        ttk.Button(save_frame, text="保存 Key", command=self._save_key_files).pack(side="left", padx=(0, 8))
+        ttk.Checkbutton(save_frame, text="杩愯鏃朵繚瀛?Key", variable=self.save_keys_var).pack(side="left", padx=(2, 10))
+        ttk.Button(save_frame, text="淇濆瓨 Key", command=self._save_key_files).pack(side="left", padx=(0, 8))
 
-        base_frame = ttk.LabelFrame(parent, text="OpenAI 兼容中转")
+        base_frame = ttk.LabelFrame(parent, text="OpenAI 鍏煎涓浆")
         base_frame.grid(row=7, column=0, columnspan=4, sticky="ew", padx=10, pady=(8, 8))
         base_frame.columnconfigure(1, weight=1)
-        ttk.Label(base_frame, text="官网").grid(row=0, column=0, sticky="w", padx=8, pady=4)
-        ttk.Label(base_frame, text="https://greatwalllink.top", foreground="#555").grid(row=0, column=1, sticky="w", padx=8, pady=4)
+        ttk.Label(base_frame, text="瀹樼綉").grid(row=0, column=0, sticky="w", padx=8, pady=4)
+        ttk.Label(base_frame, text="https://www.fhl.mom/v1", foreground="#555").grid(row=0, column=1, sticky="w", padx=8, pady=4)
         ttk.Label(base_frame, text="BaseURL").grid(row=1, column=0, sticky="w", padx=8, pady=4)
         base_entry = ttk.Entry(base_frame, textvariable=self.foreign_base_url_var)
         base_entry.grid(row=1, column=1, sticky="ew", padx=8, pady=4)
-        ToolTip(base_entry, "Gemini、OpenAI 兼容文本模型和生图模型默认使用这个 /v1 端点。")
-        ttk.Label(base_frame, text="推荐 Gemini 模型").grid(row=2, column=0, sticky="w", padx=8, pady=4)
+        ToolTip(base_entry, "Gemini銆丱penAI 鍏煎鏂囨湰妯″瀷鍜岀敓鍥炬ā鍨嬮粯璁や娇鐢ㄨ繖涓?/v1 绔偣銆?)
+        ttk.Label(base_frame, text="鎺ㄨ崘 Gemini 妯″瀷").grid(row=2, column=0, sticky="w", padx=8, pady=4)
         ttk.Label(base_frame, text="gemini-3.1-pro-preview", foreground="#555").grid(row=2, column=1, sticky="w", padx=8, pady=4)
         ttk.Label(base_frame, text="DeepSeek").grid(row=3, column=0, sticky="w", padx=8, pady=4)
-        ttk.Label(base_frame, text=f"不中转，默认 {DEFAULT_DEEPSEEK_BASE_URL}", foreground="#555").grid(row=3, column=1, sticky="w", padx=8, pady=4)
+        ttk.Label(base_frame, text=f"涓嶄腑杞紝榛樿 {DEFAULT_DEEPSEEK_BASE_URL}", foreground="#555").grid(row=3, column=1, sticky="w", padx=8, pady=4)
 
-        vault = ttk.LabelFrame(parent, text="API Key（可保存）")
+        vault = ttk.LabelFrame(parent, text="API Key锛堝彲淇濆瓨锛?)
         vault.grid(row=8, column=0, columnspan=4, sticky="ew", padx=10, pady=(8, 8))
         vault.columnconfigure(1, weight=1)
         ttk.Label(vault, text="Gemini").grid(row=0, column=0, sticky="w", padx=8, pady=4)
@@ -1284,47 +1248,47 @@ SMTP：
         ttk.Entry(vault, textvariable=self.deepseek_key_var).grid(row=2, column=1, sticky="ew", padx=8, pady=4)
         ttk.Label(vault, text="GPT-image2").grid(row=3, column=0, sticky="w", padx=8, pady=4)
         ttk.Entry(vault, textvariable=self.image_api_key_var).grid(row=3, column=1, sticky="ew", padx=8, pady=4)
-        ttk.Button(vault, text="保存全部 Key", command=self._save_all_key_files).grid(row=4, column=1, sticky="e", padx=8, pady=(2, 6))
-        ToolTip(vault, "当前简洁模式只显示四模型需要的 Key；更多兼容 Key 可点顶部 Key。")
+        ttk.Button(vault, text="淇濆瓨鍏ㄩ儴 Key", command=self._save_all_key_files).grid(row=4, column=1, sticky="e", padx=8, pady=(2, 6))
+        ToolTip(vault, "褰撳墠绠€娲佹ā寮忓彧鏄剧ず鍥涙ā鍨嬮渶瑕佺殑 Key锛涙洿澶氬吋瀹?Key 鍙偣椤堕儴 Key銆?)
 
         sep = ttk.Separator(parent)
         sep.grid(row=9, column=0, columnspan=4, sticky="ew", padx=10, pady=10)
 
-        ttk.Label(parent, text="绘图模型来源").grid(row=10, column=0, sticky="w", padx=10, pady=7)
+        ttk.Label(parent, text="缁樺浘妯″瀷鏉ユ簮").grid(row=10, column=0, sticky="w", padx=10, pady=7)
         image_provider = ttk.Combobox(parent, textvariable=self.image_provider_var, values=["openai", "none", "dry-run"], state="readonly")
         image_provider.grid(row=10, column=1, columnspan=2, sticky="ew", padx=8, pady=7)
         image_provider.bind("<<ComboboxSelected>>", self._on_image_provider_change)
-        ToolTip(image_provider, "none 表示不调用生图接口；dry-run 只保存图片提示词。")
+        ToolTip(image_provider, "none 琛ㄧず涓嶈皟鐢ㄧ敓鍥炬帴鍙ｏ紱dry-run 鍙繚瀛樺浘鐗囨彁绀鸿瘝銆?)
 
-        ttk.Label(parent, text="绘图模型").grid(row=11, column=0, sticky="w", padx=10, pady=7)
+        ttk.Label(parent, text="缁樺浘妯″瀷").grid(row=11, column=0, sticky="w", padx=10, pady=7)
         self.image_model_combo = ttk.Combobox(parent, textvariable=self.image_model_var, values=IMAGE_MODEL_OPTIONS["none"], state="normal")
         self.image_model_combo.grid(row=11, column=1, columnspan=2, sticky="ew", padx=8, pady=7)
-        ToolTip(self.image_model_combo, "默认 gpt-image-2，经 NewAPI/OpenAI 兼容中转请求。")
-        ttk.Button(parent, text="测试绘图", command=self._test_image_connection, width=8).grid(row=11, column=3, sticky="ew", padx=(0, 10), pady=7)
+        ToolTip(self.image_model_combo, "榛樿 gpt-image-2锛岀粡 NewAPI/OpenAI 鍏煎涓浆璇锋眰銆?)
+        ttk.Button(parent, text="娴嬭瘯缁樺浘", command=self._test_image_connection, width=8).grid(row=11, column=3, sticky="ew", padx=(0, 10), pady=7)
 
     def _browse_book(self) -> None:
-        path = filedialog.askopenfilename(title="选择书籍 PDF", filetypes=[("PDF 文件", "*.pdf"), ("所有文件", "*.*")])
+        path = filedialog.askopenfilename(title="閫夋嫨涔︾睄 PDF", filetypes=[("PDF 鏂囦欢", "*.pdf"), ("鎵€鏈夋枃浠?, "*.*")])
         if not path:
             return
         self.book_var.set(path)
         self._sync_output_dir_for_book(force=True)
 
     def _browse_out(self) -> None:
-        path = filedialog.askdirectory(title="选择输出目录")
+        path = filedialog.askdirectory(title="閫夋嫨杈撳嚭鐩綍")
         if path:
             self.out_var.set(path)
             self._last_auto_out = ""
             self._last_book_for_auto_out = self.book_var.get().strip().strip('"')
 
     def _browse_continue_folder(self) -> None:
-        path = filedialog.askdirectory(title="选择要续作的已有输出目录 / 分集目录")
+        path = filedialog.askdirectory(title="閫夋嫨瑕佺画浣滅殑宸叉湁杈撳嚭鐩綍 / 鍒嗛泦鐩綍")
         if path:
             self.continue_folder_var.set(path)
             if not self.out_var.get().strip():
                 self.out_var.set(path)
 
     def _browse_outline(self) -> None:
-        path = filedialog.askopenfilename(title="选择已有大纲 JSON", filetypes=[("JSON 文件", "*.json"), ("文本文件", "*.txt"), ("所有文件", "*.*")])
+        path = filedialog.askopenfilename(title="閫夋嫨宸叉湁澶х翰 JSON", filetypes=[("JSON 鏂囦欢", "*.json"), ("鏂囨湰鏂囦欢", "*.txt"), ("鎵€鏈夋枃浠?, "*.*")])
         if path:
             self.outline_json_var.set(path)
 
@@ -1344,7 +1308,7 @@ SMTP：
                 self.stage_model_vars[stage].set(DEFAULT_OPENAI_TEXT_MODEL)
         elif stage == "polish" and provider == "deepseek":
             if not current or current not in all_known:
-                self.stage_model_vars[stage].set("deepseek-v4-pro")
+                self.stage_model_vars[stage].set("deepseek-chat")
         elif not current or current not in all_known:
             if provider == "doubao":
                 endpoint = self.doubao_endpoint_var.get().strip() or doubao_env_model()
@@ -1382,7 +1346,7 @@ SMTP：
 
     def _normalized_foreign_base_url(self) -> str:
         base_url = self.foreign_base_url_var.get().strip() or DEFAULT_FOREIGN_MODEL_BASE_URL
-        base_url = base_url.replace("greatwallink.top", "greatwalllink.top")
+        base_url = base_url
         if not base_url.endswith("/v1"):
             base_url = base_url.rstrip("/") + "/v1"
         self.foreign_base_url_var.set(base_url)
@@ -1396,19 +1360,19 @@ SMTP：
             if model:
                 self.stage_model_vars[stage].set(model)
         if provider in {"dry-run", "none"}:
-            messagebox.showinfo("测试连接", "dry-run/none 不需要测试连接。")
+            messagebox.showinfo("娴嬭瘯杩炴帴", "dry-run/none 涓嶉渶瑕佹祴璇曡繛鎺ャ€?)
             return
         key_var = self._key_var_for_provider(provider)
         api_key = key_var.get().strip() if key_var is not None else ""
         api_key = api_key or read_api_key(provider, "")
         if not api_key:
-            messagebox.showerror("测试连接", f"{provider} API Key 为空，请先填写或保存 Key。")
+            messagebox.showerror("娴嬭瘯杩炴帴", f"{provider} API Key 涓虹┖锛岃鍏堝～鍐欐垨淇濆瓨 Key銆?)
             return
         if not model:
-            messagebox.showerror("测试连接", "模型名为空，请先选择或填写模型名。")
+            messagebox.showerror("娴嬭瘯杩炴帴", "妯″瀷鍚嶄负绌猴紝璇峰厛閫夋嫨鎴栧～鍐欐ā鍨嬪悕銆?)
             return
         base_url = deepseek_base_url() if provider == "deepseek" else self._normalized_foreign_base_url()
-        self._append_log(f"🔌 测试连接：{stage} / {provider} / {model} / {base_url}")
+        self._append_log(f"馃攲 娴嬭瘯杩炴帴锛歿stage} / {provider} / {model} / {base_url}")
         thread = threading.Thread(target=self._test_model_worker, args=(provider, model, api_key, base_url, stage), daemon=True)
         thread.start()
 
@@ -1416,17 +1380,17 @@ SMTP：
         provider = self.image_provider_var.get().strip() or "openai"
         model = self.image_model_var.get().strip()
         if provider in {"dry-run", "none"}:
-            messagebox.showinfo("测试连接", "none/dry-run 不需要测试绘图连接。")
+            messagebox.showinfo("娴嬭瘯杩炴帴", "none/dry-run 涓嶉渶瑕佹祴璇曠粯鍥捐繛鎺ャ€?)
             return
         api_key = self.image_api_key_var.get().strip() or read_api_key("image", "")
         if not api_key:
-            messagebox.showerror("测试连接", "绘图 API Key 为空，请先填写 GPT-image2 Key。")
+            messagebox.showerror("娴嬭瘯杩炴帴", "缁樺浘 API Key 涓虹┖锛岃鍏堝～鍐?GPT-image2 Key銆?)
             return
         if not model:
-            messagebox.showerror("测试连接", "绘图模型名为空，请先选择或填写模型名。")
+            messagebox.showerror("娴嬭瘯杩炴帴", "缁樺浘妯″瀷鍚嶄负绌猴紝璇峰厛閫夋嫨鎴栧～鍐欐ā鍨嬪悕銆?)
             return
         base_url = self._normalized_foreign_base_url()
-        self._append_log(f"🔌 测试绘图模型：{provider} / {model} / {base_url}")
+        self._append_log(f"馃攲 娴嬭瘯缁樺浘妯″瀷锛歿provider} / {model} / {base_url}")
         thread = threading.Thread(target=self._test_model_worker, args=("image", model, api_key, base_url, "image"), daemon=True)
         thread.start()
 
@@ -1454,7 +1418,7 @@ SMTP：
                     )
                     resp.raise_for_status()
                     elapsed = time.perf_counter() - started
-                    self.log_queue.put(("log", f"✅ 测试绘图连接成功：provider=gemini，model={model}，base={base_url}，耗时 {elapsed:.1f}s，接口：generateContent"))
+                    self.log_queue.put(("log", f"鉁?娴嬭瘯缁樺浘杩炴帴鎴愬姛锛歱rovider=gemini锛宮odel={model}锛宐ase={base_url}锛岃€楁椂 {elapsed:.1f}s锛屾帴鍙ｏ細generateContent"))
                     return
                 payload = {
                     "model": model,
@@ -1474,12 +1438,12 @@ SMTP：
                         raise
                 data = getattr(response, "data", None) or []
                 if not data:
-                    raise RuntimeError("图片接口未返回 data。")
+                    raise RuntimeError("鍥剧墖鎺ュ彛鏈繑鍥?data銆?)
                 first = data[0]
                 if not (getattr(first, "b64_json", None) or getattr(first, "url", None)):
-                    raise RuntimeError("图片接口未返回 b64_json 或 url。")
+                    raise RuntimeError("鍥剧墖鎺ュ彛鏈繑鍥?b64_json 鎴?url銆?)
                 elapsed = time.perf_counter() - started
-                self.log_queue.put(("log", f"✅ 测试绘图连接成功：provider={provider}，model={model}，base={base_url}，耗时 {elapsed:.1f}s，接口：images.generate，尺寸：{payload.get('size')}"))
+                self.log_queue.put(("log", f"鉁?娴嬭瘯缁樺浘杩炴帴鎴愬姛锛歱rovider={provider}锛宮odel={model}锛宐ase={base_url}锛岃€楁椂 {elapsed:.1f}s锛屾帴鍙ｏ細images.generate锛屽昂瀵革細{payload.get('size')}"))
                 return
             response = client.chat.completions.create(
                 model=model,
@@ -1489,12 +1453,12 @@ SMTP：
             )
             content = _extract_chat_content(response)
             if not content:
-                raise RuntimeError(f"模型返回为空或格式不可识别：{type(response).__name__}")
+                raise RuntimeError(f"妯″瀷杩斿洖涓虹┖鎴栨牸寮忎笉鍙瘑鍒細{type(response).__name__}")
             elapsed = time.perf_counter() - started
-            self.log_queue.put(("log", f"✅ 测试连接成功：stage={label}，provider={provider}，model={model}，base={base_url}，耗时 {elapsed:.1f}s，返回：{content[:80] or '空'}"))
+            self.log_queue.put(("log", f"鉁?娴嬭瘯杩炴帴鎴愬姛锛歴tage={label}锛宲rovider={provider}锛宮odel={model}锛宐ase={base_url}锛岃€楁椂 {elapsed:.1f}s锛岃繑鍥烇細{content[:80] or '绌?}"))
         except Exception as exc:
             elapsed = time.perf_counter() - started
-            self.log_queue.put(("log", f"❌ 测试连接失败：stage={label}，provider={provider}，model={model}，base={base_url}，耗时 {elapsed:.1f}s，错误：{type(exc).__name__}: {exc}"))
+            self.log_queue.put(("log", f"鉂?娴嬭瘯杩炴帴澶辫触锛歴tage={label}锛宲rovider={provider}锛宮odel={model}锛宐ase={base_url}锛岃€楁椂 {elapsed:.1f}s锛岄敊璇細{type(exc).__name__}: {exc}"))
 
     def _read_ui_key_file(self, provider: str) -> str:
         """Read only the provider's own key file for display in the GUI.
@@ -1565,18 +1529,18 @@ SMTP：
         if endpoint:
             if doubao_model_looks_like_api_key(endpoint):
                 if show_message:
-                    messagebox.showerror("豆包接入点填写错误", "豆包接入点看起来像 API Key。请填写 ep-... 接入点 ID，API Key 填到豆包 Key 输入框。")
+                    messagebox.showerror("璞嗗寘鎺ュ叆鐐瑰～鍐欓敊璇?, "璞嗗寘鎺ュ叆鐐圭湅璧锋潵鍍?API Key銆傝濉啓 ep-... 鎺ュ叆鐐?ID锛孉PI Key 濉埌璞嗗寘 Key 杈撳叆妗嗐€?)
                 return False
             write_text(PROJECT_ROOT / DOUBAO_ENDPOINT_FILE_NAME, endpoint + "\n")
             saved.append(DOUBAO_ENDPOINT_FILE_NAME)
         saved.extend(cleared)
         if saved:
-            self._append_log("已保存 Key/接入点文件：" + "、".join(saved))
+            self._append_log("宸蹭繚瀛?Key/鎺ュ叆鐐规枃浠讹細" + "銆?.join(saved))
             if show_message:
-                messagebox.showinfo("Key/接入点已保存", "已保存到项目根目录：\n" + "\n".join(saved))
+                messagebox.showinfo("Key/鎺ュ叆鐐瑰凡淇濆瓨", "宸蹭繚瀛樺埌椤圭洰鏍圭洰褰曪細\n" + "\n".join(saved))
             return True
         if show_message:
-            messagebox.showinfo("没有可保存的内容", "当前没有填写可保存的 API Key 或豆包接入点。")
+            messagebox.showinfo("娌℃湁鍙繚瀛樼殑鍐呭", "褰撳墠娌℃湁濉啓鍙繚瀛樼殑 API Key 鎴栬眴鍖呮帴鍏ョ偣銆?)
         return False
 
     def _save_key_files(self) -> bool:
@@ -1585,7 +1549,7 @@ SMTP：
     def _show_key_manager(self) -> None:
         self._load_all_key_vars(overwrite=False)
         win = tk.Toplevel(self)
-        win.title("API Key 管理")
+        win.title("API Key 绠＄悊")
         win.geometry("760x360")
         win.transient(self)
         frame = ttk.Frame(win, padding=14)
@@ -1595,21 +1559,21 @@ SMTP：
             ("Gemini API Key", self.gemini_key_var, "gemini_api_key.txt", True),
             ("OpenAI API Key", self.openai_key_var, "openai_api_key.txt", True),
             ("GPT-image2 API Key", self.image_api_key_var, "image_api_key.txt", True),
-            ("豆包/火山方舟 API Key", self.doubao_key_var, "ark_api_key.txt", True),
+            ("璞嗗寘/鐏北鏂硅垷 API Key", self.doubao_key_var, "ark_api_key.txt", True),
             ("DeepSeek API Key", self.deepseek_key_var, "deepseek_api_key.txt", True),
-            ("豆包接入点 ID", self.doubao_endpoint_var, DOUBAO_ENDPOINT_FILE_NAME, False),
+            ("璞嗗寘鎺ュ叆鐐?ID", self.doubao_endpoint_var, DOUBAO_ENDPOINT_FILE_NAME, False),
         ]
         for row, (label, var, filename, is_secret) in enumerate(fields):
             ttk.Label(frame, text=label).grid(row=row, column=0, sticky="w", padx=8, pady=8)
             entry = ttk.Entry(frame, textvariable=var)
             entry.grid(row=row, column=1, sticky="ew", padx=8, pady=8)
             ttk.Label(frame, text=filename, foreground="#666").grid(row=row, column=2, sticky="w", padx=8, pady=8)
-        tip = ttk.Label(frame, text="Key 与豆包接入点会保存为项目根目录下的 txt 文件；程序运行时会自动读取。", foreground="#555")
+        tip = ttk.Label(frame, text="Key 涓庤眴鍖呮帴鍏ョ偣浼氫繚瀛樹负椤圭洰鏍圭洰褰曚笅鐨?txt 鏂囦欢锛涚▼搴忚繍琛屾椂浼氳嚜鍔ㄨ鍙栥€?, foreground="#555")
         tip.grid(row=5, column=0, columnspan=3, sticky="w", padx=8, pady=(8, 4))
         buttons = ttk.Frame(frame)
         buttons.grid(row=6, column=0, columnspan=3, sticky="e", padx=8, pady=(12, 0))
-        ttk.Button(buttons, text="保存全部 Key/接入点", command=lambda: (self._save_all_key_files(show_message=True), win.destroy())).pack(side="right", padx=(8, 0))
-        ttk.Button(buttons, text="取消", command=win.destroy).pack(side="right")
+        ttk.Button(buttons, text="淇濆瓨鍏ㄩ儴 Key/鎺ュ叆鐐?, command=lambda: (self._save_all_key_files(show_message=True), win.destroy())).pack(side="right", padx=(8, 0))
+        ttk.Button(buttons, text="鍙栨秷", command=win.destroy).pack(side="right")
 
     def _read_runtime_switches_config(self) -> dict:
         try:
@@ -1641,7 +1605,7 @@ SMTP：
         self.email_password_env_var.set(str(config.get("password_env") or "AMP_SMTP_PASSWORD"))
         self.email_password_file_var.set(str(config.get("password_file") or "smtp_password.txt"))
         self.email_max_mb_var.set(str(config.get("max_attachment_mb") or 20))
-        self.email_subject_template_var.set(str(config.get("subject_template") or "著作解读分集完成：{part_name}"))
+        self.email_subject_template_var.set(str(config.get("subject_template") or "钁椾綔瑙ｈ鍒嗛泦瀹屾垚锛歿part_name}"))
 
     def _email_config_from_vars(self) -> dict | None:
         try:
@@ -1649,37 +1613,37 @@ SMTP：
             if port <= 0:
                 raise ValueError
         except Exception:
-            messagebox.showerror("邮箱配置错误", "SMTP 端口必须是正整数。")
+            messagebox.showerror("閭閰嶇疆閿欒", "SMTP 绔彛蹇呴』鏄鏁存暟銆?)
             return None
         try:
             max_mb = int(self.email_max_mb_var.get().strip() or "20")
             if max_mb <= 0:
                 raise ValueError
         except Exception:
-            messagebox.showerror("邮箱配置错误", "附件上限 MB 必须是正整数。")
+            messagebox.showerror("閭閰嶇疆閿欒", "闄勪欢涓婇檺 MB 蹇呴』鏄鏁存暟銆?)
             return None
 
-        recipients = [x.strip() for x in self.email_to_var.get().replace("；", ",").replace("，", ",").split(",") if x.strip()]
+        recipients = [x.strip() for x in self.email_to_var.get().replace("锛?, ",").replace("锛?, ",").split(",") if x.strip()]
         enabled = bool(self.email_enabled_var.get())
         host = self.email_smtp_host_var.get().strip() or "smtp.qq.com"
         username = self.email_username_var.get().strip()
         sender = self.email_from_var.get().strip() or username
         password_env = self.email_password_env_var.get().strip() or "AMP_SMTP_PASSWORD"
         password_file = self.email_password_file_var.get().strip() or "smtp_password.txt"
-        subject_template = self.email_subject_template_var.get().strip() or "著作解读分集完成：{part_name}"
+        subject_template = self.email_subject_template_var.get().strip() or "钁椾綔瑙ｈ鍒嗛泦瀹屾垚锛歿part_name}"
 
         if enabled:
             missing = []
             if not recipients:
-                missing.append("收件邮箱")
+                missing.append("鏀朵欢閭")
             if not host:
                 missing.append("SMTP")
             if not username:
-                missing.append("登录账号")
+                missing.append("鐧诲綍璐﹀彿")
             if not sender:
-                missing.append("发件人")
+                missing.append("鍙戜欢浜?)
             if missing:
-                messagebox.showerror("邮箱配置错误", "开启邮箱发送前请补全：" + "、".join(missing))
+                messagebox.showerror("閭閰嶇疆閿欒", "寮€鍚偖绠卞彂閫佸墠璇疯ˉ鍏細" + "銆?.join(missing))
                 return None
 
         return {
@@ -1705,16 +1669,16 @@ SMTP：
         try:
             self._write_runtime_switches_config(root)
         except Exception as exc:
-            messagebox.showerror("保存邮箱配置失败", str(exc))
+            messagebox.showerror("淇濆瓨閭閰嶇疆澶辫触", str(exc))
             return False
         if show_message:
-            messagebox.showinfo("已保存", f"邮箱配置已写入：\n{RUNTIME_SWITCHES_CONFIG_PATH}")
+            messagebox.showinfo("宸蹭繚瀛?, f"閭閰嶇疆宸插啓鍏ワ細\n{RUNTIME_SWITCHES_CONFIG_PATH}")
         return True
 
     def _test_email_connection(self) -> None:
         if not self._save_email_config_from_vars(show_message=False):
             return
-        self._append_log("📧 开始测试邮箱连接：会尝试登录 SMTP，并发送一封小测试邮件。")
+        self._append_log("馃摟 寮€濮嬫祴璇曢偖绠辫繛鎺ワ細浼氬皾璇曠櫥褰?SMTP锛屽苟鍙戦€佷竴灏佸皬娴嬭瘯閭欢銆?)
         thread = threading.Thread(target=self._test_email_worker, daemon=True)
         thread.start()
 
@@ -1722,39 +1686,39 @@ SMTP：
         started = time.perf_counter()
 
         def emit(message: str) -> None:
-            self.log_queue.put(("log", "📧 " + str(message)))
+            self.log_queue.put(("log", "馃摟 " + str(message)))
 
         try:
             result = test_email_connection(send_test=True, logger=emit)
             elapsed = time.perf_counter() - started
             if result.get("ok"):
-                sent_text = "已发送测试邮件" if result.get("sent") else "仅测试连接"
-                self.log_queue.put(("log", f"✅ 邮箱测试成功：{sent_text}，耗时 {elapsed:.1f}s"))
+                sent_text = "宸插彂閫佹祴璇曢偖浠? if result.get("sent") else "浠呮祴璇曡繛鎺?
+                self.log_queue.put(("log", f"鉁?閭娴嬭瘯鎴愬姛锛歿sent_text}锛岃€楁椂 {elapsed:.1f}s"))
             else:
-                self.log_queue.put(("log", f"❌ 邮箱测试失败，耗时 {elapsed:.1f}s：{result.get('reason') or result.get('error') or '未知原因'}"))
+                self.log_queue.put(("log", f"鉂?閭娴嬭瘯澶辫触锛岃€楁椂 {elapsed:.1f}s锛歿result.get('reason') or result.get('error') or '鏈煡鍘熷洜'}"))
                 smtp_info = result.get("smtp") if isinstance(result.get("smtp"), dict) else {}
                 if smtp_info:
                     self.log_queue.put((
                         "log",
-                        "📧 SMTP 配置："
-                        f"{smtp_info.get('host') or ''}:{smtp_info.get('port') or ''}，"
-                        f"SSL={smtp_info.get('use_ssl')}，"
-                        f"登录账号={smtp_info.get('username') or ''}，"
-                        f"发件人={smtp_info.get('sender') or ''}，"
-                        f"收件人={', '.join(smtp_info.get('recipients') or [])}",
+                        "馃摟 SMTP 閰嶇疆锛?
+                        f"{smtp_info.get('host') or ''}:{smtp_info.get('port') or ''}锛?
+                        f"SSL={smtp_info.get('use_ssl')}锛?
+                        f"鐧诲綍璐﹀彿={smtp_info.get('username') or ''}锛?
+                        f"鍙戜欢浜?{smtp_info.get('sender') or ''}锛?
+                        f"鏀朵欢浜?{', '.join(smtp_info.get('recipients') or [])}",
                     ))
                 warnings = result.get("warnings") if isinstance(result.get("warnings"), list) else []
                 for warning in warnings:
-                    self.log_queue.put(("log", f"📧 配置提醒：{warning}"))
+                    self.log_queue.put(("log", f"馃摟 閰嶇疆鎻愰啋锛歿warning}"))
                 if result.get("hint"):
-                    self.log_queue.put(("log", f"📧 排查建议：{result.get('hint')}"))
+                    self.log_queue.put(("log", f"馃摟 鎺掓煡寤鸿锛歿result.get('hint')}"))
                 if result.get("stage") or result.get("error_type"):
-                    self.log_queue.put(("log", f"📧 失败阶段：{result.get('stage') or '未知'}；异常类型：{result.get('error_type') or '未知'}"))
+                    self.log_queue.put(("log", f"馃摟 澶辫触闃舵锛歿result.get('stage') or '鏈煡'}锛涘紓甯哥被鍨嬶細{result.get('error_type') or '鏈煡'}"))
                 if result.get("traceback"):
-                    self.log_queue.put(("log", "📧 邮箱测试 traceback：\n" + str(result.get("traceback"))))
+                    self.log_queue.put(("log", "馃摟 閭娴嬭瘯 traceback锛歕n" + str(result.get("traceback"))))
         except Exception as exc:
             elapsed = time.perf_counter() - started
-            self.log_queue.put(("log", f"❌ 邮箱测试异常，耗时 {elapsed:.1f}s：{type(exc).__name__} - {exc}"))
+            self.log_queue.put(("log", f"鉂?閭娴嬭瘯寮傚父锛岃€楁椂 {elapsed:.1f}s锛歿type(exc).__name__} - {exc}"))
             self.log_queue.put(("log", "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)).rstrip()))
 
     def _validate(self) -> PipelineArgs | None:
@@ -1769,25 +1733,25 @@ SMTP：
         if continue_mode:
             continue_text = self.continue_folder_var.get().strip().strip('"')
             if not continue_text:
-                messagebox.showerror("缺少续作文件夹", "请先选择一个已有输出目录或分集目录。")
+                messagebox.showerror("缂哄皯缁綔鏂囦欢澶?, "璇峰厛閫夋嫨涓€涓凡鏈夎緭鍑虹洰褰曟垨鍒嗛泦鐩綍銆?)
                 return None
             continue_folder = Path(continue_text).expanduser()
             if not continue_folder.exists() or not continue_folder.is_dir():
-                messagebox.showerror("找不到续作文件夹", f"目录不存在：\n{continue_folder}")
+                messagebox.showerror("鎵句笉鍒扮画浣滄枃浠跺す", f"鐩綍涓嶅瓨鍦細\n{continue_folder}")
                 return None
-            # 指定文件夹续作模式不再强制要求 PDF；book 字段用续作目录占位，runner 会直接读取 continue_from_folder。
+            # 鎸囧畾鏂囦欢澶圭画浣滄ā寮忎笉鍐嶅己鍒惰姹?PDF锛沚ook 瀛楁鐢ㄧ画浣滅洰褰曞崰浣嶏紝runner 浼氱洿鎺ヨ鍙?continue_from_folder銆?
             book = continue_folder
         else:
             book_text = self.book_var.get().strip().strip('"')
             if not book_text:
-                messagebox.showerror("缺少 PDF", "请先选择一本书籍 PDF。")
+                messagebox.showerror("缂哄皯 PDF", "璇峰厛閫夋嫨涓€鏈功绫?PDF銆?)
                 return None
             book = Path(book_text).expanduser()
             if not book.exists():
-                messagebox.showerror("找不到 PDF", f"文件不存在：\n{book}")
+                messagebox.showerror("鎵句笉鍒?PDF", f"鏂囦欢涓嶅瓨鍦細\n{book}")
                 return None
             if book.suffix.lower() != ".pdf":
-                messagebox.showerror("文件类型不正确", "当前程序只支持 PDF。")
+                messagebox.showerror("鏂囦欢绫诲瀷涓嶆纭?, "褰撳墠绋嬪簭鍙敮鎸?PDF銆?)
                 return None
 
         out_text = self.out_var.get().strip().strip('"')
@@ -1808,7 +1772,7 @@ SMTP：
             out_text = str(default_output_dir_for_book(book))
             self.out_var.set(out_text)
         if not out_text:
-            messagebox.showerror("缺少输出目录", "请选择输出目录。")
+            messagebox.showerror("缂哄皯杈撳嚭鐩綍", "璇烽€夋嫨杈撳嚭鐩綍銆?)
             return None
         out = Path(out_text).expanduser()
 
@@ -1817,7 +1781,7 @@ SMTP：
             if max_retries < 0:
                 raise ValueError
         except Exception:
-            messagebox.showerror("参数错误", "重试次数必须是 0 或正整数。")
+            messagebox.showerror("鍙傛暟閿欒", "閲嶈瘯娆℃暟蹇呴』鏄?0 鎴栨鏁存暟銆?)
             return None
 
         outline_path = None
@@ -1825,7 +1789,7 @@ SMTP：
         if outline_text:
             outline_path = Path(outline_text).expanduser()
             if not outline_path.exists():
-                messagebox.showerror("找不到大纲", f"已有大纲 JSON 不存在：\n{outline_path}")
+                messagebox.showerror("鎵句笉鍒板ぇ绾?, f"宸叉湁澶х翰 JSON 涓嶅瓨鍦細\n{outline_path}")
                 return None
 
         if self.save_keys_var.get():
@@ -1844,32 +1808,32 @@ SMTP：
             if provider == "gemini":
                 fixed_model = canonical_gemini_model(model)
                 if fixed_model != model:
-                    self._append_log(f"提示：{title} 模型名已自动修正：{model} → {fixed_model}")
+                    self._append_log(f"鎻愮ず锛歿title} 妯″瀷鍚嶅凡鑷姩淇锛歿model} 鈫?{fixed_model}")
                     self.stage_model_vars[stage].set(fixed_model)
                     model = fixed_model
             if provider == "doubao":
                 saved_endpoint = self.doubao_endpoint_var.get().strip()
-                if not model or model == "ep-请填写推理接入点ID":
+                if not model or model == "ep-璇峰～鍐欐帹鐞嗘帴鍏ョ偣ID":
                     model = saved_endpoint
                     if model:
                         self.stage_model_vars[stage].set(model)
                 if doubao_model_looks_like_api_key(model):
                     messagebox.showerror(
-                        "豆包模型名填写错误",
-                        f"{title} 的模型名看起来像 API Key。\n\n"
-                        "模型名栏请填写火山方舟推理接入点 ID（通常 ep- 开头），"
-                        "或 doubao- 开头的可直连 Model ID；API Key 请填写在下方“豆包/火山方舟 API Key”。"
+                        "璞嗗寘妯″瀷鍚嶅～鍐欓敊璇?,
+                        f"{title} 鐨勬ā鍨嬪悕鐪嬭捣鏉ュ儚 API Key銆俓n\n"
+                        "妯″瀷鍚嶆爮璇峰～鍐欑伀灞辨柟鑸熸帹鐞嗘帴鍏ョ偣 ID锛堥€氬父 ep- 寮€澶达級锛?
+                        "鎴?doubao- 寮€澶寸殑鍙洿杩?Model ID锛汚PI Key 璇峰～鍐欏湪涓嬫柟鈥滆眴鍖?鐏北鏂硅垷 API Key鈥濄€?
                     )
                     return None
                 if saved_endpoint and doubao_model_looks_like_api_key(saved_endpoint):
                     messagebox.showerror(
-                        "豆包接入点填写错误",
-                        "豆包接入点看起来像 API Key。请填写 ep-... 接入点 ID，API Key 填到豆包 Key 输入框。"
+                        "璞嗗寘鎺ュ叆鐐瑰～鍐欓敊璇?,
+                        "璞嗗寘鎺ュ叆鐐圭湅璧锋潵鍍?API Key銆傝濉啓 ep-... 鎺ュ叆鐐?ID锛孉PI Key 濉埌璞嗗寘 Key 杈撳叆妗嗐€?
                     )
                     return None
             key = provider_key(provider)
             if provider not in {"dry-run", "none"} and not key and not read_api_key(provider, ""):
-                self._append_log(f"提示：{title} 的 {provider} API Key 为空，程序会尝试读取环境变量或本地 key 文件；如果仍为空会报错。")
+                self._append_log(f"鎻愮ず锛歿title} 鐨?{provider} API Key 涓虹┖锛岀▼搴忎細灏濊瘯璇诲彇鐜鍙橀噺鎴栨湰鍦?key 鏂囦欢锛涘鏋滀粛涓虹┖浼氭姤閿欍€?)
             stage_values[stage] = (provider, model, key)
 
         image_provider = self.image_provider_var.get().strip() or "openai"
@@ -1881,7 +1845,7 @@ SMTP：
             if start_episode_no < 1:
                 raise ValueError
         except Exception:
-            messagebox.showerror("参数错误", "起始集数必须是大于等于 1 的整数。")
+            messagebox.showerror("鍙傛暟閿欒", "璧峰闆嗘暟蹇呴』鏄ぇ浜庣瓑浜?1 鐨勬暣鏁般€?)
             return None
 
         start_stage = (self.start_stage_var.get().strip() or "outline")
@@ -1965,7 +1929,7 @@ SMTP：
 
     def _run(self, test_b_image_limit: int = 0) -> None:
         if self.running:
-            messagebox.showinfo("正在运行", "当前任务还在运行。可以点击“停止”安全停止。")
+            messagebox.showinfo("姝ｅ湪杩愯", "褰撳墠浠诲姟杩樺湪杩愯銆傚彲浠ョ偣鍑烩€滃仠姝⑩€濆畨鍏ㄥ仠姝€?)
             return
         self.cancel_event = threading.Event()
         args = self._validate()
@@ -1976,26 +1940,26 @@ SMTP：
         self._save_settings()
         self.last_output_dir = args.out
         self.running = True
-        self.status_var.set("运行中…")
+        self.status_var.set("杩愯涓€?)
         self._set_running_state(True)
         self.progress.start(10)
         self._clear_log()
-        self._append_log("开始运行。当前流程：生成大纲 → 分集提示词 → 切分 PDF → 生成脚本 → 台词润色 → 配图/后处理 → 拆分脚本与图片。")
-        self._append_log("PDF 策略：禁止 PDF 直传；只把本地 PyMuPDF4LLM/pypdf 解析后的 Markdown/文本传给模型。")
-        self._append_log(f"本地解析：{args.local_parse_mode} / 解析器={args.mineru_backend}")
+        self._append_log("寮€濮嬭繍琛屻€傚綋鍓嶆祦绋嬶細鐢熸垚澶х翰 鈫?鍒嗛泦鎻愮ず璇?鈫?鍒囧垎 PDF 鈫?鐢熸垚鑴氭湰 鈫?鍙拌瘝娑﹁壊 鈫?閰嶅浘/鍚庡鐞?鈫?鎷嗗垎鑴氭湰涓庡浘鐗囥€?)
+        self._append_log("PDF 绛栫暐锛氱姝?PDF 鐩翠紶锛涘彧鎶婃湰鍦?PyMuPDF4LLM/pypdf 瑙ｆ瀽鍚庣殑 Markdown/鏂囨湰浼犵粰妯″瀷銆?)
+        self._append_log(f"鏈湴瑙ｆ瀽锛歿args.local_parse_mode} / 瑙ｆ瀽鍣?{args.mineru_backend}")
         for label, provider, model in [
-            ("大纲生成", args.outline_provider, args.outline_model),
-            ("脚本生成", args.script_provider, args.script_model),
-            ("台词润色", args.polish_provider, args.polish_model),
+            ("澶х翰鐢熸垚", args.outline_provider, args.outline_model),
+            ("鑴氭湰鐢熸垚", args.script_provider, args.script_model),
+            ("鍙拌瘝娑﹁壊", args.polish_provider, args.polish_model),
         ]:
-            self._append_log(f"{label}模型：{provider} / {model or '默认模型'}")
-        self._append_log(f"生图模型：{args.image_provider} / {args.image_model or '默认模型'}")
+            self._append_log(f"{label}妯″瀷锛歿provider} / {model or '榛樿妯″瀷'}")
+        self._append_log(f"鐢熷浘妯″瀷锛歿args.image_provider} / {args.image_model or '榛樿妯″瀷'}")
         if args.test_b_image_limit:
-            self._append_log(f"测试运行：先生成/复用全文故事线大纲；B 图只生成/处理前 {args.test_b_image_limit} 张，后续仍执行拆分、打包并尝试发送邮件。")
-        self._append_log(f"配图节奏：每句台词对应一幕画面，单幕约 {args.image_interval_seconds} 秒。")
-        self._append_log("分集数量：优先由大纲模型阅读全文后按故事线决定；可组合全书不同位置的材料，章节页码只作为原文定位依据。")
-        self._append_log(f"输入 PDF：{args.book}")
-        self._append_log(f"输出目录：{args.out}")
+            self._append_log(f"娴嬭瘯杩愯锛氬厛鐢熸垚/澶嶇敤鍏ㄦ枃鏁呬簨绾垮ぇ绾诧紱B 鍥惧彧鐢熸垚/澶勭悊鍓?{args.test_b_image_limit} 寮狅紝鍚庣画浠嶆墽琛屾媶鍒嗐€佹墦鍖呭苟灏濊瘯鍙戦€侀偖浠躲€?)
+        self._append_log(f"閰嶅浘鑺傚锛氭瘡鍙ュ彴璇嶅搴斾竴骞曠敾闈紝鍗曞箷绾?{args.image_interval_seconds} 绉掋€?)
+        self._append_log("鍒嗛泦鏁伴噺锛氫紭鍏堢敱澶х翰妯″瀷闃呰鍏ㄦ枃鍚庢寜鏁呬簨绾垮喅瀹氾紱鍙粍鍚堝叏涔︿笉鍚屼綅缃殑鏉愭枡锛岀珷鑺傞〉鐮佸彧浣滀负鍘熸枃瀹氫綅渚濇嵁銆?)
+        self._append_log(f"杈撳叆 PDF锛歿args.book}")
+        self._append_log(f"杈撳嚭鐩綍锛歿args.out}")
         thread = threading.Thread(target=self._worker, args=(args,), daemon=True)
         thread.start()
 
@@ -2005,7 +1969,7 @@ SMTP：
         self.cancel_event.set()
         self.stop_button.configure(state="disabled")
         self.stop_button_top.configure(state="disabled")
-        self._append_log("已请求停止：当前 API 请求返回后，程序会在下一步前安全停止。")
+        self._append_log("宸茶姹傚仠姝細褰撳墠 API 璇锋眰杩斿洖鍚庯紝绋嬪簭浼氬湪涓嬩竴姝ュ墠瀹夊叏鍋滄銆?)
 
     def _worker(self, args: PipelineArgs) -> None:
         def handler(message: str) -> None:
@@ -2042,17 +2006,17 @@ SMTP：
         self.progress.stop()
         self._set_running_state(False)
         if success:
-            self.status_var.set("已完成")
-            self._append_log("✅ 全部完成。")
-            messagebox.showinfo("完成", f"生成完成。\n\n输出目录：\n{out_dir}")
+            self.status_var.set("宸插畬鎴?)
+            self._append_log("鉁?鍏ㄩ儴瀹屾垚銆?)
+            messagebox.showinfo("瀹屾垚", f"鐢熸垚瀹屾垚銆俓n\n杈撳嚭鐩綍锛歕n{out_dir}")
         elif cancelled:
-            self.status_var.set("已停止")
-            self._append_log("⏹️ 已停止。已生成的文件会保留在输出目录。")
-            messagebox.showinfo("已停止", f"任务已停止。\n\n已生成的文件保留在：\n{out_dir}")
+            self.status_var.set("宸插仠姝?)
+            self._append_log("鈴癸笍 宸插仠姝€傚凡鐢熸垚鐨勬枃浠朵細淇濈暀鍦ㄨ緭鍑虹洰褰曘€?)
+            messagebox.showinfo("宸插仠姝?, f"浠诲姟宸插仠姝€俓n\n宸茬敓鎴愮殑鏂囦欢淇濈暀鍦細\n{out_dir}")
         else:
-            self.status_var.set("运行失败")
-            self._append_log(f"❌ 运行失败：{error}")
-            messagebox.showerror("运行失败", f"运行失败：\n{error}\n\n详情请查看日志。")
+            self.status_var.set("杩愯澶辫触")
+            self._append_log(f"鉂?杩愯澶辫触锛歿error}")
+            messagebox.showerror("杩愯澶辫触", f"杩愯澶辫触锛歕n{error}\n\n璇︽儏璇锋煡鐪嬫棩蹇椼€?)
 
     def _set_running_state(self, is_running: bool) -> None:
         start_state = "disabled" if is_running else "normal"
@@ -2081,7 +2045,7 @@ SMTP：
         out_text = self.out_var.get().strip().strip('"')
         target = Path(out_text).expanduser() if out_text else self.last_output_dir
         if not target:
-            messagebox.showinfo("没有输出目录", "还没有设置输出目录。")
+            messagebox.showinfo("娌℃湁杈撳嚭鐩綍", "杩樻病鏈夎缃緭鍑虹洰褰曘€?)
             return
         target.mkdir(parents=True, exist_ok=True)
         try:
@@ -2092,32 +2056,32 @@ SMTP：
             else:
                 subprocess.Popen(["xdg-open", str(target)])
         except Exception as exc:
-            messagebox.showerror("无法打开目录", str(exc))
+            messagebox.showerror("鏃犳硶鎵撳紑鐩綍", str(exc))
 
     def _clear_output_dir(self) -> None:
         out_text = self.out_var.get().strip().strip('"')
         target = Path(out_text).expanduser() if out_text else self.last_output_dir
         if not target:
-            messagebox.showinfo("没有输出目录", "还没有设置输出目录。")
+            messagebox.showinfo("娌℃湁杈撳嚭鐩綍", "杩樻病鏈夎缃緭鍑虹洰褰曘€?)
             return
         try:
             target = target.resolve()
         except Exception:
             target = target
         if str(target).strip() in {"", str(target.anchor), str(PROJECT_ROOT.resolve())}:
-            messagebox.showerror("不能清空", "这个目录过于危险，程序拒绝清空。请换一个明确的输出目录。")
+            messagebox.showerror("涓嶈兘娓呯┖", "杩欎釜鐩綍杩囦簬鍗遍櫓锛岀▼搴忔嫆缁濇竻绌恒€傝鎹竴涓槑纭殑杈撳嚭鐩綍銆?)
             return
         target.mkdir(parents=True, exist_ok=True)
         items = list(target.iterdir())
         if not items:
-            messagebox.showinfo("目录已是空的", f"输出目录当前为空：\n{target}")
+            messagebox.showinfo("鐩綍宸叉槸绌虹殑", f"杈撳嚭鐩綍褰撳墠涓虹┖锛歕n{target}")
             return
-        if not messagebox.askyesno("确认清空输出目录", f"确定要清空下面目录中的全部内容吗？\n\n{target}\n\n这个操作不可撤销。"):
+        if not messagebox.askyesno("纭娓呯┖杈撳嚭鐩綍", f"纭畾瑕佹竻绌轰笅闈㈢洰褰曚腑鐨勫叏閮ㄥ唴瀹瑰悧锛焅n\n{target}\n\n杩欎釜鎿嶄綔涓嶅彲鎾ら攢銆?):
             return
         book_text = self.book_var.get().strip().strip('"')
         preserved = backup_outline_files_before_clear(target, Path(book_text).expanduser() if book_text else None)
         if preserved:
-            self._append_log(f"🧰 已备份分集大纲到：{preserved[0].parent}")
+            self._append_log(f"馃О 宸插浠藉垎闆嗗ぇ绾插埌锛歿preserved[0].parent}")
         failed = []
         for item in items:
             try:
@@ -2128,17 +2092,17 @@ SMTP：
             except Exception as exc:
                 failed.append(f"{item.name}: {exc}")
         if failed:
-            self._append_log("⚠️ 输出目录已部分清空，但以下项目删除失败：")
+            self._append_log("鈿狅笍 杈撳嚭鐩綍宸查儴鍒嗘竻绌猴紝浣嗕互涓嬮」鐩垹闄ゅけ璐ワ細")
             for line in failed:
                 self._append_log("  - " + line)
-            messagebox.showwarning("部分删除失败", "输出目录已部分清空，详情请查看日志。")
+            messagebox.showwarning("閮ㄥ垎鍒犻櫎澶辫触", "杈撳嚭鐩綍宸查儴鍒嗘竻绌猴紝璇︽儏璇锋煡鐪嬫棩蹇椼€?)
         else:
-            self._append_log(f"🧹 已清空输出目录：{target}")
-            messagebox.showinfo("已清空", f"已清空输出目录：\n{target}")
+            self._append_log(f"馃Ч 宸叉竻绌鸿緭鍑虹洰褰曪細{target}")
+            messagebox.showinfo("宸叉竻绌?, f"宸叉竻绌鸿緭鍑虹洰褰曪細\n{target}")
 
     def _show_prompts(self) -> None:
         win = tk.Toplevel(self)
-        win.title("提示词 / 规范")
+        win.title("鎻愮ず璇?/ 瑙勮寖")
         win.geometry("980x720")
         win.transient(self)
         frame = ttk.Frame(win, padding=10)
@@ -2146,11 +2110,11 @@ SMTP：
         frame.columnconfigure(0, weight=1)
         frame.rowconfigure(1, weight=1)
         self._build_prompt_tab(frame)
-        self.status_var.set("正在编辑提示词 / 后处理规范")
+        self.status_var.set("姝ｅ湪缂栬緫鎻愮ず璇?/ 鍚庡鐞嗚鑼?)
 
     def _show_visual(self) -> None:
         win = tk.Toplevel(self)
-        win.title("视觉后处理")
+        win.title("瑙嗚鍚庡鐞?)
         win.geometry("1040x620")
         win.transient(self)
         frame = ttk.Frame(win, padding=10)
@@ -2158,7 +2122,7 @@ SMTP：
         frame.columnconfigure(0, weight=1)
         frame.rowconfigure(1, weight=1)
         self._build_visual_tab(frame)
-        self.status_var.set("正在编辑视觉后处理参数")
+        self.status_var.set("姝ｅ湪缂栬緫瑙嗚鍚庡鐞嗗弬鏁?)
 
     def _settings_data(self) -> dict:
         previous = {}
@@ -2319,15 +2283,15 @@ SMTP：
             self.stage_provider_vars["script"].set("openai")
             self.stage_model_vars["script"].set(DEFAULT_OPENAI_TEXT_MODEL)
             repaired_settings = True
-        elif self.stage_provider_vars["script"].get().strip() == "openai" and self.stage_model_vars["script"].get().strip() in {"", "gpt-5.5-pro", "gpt-5.4-nano"}:
+        elif self.stage_provider_vars["script"].get().strip() == "openai" and self.stage_model_vars["script"].get().strip() in {"", "gpt-5.5-pro", "gpt-5.5"}:
             self.stage_model_vars["script"].set(DEFAULT_OPENAI_TEXT_MODEL)
             repaired_settings = True
         if self.stage_provider_vars["polish"].get().strip() in {"", "gemini", "doubao", "openai"}:
             self.stage_provider_vars["polish"].set("deepseek")
-            self.stage_model_vars["polish"].set("deepseek-v4-pro")
+            self.stage_model_vars["polish"].set("deepseek-chat")
             repaired_settings = True
         elif self.stage_provider_vars["polish"].get().strip() == "deepseek" and not self.stage_model_vars["polish"].get().strip():
-            self.stage_model_vars["polish"].set("deepseek-v4-pro")
+            self.stage_model_vars["polish"].set("deepseek-chat")
             repaired_settings = True
         self.stage_provider_vars["episode_prompt"].set(self.stage_provider_vars["script"].get())
         self.stage_model_vars["episode_prompt"].set(self.stage_model_vars["script"].get())
@@ -2351,7 +2315,7 @@ SMTP：
             if provider == "openai" and model in {"", "gpt-4.1-mini", "gpt-4o-mini"}:
                 self.stage_model_vars[stage].set(DEFAULT_OPENAI_TEXT_MODEL)
                 repaired_settings = True
-            if provider == "doubao" and model == "ep-请填写推理接入点ID":
+            if provider == "doubao" and model == "ep-璇峰～鍐欐帹鐞嗘帴鍏ョ偣ID":
                 self.stage_model_vars[stage].set("")
                 repaired_settings = True
         if self.image_provider_var.get().strip() in {"", "none", "gemini"}:
@@ -2362,18 +2326,18 @@ SMTP：
             self.image_model_var.set("gpt-image-2")
             repaired_settings = True
 
-        # 提示词已外置到 prompts/ 目录；旧版 gui_settings.json 中的 prompts 不再覆盖文件。
+        # 鎻愮ず璇嶅凡澶栫疆鍒?prompts/ 鐩綍锛涙棫鐗?gui_settings.json 涓殑 prompts 涓嶅啀瑕嗙洊鏂囦欢銆?
         self._reload_prompt_files(update_editors=True)
         for stage, _title, _tip in TEXT_STAGES:
             self._on_stage_provider_change(stage)
         self._on_image_provider_change()
         if repaired_settings:
             self._save_settings()
-            self._append_log("已自动修复旧模型配置，并保存到 gui_settings.json。")
+            self._append_log("宸茶嚜鍔ㄤ慨澶嶆棫妯″瀷閰嶇疆锛屽苟淇濆瓨鍒?gui_settings.json銆?)
 
     def _on_close(self) -> None:
         if self.running:
-            if not messagebox.askyesno("任务正在运行", "任务正在运行中。要先请求停止并退出吗？当前 API 请求可能仍需返回后才会停下。"):
+            if not messagebox.askyesno("浠诲姟姝ｅ湪杩愯", "浠诲姟姝ｅ湪杩愯涓€傝鍏堣姹傚仠姝㈠苟閫€鍑哄悧锛熷綋鍓?API 璇锋眰鍙兘浠嶉渶杩斿洖鍚庢墠浼氬仠涓嬨€?):
                 return
             if self.cancel_event is not None:
                 self.cancel_event.set()
@@ -2384,3 +2348,6 @@ SMTP：
 def main() -> None:
     app = AutoMediaGUI()
     app.mainloop()
+
+
+

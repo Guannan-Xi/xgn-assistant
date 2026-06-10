@@ -56,6 +56,7 @@ class UIManager:
             "clear_existing_images_before_draw": bool(saved_slot.get("clear_existing_images_before_draw", self.model_scheme.get("clear_existing_images_before_draw", False))),
             "email_after_completion": bool(saved_slot.get("email_after_completion", self.model_scheme.get("email_after_completion", False))),
             "email_recipient": normalize_email_recipient(saved_slot.get("email_recipient", self.model_scheme.get("email_recipient", ""))),
+            "daily_skip_medical_related": bool(saved_slot.get("daily_skip_medical_related", self.model_scheme.get("daily_skip_medical_related", False))),
             "test_b_image_limit": max(0, int(saved_slot.get("test_b_image_limit", 0) or 0)),
         })
         if saved_slot.get("pdf_path") or saved_slot.get("current_pdf_path"):
@@ -100,6 +101,8 @@ class UIManager:
             slot["email_after_completion"] = bool(self.email_after_completion_var.get())
         if hasattr(self, "email_recipient_var"):
             slot["email_recipient"] = normalize_email_recipient(self.email_recipient_var.get())
+        if hasattr(self, "daily_skip_medical_related_var"):
+            slot["daily_skip_medical_related"] = bool(self.daily_skip_medical_related_var.get())
 
     def _load_slot_to_ui(self, slot: dict):
         if hasattr(self, "pdf_var"):
@@ -128,6 +131,8 @@ class UIManager:
             self.email_after_completion_var.set(bool(slot.get("email_after_completion", False)))
         if hasattr(self, "email_recipient_var"):
             self.email_recipient_var.set(normalize_email_recipient(slot.get("email_recipient", "")))
+        if hasattr(self, "daily_skip_medical_related_var"):
+            self.daily_skip_medical_related_var.set(bool(slot.get("daily_skip_medical_related", False)))
         if hasattr(self, "toc_tree"):
             self.refresh_tree(slot.get("current_toc", []))
         if hasattr(self, "text_engine_var"):
@@ -347,6 +352,7 @@ class UIManager:
         self.content_style_var = ctk.StringVar(value=normalize_content_style(state.get("content_style") or self.model_scheme.get("content_style", get_active_content_style())))
         self.email_after_completion_var = ctk.BooleanVar(value=bool(state.get("email_after_completion", False)))
         self.email_recipient_var = ctk.StringVar(value=normalize_email_recipient(state.get("email_recipient", "")))
+        self.daily_skip_medical_related_var = ctk.BooleanVar(value=bool(state.get("daily_skip_medical_related", self.model_scheme.get("daily_skip_medical_related", False))))
 
         # ---------------- 主要工作流 ----------------
         ctk.CTkLabel(left_frame, text="主要工作流", anchor="w", font=ctk.CTkFont(size=15, weight="bold"), text_color="#1D1D1F").pack(padx=20, pady=(0, 6), fill="x")
@@ -391,6 +397,14 @@ class UIManager:
             wrap="word",
         )
         self.daily_journals_textbox.insert("1.0", self._default_daily_journal_text())
+        self.daily_skip_medical_check = ctk.CTkCheckBox(
+            workflow_card,
+            text="微信避险：跳过医学/疾病相关论文",
+            variable=self.daily_skip_medical_related_var,
+            text_color="#1D1D1F",
+            font=ctk.CTkFont(size=12),
+            command=lambda: self._save_task_page_settings(log=False),
+        )
         self.btn_start_frontier_tracking = ctk.CTkButton(
             workflow_card,
             text="开始运行前沿追踪",
@@ -1464,6 +1478,7 @@ class UIManager:
             "content_style": normalize_content_style(self.content_style_var.get()) if hasattr(self, "content_style_var") else get_active_content_style(),
             "email_after_completion": bool(self.email_after_completion_var.get()) if hasattr(self, "email_after_completion_var") else False,
             "email_recipient": normalize_email_recipient(self.email_recipient_var.get()) if hasattr(self, "email_recipient_var") else "",
+            "daily_skip_medical_related": bool(self.daily_skip_medical_related_var.get()) if hasattr(self, "daily_skip_medical_related_var") else False,
         }
         self.model_scheme = scheme
         self._capture_active_slot_from_ui()
@@ -1582,6 +1597,7 @@ class UIManager:
         widgets = [
             getattr(self, "daily_journals_label", None),
             getattr(self, "daily_journals_textbox", None),
+            getattr(self, "daily_skip_medical_check", None),
             getattr(self, "btn_start_frontier_tracking", None),
         ]
         if visible:
@@ -1590,7 +1606,9 @@ class UIManager:
             if widgets[1]:
                 widgets[1].pack(padx=14, pady=(0, 8), fill="x", before=self.frontier_hint_label)
             if widgets[2]:
-                widgets[2].pack(padx=14, pady=(0, 10), fill="x", before=self.frontier_hint_label)
+                widgets[2].pack(padx=14, pady=(0, 8), anchor="w", before=self.frontier_hint_label)
+            if widgets[3]:
+                widgets[3].pack(padx=14, pady=(0, 10), fill="x", before=self.frontier_hint_label)
             if hasattr(self, "frontier_hint_label"):
                 self.frontier_hint_label.configure(text="确认或编辑期刊列表后，点击“开始运行前沿追踪”。")
         else:
@@ -1854,8 +1872,11 @@ class UIManager:
         os.makedirs(out_dir, exist_ok=True)
         daily_journals = self._get_daily_journals_text()
         daily_journal_items = [x.strip(" ，,;；") for x in re.split(r"[\n,，;；]+", daily_journals) if x.strip(" ，,;；")]
+        skip_medical_related = bool(self.daily_skip_medical_related_var.get()) if hasattr(self, "daily_skip_medical_related_var") else False
         self.log(f"🧠 已加入每日研究速递任务：{out_dir}")
         self.log(f"📚 本次检索期刊 {len(daily_journal_items)} 个：" + "、".join(daily_journal_items))
+        if skip_medical_related:
+            self.log("🛡️ 微信避险已启用：将跳过医学、疾病、诊疗、患者或临床外推相关论文。")
         self._update_task_page_ui()
         self._render_active_task_log()
         self._render_main_task_log()
@@ -1865,6 +1886,7 @@ class UIManager:
             "days": 14,
             "max_articles": 5,
             "journals": daily_journals,
+            "skip_medical_related": skip_medical_related,
             "text_engine": text_engine,
             "polish_engine": polish_engine,
             "image_engine": image_engine,
@@ -2323,6 +2345,245 @@ class UIManager:
         self.root.mainloop()
 
 
+class _HeadlessRoot:
+    def after(self, _delay_ms, callback=None, *args):
+        if callback:
+            return callback(*args)
+        return None
+
+
+class _HeadlessVar:
+    def __init__(self, value=""):
+        self._value = value
+
+    def get(self):
+        return self._value
+
+    def set(self, value):
+        self._value = value
+
+
+class _HeadlessScienceManager:
+    def __init__(self, out_dir: str):
+        self.root = _HeadlessRoot()
+        self.out_var = _HeadlessVar(out_dir)
+
+    def log(self, message=""):
+        print(str(message), flush=True)
+
+    def refresh_tree_for_job(self, job_state: dict, chapters: list):
+        job_state["current_toc"] = chapters or []
+
+    def mark_as_parsed_for_job(self, job_state: dict, idx: int):
+        try:
+            idx = int(idx)
+            if 0 <= idx < len(job_state.get("current_toc", [])):
+                job_state["current_toc"][idx]["parsed"] = True
+        except Exception:
+            pass
+
+    def toggle_buttons_for_job(self, job_state: dict, enabled=True):
+        job_state["is_running"] = not bool(enabled)
+
+
+def _headless_clean_path(path: str) -> str:
+    text = str(path or "").strip().strip("'\"")
+    if platform.system() == "Windows":
+        if text.startswith("//?/"):
+            text = text[4:]
+        if text.startswith("\\\\?\\"):
+            text = text[4:]
+        text = os.path.normpath(text)
+        if os.path.isabs(text) and not text.startswith("\\\\?\\"):
+            text = "\\\\?\\" + text
+    return text
+
+
+def _first_task_page_slot() -> dict:
+    try:
+        settings = load_task_page_settings()
+        slots = settings.get("slots", []) if isinstance(settings, dict) else []
+        if slots and isinstance(slots[0], dict):
+            return dict(slots[0])
+    except Exception:
+        pass
+    return {}
+
+
+def _validate_headless_science_outputs(out_dir: str, toc: list) -> tuple[bool, str]:
+    missing: list[str] = []
+    for ch in [item for item in toc if isinstance(item, dict) and item.get("selected")]:
+        title = str(ch.get("title") or "")
+        try:
+            idx_in_toc = toc.index(ch)
+            chapter_meta = parse_chapter_title_metadata(title, idx_in_toc)
+            ch_dir = resolve_chapter_output_dir(out_dir, title, idx_in_toc, chapter_meta, logger=None)
+        except Exception:
+            ch_dir = os.path.join(out_dir, safe_filename(title))
+        if not os.path.isdir(ch_dir):
+            missing.append(f"{title}: chapter folder missing")
+            continue
+        txt_files = []
+        for root, _dirs, files in os.walk(ch_dir):
+            for name in files:
+                if name.lower().endswith(".txt") and "脚本" in name:
+                    path = os.path.join(root, name)
+                    try:
+                        if os.path.getsize(path) > 500:
+                            txt_files.append(path)
+                    except Exception:
+                        pass
+        image_files = []
+        for root, _dirs, files in os.walk(ch_dir):
+            for name in files:
+                if os.path.splitext(name)[1].lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+                    image_files.append(os.path.join(root, name))
+        if not txt_files:
+            missing.append(f"{title}: final script missing")
+        if not image_files:
+            missing.append(f"{title}: generated image missing")
+    if missing:
+        return False, "; ".join(missing[:6])
+    return True, "ok"
+
+
+def _apply_shared_model_config_for_headless() -> None:
+    config_paths = [
+        os.environ.get("QUANLAN_SHARED_MODEL_CONFIG_FILE", ""),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", ".env.quanlan-model.local.json")),
+        os.path.abspath(os.path.join(os.getcwd(), "..", ".env.quanlan-model.local.json")),
+        os.path.abspath(os.path.join(os.getcwd(), "..", "..", ".env.quanlan-model.local.json")),
+    ]
+    data = None
+    for path in config_paths:
+        if not path:
+            continue
+        try:
+            with open(path, "r", encoding="utf-8-sig") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                data = loaded.get("models") if isinstance(loaded.get("models"), dict) else loaded
+                break
+        except Exception:
+            continue
+    if not isinstance(data, dict):
+        return
+
+    def value(*names: str) -> str:
+        for name in names:
+            text = str(data.get(name) or "").strip()
+            if text:
+                return text
+        return ""
+
+    text_url = value("research_text_url", "text_url", "research_text_base_url", "foreign_base_url", "gpt_base_url")
+    image_url = value("research_image_url", "image_url", "research_image_base_url", "gpt_image_base_url", "foreign_base_url")
+    polish_url = value("research_polish_url", "polish_url", "research_polish_base_url", "culture_polish_url", "foreign_base_url")
+    if text_url:
+        for env_name in ("FOREIGN_MODEL_BASE_URL", "NEWAPI_BASE_URL", "OPENAI_BASE_URL", "OPENAI_API_BASE", "CHATSHARE_API_BASE", "RESEARCH_TEXT_BASE_URL"):
+            os.environ[env_name] = text_url
+    if image_url:
+        os.environ["GPT_IMAGE_BASE_URL"] = image_url
+        os.environ["RESEARCH_IMAGE_BASE_URL"] = image_url
+        os.environ["FOREIGN_MODEL_BASE_URL"] = image_url
+        os.environ["NEWAPI_BASE_URL"] = image_url
+    if polish_url:
+        os.environ["RESEARCH_POLISH_BASE_URL"] = polish_url
+    minimax_url = value("minimax_url", "minimax_base_url")
+    if minimax_url:
+        os.environ["MINIMAX_BASE_URL"] = minimax_url
+    gpt_pro_url = value("gpt_pro_url", "gpt_pro_base_url")
+    if gpt_pro_url:
+        os.environ["GPT_PRO_BASE_URL"] = gpt_pro_url
+
+
+def _run_science_classic_headless(pdf_path: str = "", out_dir: str = "", test_b_image_limit: int = 0) -> int:
+    global ui_manager
+    _apply_shared_model_config_for_headless()
+    slot = _first_task_page_slot()
+    model_scheme = load_model_scheme()
+    pdf_path = _headless_clean_path(pdf_path or slot.get("pdf_path") or slot.get("current_pdf_path") or "")
+    out_dir = _headless_clean_path(out_dir or slot.get("out_dir") or BASE_SAVE_FOLDER)
+    raw_toc = slot.get("current_toc") if isinstance(slot.get("current_toc"), list) else []
+    current_toc = [dict(ch) if isinstance(ch, dict) else ch for ch in raw_toc]
+    limit = max(0, int(test_b_image_limit or slot.get("test_b_image_limit", 0) or 0))
+    if limit:
+        first_selected = False
+        for ch in current_toc:
+            if not isinstance(ch, dict):
+                continue
+            keep = (
+                not first_selected
+                and bool(ch.get("selected"))
+                and is_scriptable_chapter_title(ch.get("title", ""))
+            )
+            ch["selected"] = keep
+            first_selected = first_selected or keep
+    selected_count = len([ch for ch in current_toc if isinstance(ch, dict) and ch.get("selected")])
+    if not pdf_path or not os.path.exists(pdf_path):
+        print(f"ERROR: science classic PDF not found: {pdf_path}", flush=True)
+        return 2
+    if not current_toc or selected_count <= 0:
+        print("ERROR: science classic TOC is empty or has no selected chapters. Read TOC and select chapters in Web first.", flush=True)
+        return 3
+    os.makedirs(out_dir, exist_ok=True)
+    job_state = make_book_task_state(0)
+    job_state.update({
+        "slot_index": 0,
+        "slot_label": "WebScienceClassic",
+        "is_running": True,
+        "current_toc": current_toc,
+        "current_pdf_path": pdf_path,
+        "pdf_path": pdf_path,
+        "out_dir": out_dir,
+        "content_style": normalize_content_style(slot.get("content_style") or model_scheme.get("content_style", get_active_content_style())),
+        "text_engine": slot.get("text_engine") or model_scheme.get("text_engine", "GPT-5.5"),
+        "review_engine": slot.get("review_engine") or model_scheme.get("review_engine", DEFAULT_MODEL_SCHEME["review_engine"]),
+        "image_engine": slot.get("image_engine") or model_scheme.get("image_engine", IMAGE_ENGINE_GPT_IMAGE2),
+        "call_mode": slot.get("call_mode") or model_scheme.get("call_mode", WEB_CALL_MODE_API),
+        "log_lines": [],
+    })
+    ui_manager = _HeadlessScienceManager(out_dir)
+    print(f"Web science classic job started: PDF={pdf_path}", flush=True)
+    print(f"Output folder: {out_dir}", flush=True)
+    print(f"Selected chapters: {selected_count} / TOC total: {len(current_toc)}", flush=True)
+    if limit:
+        print(f"Test-B mode: limited to {limit} B image(s) and the first selected scriptable chapter.", flush=True)
+    threading.Thread(target=worker_logic, daemon=True, name="QuanLanHeadlessWorker-1").start()
+    task_queue.put({
+        "action": "START_PIPELINE",
+        "job_state": job_state,
+        "slot_index": 0,
+        "out_dir": out_dir,
+        "do_parse": bool(slot.get("flow_parse", model_scheme.get("flow_parse", True))),
+        "do_script": bool(slot.get("flow_script", model_scheme.get("flow_script", True))),
+        "do_image": bool(slot.get("flow_image", model_scheme.get("flow_image", True))),
+        "clear_existing_images": bool(slot.get("clear_existing_images_before_draw", model_scheme.get("clear_existing_images_before_draw", False))),
+        "test_b_image_limit": limit,
+        "direct_pdf_to_llm": False,
+        "text_engine": job_state["text_engine"],
+        "review_engine": job_state["review_engine"],
+        "image_engine": job_state["image_engine"],
+        "call_mode": job_state["call_mode"],
+        "grok_key": load_grok_api_key(),
+        "gemini_key": load_gemini_api_key(),
+        "openai_key": load_openai_api_key(),
+        "image_key": load_image_api_key(),
+        "deepseek_key": load_deepseek_api_key(),
+        "content_style": job_state["content_style"],
+        "prompt_templates": load_prompt_templates(job_state["content_style"]),
+        "email_after_completion": bool(slot.get("email_after_completion", model_scheme.get("email_after_completion", False))),
+        "email_recipient": normalize_email_recipient(slot.get("email_recipient", model_scheme.get("email_recipient", ""))),
+    })
+    task_queue.join()
+    ok, message = _validate_headless_science_outputs(out_dir, current_toc)
+    if not ok:
+        print(f"ERROR: science classic output incomplete: {message}", flush=True)
+        return 4
+    print("Science classic output validation passed: script and image assets found.", flush=True)
+    return 0
+
+
 def run_cli_or_ui():
     """支持命令行批量后处理，也保留原 GUI 启动方式。"""
     import argparse
@@ -2345,6 +2606,7 @@ def run_cli_or_ui():
     parser.add_argument("--daily-out-dir", default="", help="每日研究速递输出目录；默认输出到 chapter_pdf_direct_output/每日研究速递/日期")
     parser.add_argument("--daily-days", type=int, default=14, help="检索最近多少天的 PubMed 文献，默认 14")
     parser.add_argument("--daily-max-articles", type=int, default=5, help="每日研究速递最多选取几篇文章，默认 5")
+    parser.add_argument("--daily-issue-count", type=int, default=0, help="清单续做本次最多生成几期；0 表示续做到清单用完")
     parser.add_argument("--daily-journals", default="", help="逗号分隔的期刊列表；默认使用内置神经科学顶刊列表")
     parser.add_argument("--daily-article-list", default="", help="从已有文献清单 JSON 续做；可传 00_文献信息.json 或所在目录")
     parser.add_argument("--daily-continue-until-exhausted", action="store_true", help="从已有文献清单连续制作新素材，直到清单用完")
@@ -2353,14 +2615,21 @@ def run_cli_or_ui():
     parser.add_argument("--daily-polish-engine", default="DeepSeek Chat（官方润色）", choices=TEXT_ENGINE_OPTIONS, help="每日研究速递中文终稿润色模型，默认 DeepSeek 官方")
     parser.add_argument("--daily-image-engine", default=IMAGE_ENGINE_GPT_IMAGE2, choices=IMAGE_ENGINE_OPTIONS, help="每日研究速递图片摘要模型，默认 生图专用｜GPT Image 2")
     parser.add_argument("--daily-skip-image-api", action="store_true", help="跳过图片 API，用本地占位图生成卡片，便于测试排版")
+    parser.add_argument("--daily-skip-medical-related", action="store_true", help="微信避险：跳过标题或摘要中明显涉及医学、疾病、诊疗、患者或临床外推的论文")
     parser.add_argument("--daily-email", action="store_true", help="每日研究速递生成完成后压缩并发送邮件")
     parser.add_argument("--daily-email-recipient", default="", help="每日研究速递收件邮箱；多个邮箱用逗号分隔")
+    parser.add_argument("--science-classic-run", action="store_true", help="Run science classic pipeline from Web without GUI")
+    parser.add_argument("--science-pdf", default="", help="Science classic PDF path")
+    parser.add_argument("--science-out-dir", default="", help="Science classic output folder")
+    parser.add_argument("--science-test-b-image-limit", type=int, default=0, help="Limit B images for Web test mode; 0 means unlimited")
     args = parser.parse_args()
     if args.content_style:
         scheme = load_model_scheme()
         scheme["content_style"] = normalize_content_style(args.content_style)
         save_model_scheme(scheme)
         refresh_postprocess_runtime_config()
+    if args.science_classic_run:
+        raise SystemExit(_run_science_classic_headless(args.science_pdf, args.science_out_dir, args.science_test_b_image_limit))
     if args.show_naming_rules:
         _safe_console_print(MANUAL_IMAGE_NAMING_RULES.rstrip())
         return
@@ -2371,27 +2640,36 @@ def run_cli_or_ui():
             max_articles=args.daily_max_articles,
             journals=args.daily_journals,
             article_list_path=args.daily_article_list,
+            skip_medical_related=bool(args.daily_skip_medical_related),
             logger=_safe_console_print,
         )
         _safe_console_print(f"文献清单已保存：{path}")
         return
     if args.daily_research_digest:
-        run_daily_research_digest(
-            out_dir=args.daily_out_dir,
-            days=args.daily_days,
-            max_articles=args.daily_max_articles,
-            journals=args.daily_journals,
-            article_list_path=args.daily_article_list,
-            continue_until_exhausted=bool(args.daily_continue_until_exhausted),
-            resume_existing=bool(args.daily_resume_existing),
-            text_engine=args.daily_text_engine,
-            polish_engine=args.daily_polish_engine,
-            image_engine=args.daily_image_engine,
-            skip_image_api=bool(args.daily_skip_image_api),
-            email_after_completion=bool(args.daily_email),
-            email_recipient=args.daily_email_recipient,
-            logger=_safe_console_print,
-        )
+        try:
+            run_daily_research_digest(
+                out_dir=args.daily_out_dir,
+                days=args.daily_days,
+                max_articles=args.daily_max_articles,
+                journals=args.daily_journals,
+                article_list_path=args.daily_article_list,
+                continue_until_exhausted=bool(args.daily_continue_until_exhausted),
+                issue_count=args.daily_issue_count,
+                resume_existing=bool(args.daily_resume_existing),
+                text_engine=args.daily_text_engine,
+                polish_engine=args.daily_polish_engine,
+                image_engine=args.daily_image_engine,
+                skip_image_api=bool(args.daily_skip_image_api),
+                skip_medical_related=bool(args.daily_skip_medical_related),
+                email_after_completion=bool(args.daily_email),
+                email_recipient=args.daily_email_recipient,
+                logger=_safe_console_print,
+            )
+        except Exception as exc:
+            if exc.__class__.__name__ == "DailyDigestQualityGateError":
+                _safe_console_print(f"每日研究速递未达到完整交付标准：{exc}")
+                raise SystemExit(2)
+            raise
         return
     if args.postprocess_folder:
         postprocess_image_folder(

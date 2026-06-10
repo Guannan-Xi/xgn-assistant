@@ -220,6 +220,19 @@ def write_roleplay_details(state: dict[str, Any], roles: list[dict[str, str]], i
                 }
                 for item in matched
             ],
+            "audience_objections": build_audience_objections(role_name, matched),
+            "changes_made": [
+                "已把相关观众风险进入问题单和补丁计划",
+                "下一轮优先检查标题、封面、开头、发布文案和观众理解",
+            ] if matched else [
+                "已完成该观众视角审片",
+                "本轮不自动改内容，继续积累真实播放、评论和转发反馈",
+            ],
+            "effect_summary": (
+                f"发现 {len(matched)} 类观众或发布风险；下一轮会用标题、封面、A1、C 段和发布包复测。"
+                if matched else
+                "本轮没有新增高优先级风险；继续保持观众反馈巡检。"
+            ),
             "conclusion": f"发现 {len(matched)} 个相关问题，需要转成内容/发布回归检查。" if matched else "本轮没有发现该角色视角下的新高优先级问题。",
             "recommendation": "优先修复开头、标题、封面、发布链路中影响真实观众理解和点击的问题。" if matched else "继续积累真实观众反馈和生成素材表现。",
             "needs_human_confirmation": any(item.get("severity") == "high" and item.get("area") in {"content-hook", "release"} for item in matched),
@@ -231,6 +244,13 @@ def write_roleplay_details(state: dict[str, Any], roles: list[dict[str, str]], i
     state["last_roleplay_details"] = details
     append_jsonl(EVENTS_FILE, {"project": "自媒体小猪理", "stage": "roleplay_review", "event": "roleplay-details-written", "roles": len(details)})
     return details
+
+
+def build_audience_objections(role_name: str, matched: list[dict[str, Any]]) -> list[str]:
+    questions = [f"虚拟用户质疑：{question}" for question in roleplay_questions(role_name)[:2]]
+    findings = [user_problem_line(issue) for issue in matched[:4]]
+    lines = [line for line in [*questions, *findings] if line]
+    return list(dict.fromkeys(lines)) or ["本轮该角色没有提出新的高优先级质疑。"]
 
 
 def append_roleplay_transcript(session_id: str, role: dict[str, str], detail: dict[str, Any], matched: list[dict[str, Any]]) -> None:
@@ -366,6 +386,8 @@ def roleplay_email_line(item: dict[str, Any], index: int) -> str:
     user = item.get("virtual_user") or "虚拟用户"
     focus = item.get("test_focus") or "真实使用场景"
     questions = item.get("simulated_questions") if isinstance(item.get("simulated_questions"), list) else roleplay_questions(user)
+    objections = item.get("audience_objections") if isinstance(item.get("audience_objections"), list) and item.get("audience_objections") else questions
+    changes = item.get("changes_made") if isinstance(item.get("changes_made"), list) and item.get("changes_made") else [item.get("recommendation") or "继续观察真实观众反馈。"]
     observed = item.get("observed_issues") or []
     count = len(observed) if isinstance(observed, list) else 0
     needs_confirm = "需要人工确认内容/发布类变更。" if item.get("needs_human_confirmation") else "暂不需要人工确认。"
@@ -375,8 +397,10 @@ def roleplay_email_line(item: dict[str, Any], index: int) -> str:
         result = "本轮没有发现新的高优先级风险。"
     return "\n".join([
         f"- {index + 1}. {user}",
-        f"  - 模拟提问：{' / '.join(str(question) for question in questions)}",
+        f"  - 观众质疑：{' / '.join(str(question) for question in objections)}",
         f"  - 检查重点：{focus}",
+        f"  - 做了什么：{' / '.join(str(change) for change in changes)}",
+        f"  - 效果：{item.get('effect_summary') or result}",
         f"  - 本轮结果：{result}",
         f"  - 具体发现：{roleplay_finding_line(item)}",
         f"  - 下一步：{needs_confirm}",
@@ -1099,13 +1123,14 @@ def idle_optimization(apply: bool, package_release: bool = True, state: dict[str
             "stdout": "",
             "stderr": json.dumps(availability, ensure_ascii=False),
         }
-    if package_release:
+    explicit_package = os.environ.get("XGN_SELF_OPTIMIZER_PACKAGE_UPDATE", "").strip().lower() in {"1", "true", "yes"}
+    if package_release and explicit_package:
         package = run(
-            [sys.executable, "tools/channel_manager.py", "package-update", "--note", "self-optimizer release update"],
+            [sys.executable, "tools/channel_manager.py", "--channel", "test", "package-update", "--note", "self-optimizer test update"],
             timeout=240,
         )
     else:
-        package = {"ok": True, "skipped": True, "reason": "no-new-issues-or-feedback"}
+        package = {"ok": True, "skipped": True, "reason": "explicit-update-required"}
     state = state if state is not None else read_json(STATE_FILE, {})
     book_candidates = refresh_book_candidates(state)
     result = {"audience_test_bot": bot, "release_package_update": package, "book_candidates": book_candidates, "apply": apply}

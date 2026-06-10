@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
 import fnmatch
@@ -24,6 +24,7 @@ UPDATE_LOCK_NAME = "release_upgrade.lock"
 EXCLUDE_DIRS = {
     ".git",
     ".workbench_runtime",
+    ".codex_self_learning",
     ".release_updates",
     "__pycache__",
     ".pytest_cache",
@@ -33,11 +34,11 @@ EXCLUDE_DIRS = {
     "output",
     "dist",
     "build",
+    "_temp",
 }
 EXCLUDE_NAMES = {
     ".env",
     "quanlan_dual_assistant_settings.json",
-    "quanlan_model_defaults.json",
     "gui_settings.json",
     "quanlan_email_settings.json",
     "relay_settings.json",
@@ -194,12 +195,15 @@ def package_update(args: argparse.Namespace) -> int:
                     zf.write(path, path.relative_to(tmp_root))
     pointer = update_dir / "pending_update.json"
     _write_json(pointer, {**manifest, "path": str(package_path)})
-    print(f"已生成发布版待升级包：{package_path}")
+    print(f"Generated {channel} pending update package, not applied: {package_path}")
     return 0
 
 
 def apply_pending_update(args: argparse.Namespace) -> int:
-    release_root = Path(args.release_root or PROJECT_ROOT)
+    if not getattr(args, "yes", False):
+        print("Refusing to apply update without explicit --yes.")
+        return 3
+    release_root = _target_root(args, default_channel="test")
     update_dir = _update_dir(release_root)
     pointer = update_dir / "pending_update.json"
     pending = _load_json(pointer)
@@ -249,15 +253,24 @@ def apply_pending_update(args: argparse.Namespace) -> int:
         lock_path.unlink(missing_ok=True)
 
 
+def deploy_update(args: argparse.Namespace) -> int:
+    package_code = package_update(args)
+    if package_code:
+        return package_code
+    apply_args = argparse.Namespace(**vars(args))
+    apply_args.yes = True
+    return apply_pending_update(apply_args)
+
+
 def mark_busy(args: argparse.Namespace) -> int:
-    root = Path(args.release_root or PROJECT_ROOT)
+    root = _target_root(args, default_channel="test")
     active = [x for x in str(args.active or "").split(",") if x]
     _set_state(root, busy=bool(active), active_tasks=active)
     return 0
 
 
 def status(args: argparse.Namespace) -> int:
-    root = Path(args.release_root or PROJECT_ROOT)
+    root = _target_root(args, default_channel="test")
     data = _load_json(root / STATE_FILE_NAME)
     print(json.dumps(data, ensure_ascii=False, indent=2))
     pending = _load_json(_update_dir(root) / "pending_update.json")
@@ -270,6 +283,7 @@ def status(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="xgn-assistant release/development channel manager")
     parser.add_argument("--release-root", default="")
+    parser.add_argument("--channel", choices=["dev", "test", "release"], default="test")
     sub = parser.add_subparsers(dest="cmd", required=True)
     p_init = sub.add_parser("init-release")
     p_init.add_argument("--force", action="store_true")
@@ -278,7 +292,11 @@ def main(argv: list[str] | None = None) -> int:
     p_pkg.add_argument("--note", default="")
     p_pkg.set_defaults(func=package_update)
     p_apply = sub.add_parser("apply-pending-update")
+    p_apply.add_argument("--yes", action="store_true", help="Explicit confirmation required to apply an update.")
     p_apply.set_defaults(func=apply_pending_update)
+    p_deploy = sub.add_parser("deploy-update")
+    p_deploy.add_argument("--note", default="")
+    p_deploy.set_defaults(func=deploy_update)
     p_busy = sub.add_parser("mark-busy")
     p_busy.add_argument("--active", default="")
     p_busy.set_defaults(func=mark_busy)

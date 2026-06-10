@@ -592,6 +592,41 @@ def auto_patch_prompts(findings: list[Finding], *, apply: bool, patch_log: Path)
     return changed
 
 
+def readable_log_lines(findings: list[Finding], changed: list[dict[str, str]], *, apply: bool) -> list[str]:
+    lines = ["虚拟观众测试日志", "说明：这是模型规则与公开信号辅助的虚拟测试，不是真实用户调研。"]
+    if not findings:
+        lines.append("- 本轮没有生成观众质疑。")
+        return lines
+    applied_targets = [Path(item.get("path", "")).name for item in changed if item.get("path")]
+    for index, finding in enumerate(findings[:30], 1):
+        persona = {
+            "opening": "没读过原书的普通观众",
+            "publish_title": "短视频运营审片人",
+            "share": "愿意转发到朋友圈的观众",
+            "comments": "愿意留言互动的观众",
+            "language": "中年微信视频号观众",
+            "audience_signal": "公开观众信号检查",
+            "postprocess": "发布前审片人",
+            "overall": "综合观众",
+        }.get(finding.area, "虚拟观众")
+        if finding.severity == "pass":
+            effect = "通过，本轮不需要修改；继续积累真实播放和评论数据。"
+        elif apply and finding.auto_fixable and changed:
+            target_text = "、".join(applied_targets) or "提示词"
+            effect = f"已写入 {target_text}，下一轮生成会按新要求复测。"
+        elif finding.auto_fixable:
+            effect = "可自动修复，但本次未加 --apply，所以只记录建议。"
+        else:
+            effect = "已进入问题记录，需要人工或后续流程确认。"
+        lines.extend([
+            f"- {index}. 虚拟用户：{persona}",
+            f"  - 质疑：{finding.message}",
+            f"  - 修改：{finding.suggestion}",
+            f"  - 效果：{effect}",
+        ])
+    return lines
+
+
 def run_bot(args: argparse.Namespace) -> int:
     root = Path(args.material_root or PROJECT_ROOT / "outputs")
     report_paths = resolve_report_paths(args.book_pdf)
@@ -625,6 +660,7 @@ def run_bot(args: argparse.Namespace) -> int:
         )
 
     changed = auto_patch_prompts(all_findings, apply=bool(args.apply), patch_log=patch_log)
+    readable_log = readable_log_lines(all_findings, changed, apply=bool(args.apply))
     report = {
         "time": _now(),
         "policy": "public-signal-only; no-contact; no-spam; no-private-message",
@@ -636,6 +672,7 @@ def run_bot(args: argparse.Namespace) -> int:
         "materials": [str(path) for path in material_dirs],
         "findings": [finding.as_dict() for finding in all_findings],
         "auto_patches": changed,
+        "readable_log": readable_log,
         "unfixed": [
             finding.as_dict()
             for finding in all_findings
@@ -646,6 +683,7 @@ def run_bot(args: argparse.Namespace) -> int:
     for finding in all_findings:
         if finding.severity in {"high", "medium"} and not finding.auto_fixable:
             _append_jsonl(issue_file, {"time": _now(), **finding.as_dict()})
+    print("\n".join(readable_log))
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 1 if any(finding.severity == "high" for finding in all_findings) else 0
 

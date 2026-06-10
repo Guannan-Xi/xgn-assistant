@@ -51,8 +51,8 @@ DEFAULT_VISUAL_CONTROLS: dict[str, Any] = {
     "paper": {"card_opacity": 0.92, "shadow": 0.14, "texture": 0.08},
     "title": {"scale": 1.0, "max_lines_vertical": 2, "max_lines_wide": 2},
     "brand": {
-        "show_logo_on_a": True,
-        "show_slogan_on_a": True,
+        "show_logo_on_a": False,
+        "show_slogan_on_a": False,
         "logo_width_vertical": 200,
         "logo_width_wide": 122,
         "logo_width_end": 210,
@@ -423,13 +423,17 @@ def _ornaments(visual: dict[str, Any]) -> str:
 
 
 def _split_social_title(title: str) -> tuple[str, str]:
-    text = str(title or "").strip()
-    if "，" in text:
-        left, right = text.split("，", 1)
-        return left.strip(), right.strip()
-    if "," in text:
-        left, right = text.split(",", 1)
-        return left.strip(), right.strip()
+    text = " ".join(str(title or "").strip().split())
+    if not text:
+        return "", ""
+    for sep in ("，", ",", "：", ":", "；", ";"):
+        if sep in text:
+            left, right = text.split(sep, 1)
+            if left.strip() and right.strip():
+                return left.strip(), right.strip()
+    if len(text) >= 16:
+        mid = len(text) // 2
+        return text[:mid].strip(), text[mid:].strip()
     return text, ""
 
 
@@ -454,6 +458,7 @@ def _social_cover_html(
     title_scale = _number(_get_nested(visual, "title.scale"), 1.0, 0.7, 1.4)
     title_a, title_b = _split_social_title(fields["episode_name"])
     meta_text = _episode_display_label(fields["episode_no"])
+    meta_chip = f'''<div class="social-chip social-period">{_safe_text(meta_text)}</div>''' if meta_text else ""
     logo_w = int(_number(brand.get("logo_width_vertical" if vertical else "logo_width_wide"), 128 if vertical else 98, 72, 180))
     logo_block = f'''
   <div class="social-logo {'social-logo-v' if vertical else 'social-logo-w'}">
@@ -471,10 +476,10 @@ def _social_cover_html(
   <div class="texture"></div>
   <div class="social-topline"></div>
   <div class="social-book fit book-line" data-max="54" data-min="28" data-lines="1">《{_safe_text(fields['book'])}》</div>
-  <div class="social-chip social-period">{_safe_text(meta_text)}</div>
+  {meta_chip}
   <div class="social-title-wrap">
     <div class="fit left serif social-title" data-max="{title_max_a}" data-min="44" data-lines="1">{_safe_text(title_a)}</div>
-    <div class="fit left serif social-title" data-max="{title_max_b}" data-min="52" data-lines="1">{_safe_text(title_b or title_a)}</div>
+    <div class="fit left serif social-title" data-max="{title_max_b}" data-min="50" data-lines="2" data-lh="1.04">{_safe_text(title_b)}</div>
   </div>
   <div class="social-rule social-rule-v"></div>
   {logo_block}
@@ -485,7 +490,7 @@ def _social_cover_html(
 .social-topline {{ position:absolute; left:9%; right:9%; top:7%; height:1px; background:linear-gradient(90deg, transparent, rgba(255,231,187,.66), transparent); }}
 .social-book {{ position:absolute; left:9%; top:9.2%; width:82%; height:78px; color:#FFF4DF; text-shadow:0 8px 22px rgba(0,0,0,.30); }}
 .social-period {{ position:absolute; left:9%; top:18%; }}
-.social-title-wrap {{ position:absolute; left:9%; right:7%; top:31.2%; height:250px; display:grid; grid-template-rows:1fr 1.16fr; gap:14px; }}
+.social-title-wrap {{ position:absolute; left:9%; right:7%; top:30.0%; height:330px; display:grid; grid-template-rows:.82fr 1.55fr; gap:6px; }}
 .social-title-wrap .fit {{ justify-content:flex-start; text-align:left; }}
 .social-rule-v {{ position:absolute; left:9%; top:58.2%; width:58%; }}
 .social-logo-v {{ left:39%; right:39%; bottom:6.0%; min-height:116px; }}
@@ -504,10 +509,10 @@ def _social_cover_html(
   <div class="texture"></div>
   <div class="social-panel">
     <div class="social-book-w fit left book-line" data-max="42" data-min="24" data-lines="1">《{_safe_text(fields['book'])}》</div>
-    <div class="social-chip">{_safe_text(meta_text)}</div>
+    {f'''<div class="social-chip">{_safe_text(meta_text)}</div>''' if meta_text else ""}
     <div class="social-title-w">
       <div class="fit left serif social-title" data-max="{title_max_a}" data-min="30" data-lines="1">{_safe_text(title_a)}</div>
-      <div class="fit left serif social-title" data-max="{title_max_b}" data-min="36" data-lines="1">{_safe_text(title_b or title_a)}</div>
+      <div class="fit left serif social-title" data-max="{title_max_b}" data-min="36" data-lines="1">{_safe_text(title_b)}</div>
     </div>
     <div class="social-rule"></div>
   </div>
@@ -539,8 +544,8 @@ def _cover_html(base_path: Path | None, size: tuple[int, int], meta: dict[str, A
     logo_uri = _logo_uri()
     bg = _bg_image(base_path)
     css_vars = _css_vars(p, visual)
-    show_logo = _bool(brand.get("show_logo_on_a"), True)
-    show_slogan = _bool(brand.get("show_slogan_on_a"), True)
+    show_logo = False
+    show_slogan = False
     if _is_social_context(fields["book"], fields["episode_name"], fields["chapter_name"]):
         return _social_cover_html(base_path, size, meta, spec, config_payload, fields, visual, p, css_vars, bg, logo_uri, show_logo)
     if vertical:
@@ -631,8 +636,8 @@ def _end_html(base_path: Path | None, size: tuple[int, int], meta: dict[str, Any
     logo_uri = _logo_uri()
     bg = _bg_image(base_path)
     css_vars = _css_vars(p, visual, focus_x=50, focus_y=46)
-    title_max = max(82, int(min(w, h) * 0.094 * title_scale))
-    title_min = max(38, int(min(w, h) * 0.042))
+    title_max = max(88, int(min(w, h) * 0.090 * title_scale))
+    title_min = max(42, int(min(w, h) * 0.044))
     return _common_html_head(w, h) + f'''
 <body>
 <div class="canvas endcard" style="{css_vars}">
@@ -646,7 +651,7 @@ def _end_html(base_path: Path | None, size: tuple[int, int], meta: dict[str, Any
   <div class="book-rule book-rule-r"></div>
   <div class="heading-e meta-frame fit" data-max="44" data-min="26" data-lines="1">{_safe_text(fields['heading'])}</div>
   <div class="title-card paper-card">
-    <div class="title-e fit serif main-title" data-max="{title_max}" data-min="{title_min}" data-lines="2" data-lh="1.16">{_safe_text(fields['teaser'])}</div>
+    <div class="title-e serif main-title">{_safe_text(fields['teaser'])}</div>
     <div class="underline-e scribble"></div>
   </div>
   <div class="cta-e paper-card">
@@ -664,11 +669,14 @@ def _end_html(base_path: Path | None, size: tuple[int, int], meta: dict[str, Any
 .book-rule-r {{ left:60%; right:8%; }}
 .heading-e {{ position:absolute; left:31%; top:15.8%; width:38%; height:58px; padding:0 28px; }}
 .title-card {{ position:absolute; left:8.5%; top:25.0%; width:83%; height:31%; padding:52px 56px 34px; display:grid; grid-template-rows:1fr 6px; gap:16px; }}
-.title-e {{ width:100%; height:100%; }}
+.title-e {{ width:100%; height:100%; display:flex; align-items:center; justify-content:center; text-align:center; white-space:nowrap; overflow:visible; font-size:88px; line-height:1.06; transform:scaleX(.94); transform-origin:center center; }}
 .underline-e {{ width:72%; justify-self:center; height:6px; }}
 .cta-e {{ position:absolute; left:12%; top:59.2%; width:76%; height:118px; display:flex; align-items:center; justify-content:center; padding:18px 34px; color:var(--brown); }}
 .cta-e .fit {{ width:100%; height:100%; }}
-.brand-e {{ position:absolute; left:39%; right:39%; bottom:11.6%; min-height:142px; display:flex; align-items:center; justify-content:center; border-radius:24px; background:rgba(7,6,5,.52); box-shadow:inset 0 0 0 1px rgba(214,185,140,.28); }}
+.brand-e {{ position:absolute; left:32%; right:32%; bottom:9.0%; min-height:118px; display:flex; align-items:center; justify-content:center; border-radius:28px; background:linear-gradient(180deg, rgba(255,248,232,.12), rgba(255,248,232,.04)); border:1px solid rgba(255,231,187,.20); box-shadow:0 18px 48px rgba(0,0,0,.12), inset 0 0 0 1px rgba(255,255,255,.06); backdrop-filter:blur(10px); }}
+.brand-e .logo-circle {{ background:rgba(255,248,232,.22); border:0; box-shadow:none; overflow:hidden; }}
+.brand-e .logo-circle::after {{ display:none; }}
+.brand-e .logo-circle img {{ width:100%; height:100%; object-fit:contain; object-position:center; transform:none; mix-blend-mode:multiply; opacity:.94; filter:contrast(1.04) saturate(1.05) drop-shadow(0 8px 16px rgba(90,46,34,.12)); }}
 </style>
 </body>
 ''' + _fit_script()

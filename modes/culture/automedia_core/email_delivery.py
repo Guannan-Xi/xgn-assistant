@@ -356,13 +356,23 @@ def package_split_part(part_dir: Path, *, max_mb: int = 20) -> dict[str, Any]:
         for path in files:
             zf.write(path, path.relative_to(part_dir).as_posix())
     size_bytes = zip_path.stat().st_size
-    max_bytes = int(max_mb) * 1024 * 1024
+    try:
+        safe_factor = float(os.getenv("AMP_EMAIL_ATTACHMENT_SAFE_FACTOR", "0.70") or 0.70)
+    except ValueError:
+        safe_factor = 0.70
+    safe_factor = min(1.0, max(0.10, safe_factor))
+    # SMTP/MIME base64 encoding expands attachments by roughly one third.  QQ Mail
+    # rejects oversized messages at send_message time, so compare the raw zip
+    # against a conservative effective limit before connecting.
+    max_bytes = int(int(max_mb) * 1024 * 1024 * safe_factor)
     if max_bytes > 0 and size_bytes > max_bytes:
         return {
             "ok": False,
-            "reason": f"附件超过限制：{size_bytes / 1024 / 1024:.1f}MB > {max_mb}MB",
+            "reason": f"附件超过安全发送限制：{size_bytes / 1024 / 1024:.1f}MB > {max_bytes / 1024 / 1024:.1f}MB（配置上限 {max_mb}MB，已预留 MIME 膨胀余量）",
             "zip": str(zip_path),
             "size_bytes": size_bytes,
+            "configured_max_mb": max_mb,
+            "effective_max_mb": max_bytes / 1024 / 1024,
         }
     return {"ok": True, "zip": str(zip_path), "size_bytes": size_bytes, "file_count": len(files)}
 

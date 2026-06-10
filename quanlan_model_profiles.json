@@ -1,0 +1,93 @@
+{
+  "active_profile": "fhl",
+  "profiles": [
+    {
+      "id": "greatwall-link",
+      "name": "GreatWall Link series",
+      "locked": true,
+      "models": {
+        "foreign_base_url": "https://greatwalllink.top/v1",
+        "deepseek_base_url": "https://api.deepseek.com",
+        "culture_text_base_url": "https://greatwalllink.top/v1",
+        "culture_polish_base_url": "https://api.deepseek.com",
+        "culture_image_base_url": "https://greatwalllink.top/v1",
+        "research_text_base_url": "https://greatwalllink.top/v1",
+        "research_polish_base_url": "https://api.deepseek.com",
+        "research_image_base_url": "https://greatwalllink.top/v1",
+        "culture_text_provider": "openai",
+        "culture_text_model": "gpt-5.5",
+        "culture_polish_provider": "deepseek",
+        "culture_polish_model": "deepseek-chat",
+        "culture_image_provider": "openai",
+        "culture_image_model": "gpt-image-2",
+        "gpt_base_url": "https://greatwalllink.top/v1",
+        "gpt_pro_base_url": "https://greatwalllink.top/v1",
+        "gpt_image_base_url": "https://greatwalllink.top/v1",
+        "text_engine": "gpt-5.5",
+        "polish_engine": "deepseek-chat",
+        "image_engine": "gpt-image-2",
+        "minimax_base_url": "https://api.minimaxi.com/v1",
+        "minimax_tts_model": "speech-2.8-hd"
+      }
+    },
+    {
+      "id": "fhl",
+      "name": "FHL series",
+      "locked": true,
+      "models": {
+        "foreign_base_url": "https://www.fhl.mom/v1",
+        "deepseek_base_url": "https://api.deepseek.com",
+        "culture_text_base_url": "https://www.fhl.mom/v1",
+        "culture_polish_base_url": "https://api.deepseek.com",
+        "culture_image_base_url": "https://www.fhl.mom/v1",
+        "research_text_base_url": "https://www.fhl.mom/v1",
+        "research_polish_base_url": "https://api.deepseek.com",
+        "research_image_base_url": "https://www.fhl.mom/v1",
+        "culture_text_provider": "openai",
+        "culture_text_model": "gpt-5.5",
+        "culture_polish_provider": "deepseek",
+        "culture_polish_model": "deepseek-chat",
+        "culture_image_provider": "openai",
+        "culture_image_model": "gpt-image-2",
+        "gpt_base_url": "https://www.fhl.mom/v1",
+        "gpt_pro_base_url": "https://www.fhl.mom/v1",
+        "gpt_image_base_url": "https://www.fhl.mom/v1",
+        "text_engine": "gpt-5.5",
+        "polish_engine": "deepseek-chat",
+        "image_engine": "gpt-image-2",
+        "minimax_base_url": "https://api.minimaxi.com/v1",
+        "minimax_tts_model": "speech-2.8-hd"
+      }
+    },
+    {
+      "id": "dst",
+      "name": "DST series",
+      "locked": true,
+      "models": {
+        "foreign_base_url": "https://api.dstopology.com/v1",
+        "deepseek_base_url": "https://api.deepseek.com",
+        "culture_text_base_url": "https://api.dstopology.com/v1",
+        "culture_polish_base_url": "https://api.deepseek.com",
+        "culture_image_base_url": "https://api.dstopology.com/v1",
+        "research_text_base_url": "https://api.dstopology.com/v1",
+        "research_polish_base_url": "https://api.deepseek.com",
+        "research_image_base_url": "https://api.dstopology.com/v1",
+        "culture_text_provider": "openai",
+        "culture_text_model": "gpt-5.5",
+        "culture_polish_provider": "deepseek",
+        "culture_polish_model": "deepseek-chat",
+        "culture_image_provider": "openai",
+        "culture_image_model": "gpt-image-2",
+        "gpt_base_url": "https://api.dstopology.com/v1",
+        "gpt_pro_base_url": "",
+        "gpt_image_base_url": "https://api.dstopology.com/v1",
+        "text_engine": "gpt-5.5",
+        "polish_engine": "deepseek-chat",
+        "image_engine": "gpt-image-2",
+        "minimax_base_url": "https://api.minimaxi.com/v1",
+        "minimax_tts_model": "speech-2.8-hd",
+        "gpt_pro_model": "gpt-5.5"
+      }
+    }
+  ]
+}

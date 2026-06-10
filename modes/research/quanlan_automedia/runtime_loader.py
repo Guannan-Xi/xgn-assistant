@@ -39,7 +39,7 @@ def _exec_ordered_modules(files: Iterable[Path]) -> dict:
     namespace = _runtime_namespace("source_modules")
     executed: list[str] = []
     for path in files:
-        source = path.read_text(encoding="utf-8")
+        source = path.read_text(encoding="utf-8-sig")
         exec(compile(source, str(path), "exec"), namespace)
         executed.append(path.name)
     namespace["__runtime_modules__"] = executed

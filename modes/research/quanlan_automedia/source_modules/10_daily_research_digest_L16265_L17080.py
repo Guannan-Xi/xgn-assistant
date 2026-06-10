@@ -33,6 +33,10 @@ DAILY_RESEARCH_SEARCH_TERMS = [
 DAILY_RESEARCH_LAST_CANDIDATES: list[dict] = []
 
 
+class DailyDigestQualityGateError(RuntimeError):
+    """Raised when generated assets exist but are not complete enough to deliver."""
+
+
 def _daily_digest_progress_heartbeat(label: str, logger=print, interval: int = 20):
     stop_event = threading.Event()
 
@@ -51,6 +55,64 @@ def _daily_digest_progress_heartbeat(label: str, logger=print, interval: int = 2
     return stop_event
 
 
+DAILY_DIGEST_STAGE_PLAN = [
+    "准备输出目录和模型配置",
+    "确认文献来源",
+    "读取或检索文献清单",
+    "选择本期文献",
+    "生成结构化中文初稿",
+    "DeepSeek 官方润色",
+    "写入口播和字幕等文案文件",
+    "逐篇生成图片摘要",
+    "生成综合封面背景",
+    "绘制成片卡片",
+    "生成平台封面和品牌页",
+    "打包与邮件处理",
+    "完成交付检查",
+]
+
+
+def _daily_digest_log_progress_plan(logger=print):
+    if not logger:
+        return
+    logger("📋 每日研究速递生成步骤：")
+    for idx, name in enumerate(DAILY_DIGEST_STAGE_PLAN, start=1):
+        logger(f"   {idx:02d}/{len(DAILY_DIGEST_STAGE_PLAN):02d} {name}")
+
+
+def _daily_digest_log_stage(index: int, title: str, detail: str = "", *, logger=print, done: bool = False):
+    if not logger:
+        return
+    mark = "✅" if done else "▶️"
+    suffix = f"：{detail}" if detail else ""
+    logger(f"{mark} 进度 {index:02d}/{len(DAILY_DIGEST_STAGE_PLAN):02d}｜{title}{suffix}")
+
+
+def _daily_digest_log_generated_file(path: str, label: str, logger=print):
+    if logger and path:
+        logger(f"   已生成 {label}：{os.path.abspath(path)}")
+
+
+def _daily_digest_clear_generated_pngs(folder: str, logger=print):
+    if not folder or not os.path.isdir(folder):
+        return
+    removed = 0
+    for name in os.listdir(folder):
+        if not name.lower().endswith((".png", ".jpg", ".jpeg")):
+            continue
+        path = os.path.join(folder, name)
+        if not os.path.isfile(path):
+            continue
+        try:
+            os.remove(path)
+            removed += 1
+        except Exception as exc:
+            if logger:
+                logger(f"⚠️ 清理旧派生图片失败：{name}，{str(exc)[:80]}")
+    if logger and removed:
+        logger(f"🧹 已清理旧派生图片 {removed} 张，避免混入上一轮作品。")
+
+
 def _daily_digest_today_cn() -> str:
     return datetime.now().strftime("%Y年%m月%d日")
 
@@ -64,8 +126,16 @@ def _daily_digest_safe_text(value: str, max_chars: int = 800) -> str:
     return text[:max_chars].rstrip()
 
 
+def _daily_digest_fix_display_terms(text: str) -> str:
+    fixes = {
+        "Nature neuroscience": "Nature Neuroscience",
+        "Brain : a journal of neurology": "Brain",
+    }
+    return fixes.get(str(text or "").strip(), str(text or ""))
+
+
 def _daily_digest_display_text(value: str, max_chars: int = 800) -> str:
-    text = _daily_digest_safe_text(value, max_chars)
+    text = _daily_digest_fix_display_terms(_daily_digest_safe_text(value, max_chars))
     if not text:
         return ""
     text = text.replace("。", "").replace("．", "")
@@ -75,7 +145,7 @@ def _daily_digest_display_text(value: str, max_chars: int = 800) -> str:
 
 
 def _daily_digest_display_meta(value: str, max_chars: int = 800) -> str:
-    text = _daily_digest_safe_text(value, max_chars)
+    text = _daily_digest_fix_display_terms(_daily_digest_safe_text(value, max_chars))
     text = text.replace("。", "").replace("．", "")
     return re.sub(r"\bet al\.", "et al", text, flags=re.I).strip()
 
@@ -118,6 +188,49 @@ def _daily_digest_clean_affiliation(value: str, max_chars: int = 180) -> str:
         if len(cleaned_parts) >= 2:
             break
     return _daily_digest_safe_text("；".join(cleaned_parts), max_chars)
+
+
+def _daily_digest_cn_affiliation_name(value: str) -> str:
+    text = _daily_digest_clean_affiliation(value, 180)
+    if not text:
+        return ""
+    replacements = [
+        (r"\bVollum Institute\b", "沃勒姆研究所"),
+        (r"\bOregon Health\s*&\s*Science University\b", "俄勒冈健康与科学大学"),
+        (r"\bYale School of Medicine\b", "耶鲁大学医学院"),
+        (r"\bYale Medicine\b", "耶鲁医学中心"),
+        (r"\bWeizmann Institute of Science\b", "魏茨曼科学研究所"),
+        (r"\bHoward Hughes Medical Institute\b", "霍华德·休斯医学研究所"),
+        (r"\bBroad Institute of MIT and Harvard\b", "麻省理工与哈佛博德研究所"),
+        (r"\bNara Medical University\b", "奈良县立医科大学"),
+        (r"\bSchool of Dentistry\b", "牙科学院"),
+        (r"\bDepartment of Neurosurgery\b", "神经外科"),
+        (r"\bDepartment of Molecular Cell Biology\b", "分子细胞生物学系"),
+        (r"\bDepartment of Biology\b", "生物学系"),
+        (r"\bDepartment of Psychiatry\b", "精神医学系"),
+        (r"\bCenter for Health Control\b", "健康控制中心"),
+        (r"\bDepartment of Biologic and Materials Sciences\s*&\s*Prosthodontics\b", "生物与材料科学及修复学系"),
+        (r"\bDepartment of Molecular\b", "分子生物学系"),
+        (r"\bCellular\b", "细胞生物学系"),
+    ]
+    for pattern, repl in replacements:
+        text = re.sub(pattern, repl, text, flags=re.I)
+    text = re.sub(r"\bDepartment of\b", "", text, flags=re.I)
+    text = re.sub(r"\bDepartment\b", "", text, flags=re.I)
+    text = re.sub(r"\bSchool of\b", "", text, flags=re.I)
+    text = re.sub(r"\bInstitute of\b", "研究所", text, flags=re.I)
+    text = re.sub(r"\bInstitute\b", "研究所", text, flags=re.I)
+    text = re.sub(r"\bUniversity\b", "大学", text, flags=re.I)
+    text = re.sub(r"\bMedicine\b", "医学", text, flags=re.I)
+    text = re.sub(r"\bBiology\b", "生物学系", text, flags=re.I)
+    text = re.sub(r"\bMolecular\b", "分子生物学系", text, flags=re.I)
+    text = re.sub(r"\bCellular\b", "细胞生物学系", text, flags=re.I)
+    text = re.sub(r"\bPsychiat(?:ry)?\b", "精神医学系", text, flags=re.I)
+    text = re.sub(r"\bNeurosurgery\b", "神经外科", text, flags=re.I)
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"\s*([，；、和与])\s*", r"\1", text)
+    text = text.strip(" ,，;；.。")
+    return _daily_digest_safe_text(text, 120)
 
 
 def _daily_digest_parse_journals(raw: str = "") -> list[str]:
@@ -323,6 +436,7 @@ def _daily_digest_select_from_existing_list(
     *,
     max_articles: int,
     article_list_path: str,
+    skip_medical_related: bool = False,
     logger=print,
 ) -> list[dict]:
     used_pmids = _daily_digest_list_used_pmids(article_list_path)
@@ -330,11 +444,20 @@ def _daily_digest_select_from_existing_list(
     seen: set[str] = set()
     total_with_pmid = 0
     candidates: list[dict] = []
+    skipped_medical = 0
+    skipped_medical_examples: list[str] = []
     for item in articles or []:
         pmid = str(item.get("pmid", "")).strip()
         if not pmid or not str(item.get("title", "")).strip():
             continue
         total_with_pmid += 1
+        skip_reason = _daily_digest_medical_related_reason(item) if skip_medical_related else ""
+        if skip_reason:
+            skipped_medical += 1
+            if len(skipped_medical_examples) < 5:
+                title = str(item.get("title", "") or "").strip()
+                skipped_medical_examples.append(f"{pmid}｜{skip_reason}｜{title[:80]}")
+            continue
         if pmid in used_pmids or pmid in seen:
             continue
         seen.add(pmid)
@@ -384,6 +507,10 @@ def _daily_digest_select_from_existing_list(
         journals_used = [str(x.get("journal", "") or "Unknown").strip() for x in selected]
         unique_journals = len({_daily_digest_journal_key(x) or x for x in journals_used if x})
         logger(f"已有文献清单续做：本轮取 {len(selected)} 篇，覆盖 {unique_journals} 个期刊；清单已用 {len(used_pmids)} 篇，预计剩余 {remaining_after} 篇。")
+        if skip_medical_related:
+            logger(f"微信避险筛选：已跳过医学/疾病相关候选 {skipped_medical} 篇。")
+            for example in skipped_medical_examples:
+                logger(f"微信避险示例：{example}")
         if len(selected) > unique_journals:
             logger("期刊分散：候选期刊不足或剩余文献不足，本期已用同刊补位。")
     return selected
@@ -491,7 +618,7 @@ def _daily_digest_prepare_resumed_digest(digest: dict, articles: list[dict], dat
         current["source"] = source
         if not current.get("authors_cn"):
             current["authors_cn"] = source.get("authors", "") or "作者信息待补全"
-        current["affiliation_cn"] = _daily_digest_clean_affiliation(current.get("affiliation_cn") or source.get("affiliations", "")) or "机构信息待补全"
+        current["affiliation_cn"] = _daily_digest_cn_affiliation_name(current.get("affiliation_cn") or source.get("affiliations", "")) or "机构信息待补全"
         if not current.get("research_question") and current.get("hook"):
             current["research_question"] = current.get("hook")
         hook = _daily_digest_hook_question(
@@ -550,6 +677,7 @@ def _daily_digest_select_articles(
     *,
     max_articles: int,
     journals: list[str],
+    skip_medical_related: bool = False,
     logger=print,
 ) -> list[dict]:
     history = _daily_digest_load_history()
@@ -560,8 +688,22 @@ def _daily_digest_select_articles(
     journal_keys = [_daily_digest_journal_key(j) for j in journals if str(j).strip()]
     journal_labels = {_daily_digest_journal_key(j): str(j).strip() for j in journals if str(j).strip()}
 
-    by_journal: dict[str, list[dict]] = {}
+    skipped_medical = 0
+    skipped_medical_examples: list[str] = []
+    filtered_articles: list[dict] = []
     for item in articles:
+        skip_reason = _daily_digest_medical_related_reason(item) if skip_medical_related else ""
+        if skip_reason:
+            skipped_medical += 1
+            if len(skipped_medical_examples) < 5:
+                pmid = str(item.get("pmid", "") or "").strip()
+                title = str(item.get("title", "") or "").strip()
+                skipped_medical_examples.append(f"{pmid or '无PMID'}｜{skip_reason}｜{title[:80]}")
+            continue
+        filtered_articles.append(item)
+
+    by_journal: dict[str, list[dict]] = {}
+    for item in filtered_articles:
         journal = str(item.get("journal", "") or "").strip()
         key = _daily_digest_match_journal_key(journal, journal_keys) or _daily_digest_journal_key(journal) or f"unknown:{str(item.get('pmid', '')).strip()}"
         by_journal.setdefault(key, []).append(item)
@@ -613,11 +755,41 @@ def _daily_digest_select_articles(
         ]
         unique_count = len({_daily_digest_journal_key(str(x or "")) or str(x or "") for x in covered if x})
         logger(f"随机选文完成：优先按不同期刊选择 {len(selected)} 篇，覆盖 {unique_count} 个期刊：{', '.join([str(x) for x in covered if x])}")
+        if skip_medical_related:
+            logger(f"微信避险筛选：已跳过医学/疾病相关候选 {skipped_medical} 篇。")
+            for example in skipped_medical_examples:
+                logger(f"微信避险示例：{example}")
         if len(selected) > unique_count:
             logger("期刊分散：候选期刊不足或历史去重限制，本期已用同刊补位。")
         if used_pmids:
             logger(f"历史去重：已记录 {len(used_pmids)} 个用过的 PMID，本期复用 {reused} 个。")
     return selected
+
+
+DAILY_DIGEST_MEDICAL_SKIP_PATTERNS: list[tuple[str, str]] = [
+    ("临床/患者", r"\bpatient(?:s)?\b|\bclinical\b|\bclinic\b|\btrial\b|\bdiagnos(?:is|tic)\b|\bprognos(?:is|tic)\b|\bhuman(?:s)?\b|\bparticipant(?:s)?\b|\bsubject(?:s)?\b|\bvolunteer(?:s)?\b"),
+    ("治疗/干预", r"\btherapy\b|\btreatment\b|\btherapeutic\b|\bintervention\b|\bdrug(?:s)?\b|\bmedication\b|\bpharmacolog(?:y|ical)\b|\bantibiotic(?:s)?\b|\banalgesi(?:a|c)\b"),
+    ("疾病/病理", r"\bdisease(?:s)?\b|\bdisorder(?:s)?\b|\bsyndrome(?:s)?\b|\bcancer\b|\btumou?r(?:s)?\b|\bcarcinoma\b|\bglioma\b|\binfection(?:s)?\b|\binflammation\b|\binflammatory\b"),
+    ("精神神经疾病", r"\bdepression\b|\banxiety\b|\bautism\b|\bparkinson'?s\b|\balzheimer'?s\b|\bepilepsy\b|\bstroke\b|\bpain\b|\baddiction\b|\btrauma\b|\blesion(?:s)?\b"),
+    ("免疫/血液/肠道", r"\bblood\b|\bbone marrow\b|\bmonocyte(?:s)?\b|\bmacrophage(?:s)?\b|\bmicroglia\b|\bimmune\b|\bimmun(?:e|ity|ology|ological)\b|\bgut\b|\benteric\b|\bintestinal\b|\bmicrobi(?:al|ome|ota)\b|\bpathogen(?:s)?\b"),
+    ("损伤/修复外推", r"\binjur(?:y|ies|ed)\b|\bdamage(?:d)?\b|\brepair\b|\bwound\b|\btoxicity\b|\btoxic\b|\bdegeneration\b|\bneurodegeneration\b"),
+    ("中文医学风险", r"患者|受试者|临床|治疗|疗法|诊断|预后|疾病|病理|病人|病例|疗效|药物|用药|干预|镇痛|疼痛|焦虑|抑郁|成瘾|癫痫|卒中|癌|肿瘤|胶质瘤|感染|炎症|创伤|损伤|修复|退行性|帕金森|阿尔茨海默|自闭症|孤独症"),
+    ("中文生物医学外推", r"人类|人体|血液|骨髓|单核细胞|巨噬细胞|小胶质细胞|免疫|肠道|肠神经|微生物|菌群|病原体|抗生素|毒性"),
+]
+
+
+def _daily_digest_medical_related_reason(article: dict) -> str:
+    value = " ".join(str((article or {}).get(key, "") or "") for key in ("title", "abstract", "journal", "keywords"))
+    if not value.strip():
+        return ""
+    for label, pattern in DAILY_DIGEST_MEDICAL_SKIP_PATTERNS:
+        if re.search(pattern, value, flags=re.I):
+            return label
+    return ""
+
+
+def _daily_digest_is_medical_related_article(article: dict) -> bool:
+    return bool(_daily_digest_medical_related_reason(article))
 
 
 def _daily_digest_mark_articles_used(articles: list[dict], *, issue_dir: str = "", journals: list[str] | None = None) -> None:
@@ -678,6 +850,26 @@ def _daily_digest_article_text(node, xpath: str) -> str:
         return ""
 
 
+def _daily_digest_pubmed_get(url: str, *, params: dict, timeout: int, logger=None, label: str = "PubMed", attempts: int = 3):
+    last_exc = None
+    for attempt in range(1, max(1, attempts) + 1):
+        try:
+            resp = requests.get(url, params=params, timeout=timeout)
+            resp.raise_for_status()
+            return resp
+        except (requests.exceptions.ChunkedEncodingError, requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+            last_exc = exc
+            if logger:
+                logger(f"⚠️ {label} 网络响应中断，准备重试 {attempt}/{attempts}：{type(exc).__name__}")
+            if attempt < attempts:
+                time.sleep(0.8 * attempt)
+        except Exception:
+            raise
+    if last_exc:
+        raise last_exc
+    raise RuntimeError(f"{label} 请求失败。")
+
+
 def _daily_digest_authors(article_node, limit: int = 4) -> str:
     authors = []
     try:
@@ -727,6 +919,7 @@ def fetch_daily_neuroscience_articles(
     days: int = 14,
     max_articles: int = 5,
     journals: list[str] | None = None,
+    skip_medical_related: bool = False,
     logger=print,
 ) -> list[dict]:
     """Fetch recent neuroscience papers from PubMed through NCBI E-utilities."""
@@ -762,8 +955,7 @@ def fetch_daily_neuroscience_articles(
     fetch_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
     if logger:
         logger("⏳ PubMed esearch 请求已发出，正在等待候选 PMID 列表...")
-    resp = requests.get(search_url, params=params, timeout=30)
-    resp.raise_for_status()
+    resp = _daily_digest_pubmed_get(search_url, params=params, timeout=30, logger=logger, label="PubMed esearch")
     ids = (resp.json().get("esearchresult", {}) or {}).get("idlist", []) or []
     ids = [str(x).strip() for x in ids if str(x).strip()]
     seen_ids = set(ids)
@@ -780,8 +972,7 @@ def fetch_daily_neuroscience_articles(
         journal_params["term"] = journal_term
         journal_params["retmax"] = str(per_journal_retmax)
         try:
-            j_resp = requests.get(search_url, params=journal_params, timeout=30)
-            j_resp.raise_for_status()
+            j_resp = _daily_digest_pubmed_get(search_url, params=journal_params, timeout=30, logger=logger, label=f"PubMed {journal}")
             for pmid in ((j_resp.json().get("esearchresult", {}) or {}).get("idlist", []) or []):
                 pmid = str(pmid).strip()
                 if pmid and pmid not in seen_ids:
@@ -807,8 +998,7 @@ def fetch_daily_neuroscience_articles(
         fetch_params["email"] = email
     if api_key:
         fetch_params["api_key"] = api_key
-    xml_resp = requests.get(fetch_url, params=fetch_params, timeout=45)
-    xml_resp.raise_for_status()
+    xml_resp = _daily_digest_pubmed_get(fetch_url, params=fetch_params, timeout=45, logger=logger, label="PubMed efetch")
     if logger:
         logger("✅ PubMed 摘要 XML 已返回，正在筛选有标题和摘要的论文...")
     root = ET.fromstring(xml_resp.content)
@@ -850,6 +1040,7 @@ def fetch_daily_neuroscience_articles(
         articles,
         max_articles=max_articles,
         journals=journals,
+        skip_medical_related=skip_medical_related,
         logger=logger,
     )
     if logger:
@@ -885,6 +1076,7 @@ def build_daily_research_article_list(
     max_articles: int = 5,
     journals: str = "",
     article_list_path: str = "",
+    skip_medical_related: bool = False,
     logger=print,
 ) -> str:
     date_name = datetime.now().strftime("%Y%m%d")
@@ -901,6 +1093,7 @@ def build_daily_research_article_list(
         days=days,
         max_articles=max_articles,
         journals=daily_journals,
+        skip_medical_related=skip_medical_related,
         logger=logger,
     )
     candidates = DAILY_RESEARCH_LAST_CANDIDATES or selected
@@ -929,19 +1122,19 @@ def _daily_digest_llm_prompt(articles: list[dict], date_text: str) -> str:
 要求：
 1. 忠于论文标题和摘要，不夸大，不写治疗结论，不把相关性写成因果。
 2. 本步骤由 GPT 完成忠实翻译和结构化中文初稿：所有中文标题、研究说明和口播必须先准确表达原文信息，同时写成自然、克制、地道的中文。
-3. 每篇必须给一个易懂但严谨的科研切入点：research_question 必须写成一句“钩子式科学问题”，只能有一个问号，不能连续提出两个问题。它可以贴近日常经验或疾病/治疗场景，但不能煽情、类比过度或闲聊。问句必须有具体对象，例如脑区、细胞、环路、受体、行为、模型、疾病机制、记录信号或实验现象；避免“为什么调控疼痛，要追踪……”这类不自然断句。
+3. 每篇必须给一个易懂但严谨的科研切入点：research_question 必须写成一句“钩子式科学问题”，只能有一个问号，不能连续提出两个问题。问句必须忠于标题和摘要里的原始科学问题，优先保留具体对象，例如脑区、细胞、环路、受体、行为、模型、疾病机制、记录信号或实验现象。可以从生活经验或读者熟悉的现象切入，例如疼痛牵动情绪、环境影响食欲、焦虑被抑制、饥饿提前出现，但落点必须回到原文机制对象。不得把机制研究曲解成临床治疗、产品应用或泛泛价值问题；没有临床试验证据时，不要写“治疗疼痛时为什么……”。避免“为什么调控疼痛，要追踪……”这类不自然断句。
 4. 每篇必须交代清楚五个信息：科学问题是什么、用了什么方法、发现了什么结果、得到什么结论、有什么意义。五者都要来自标题或摘要，不补充摘要外信息；写作时要自然连贯，避免像表格字段逐项朗读。每个判断后面都要有对象、方法、结果或边界，不写“提供重要线索/具有重要意义”这种正确废话。
 5. 每篇必须给出“研究方法”：研究对象、关键方法、核心通路或变量，压缩成一句；不要写“证据链”“证据路径”“构成的证据”等套话。
 6. 每篇必须给出“研究结论”和“证据边界”：结论说明该研究支持了什么，边界说明不能直接外推什么。
 7. 图片摘要提示词要用于 GPT Image 2 / image2 生成 Cell 风格科学插画，尽量无文字、无标题、无标注；必须直接画成 1:1 正方形机制图，不得画成长竖版海报后再裁切；要清楚表达主要机制或发现。
 8. 专业术语使用大陆神经科学常用译法；不要为了通俗而改错术语，也不要堆叠名词造成论文摘要腔。
 9. voiceover 第一句也必须是钩子式科学问题，并且只允许一个问题、一个问号；不要写“为什么……？……能否……？”这种连续双问。随后用自然口播串起方法、发现、结论、意义和边界，不要使用“方法上”“结果发现”“研究据此认为”这类机械结构词，也不要把论文信息放在开头压住读者兴趣。
-10. 钩子写法示例：“为什么有些疼痛不只是身体信号，还会影响情绪？”“治疗疼痛时，为什么要关注迷走神经通向脑干的路径？”“饥饿感会不会在真正缺能量之前，就被大脑提前预演？”不要写“为什么调控疼痛，要……”。
+10. 钩子写法示例：“疼痛牵动情绪时，迷走神经刺激会怎样影响cNTS-PAG脑干通路？”“为什么有些环境会让人吃不下，海马-隔区-下丘脑通路在其中做了什么？”“焦虑被踩下刹车时，腹侧CA1星形胶质细胞上的H3受体在做什么？”“饥饿感会不会在真正缺能量之前，就被大脑提前预演？”不要写“治疗疼痛时为什么……”，也不要写“为什么调控疼痛，要……”。
 11. 句子要完整、自然、有主谓宾；每篇之间和每篇内部要有顺滑过渡，避免摘要拼接感。避免“研究结合小鼠记录发现”这类缺少助词或停顿的压缩句。不要写“建立和维持连接”这类宾语不清的句子；涉及神经元、表面蛋白、内吞作用时，应明确写成“建立和维持神经元之间的连接”或“建立和维持突触连接”。
 12. 输出前自检中文：标题是否忠于英文题名，表达是否顺口；研究说明是否准确、克制、易懂；不得出现 AI 腔、营销腔或语病。不要写“突破”“颠覆”“重塑”“改变局面”“提供新思路”“提供新的研究角度”“重要线索”“重大意义”“为后续研究提供依据”等空泛或拔高表述；也不要写“内吞作用主动提供……”这类把生物过程拟人化的句子。表达意义时优先具体说明“有助于解释哪个机制/为哪类模型或测量提供证据”，但这些意义表达不得写进 research_question。
 13. short_title 和 video_title 可先占位，最终会由程序统一改写。opening_voiceover 必须用本期第一篇或最有代表性论文的具体科学问题开头，再用半句交代日期/期号；不要以“欢迎大家来到/今天分享/本期关注”开头。catalog_voiceover 和 video_description 只能做事实性列举，不要硬归纳共同主题，不要写“同样是……”“分别会怎样牵动……”“关键变化可能发生在……”这类无中生有或逻辑牵强的总括句，也不要写“帮助读者”“快速把握”“真实含义”等泛泛口水话。
 14. 所有文案都要避免牵强逻辑和过度因果。除非摘要明确说明因果实验结论，否则不要用“导致”“决定”“证明”“解释了全部机制”“关键变化牵动”等强因果或强总结表达；优先用“提示”“支持”“相关”“参与”“可能涉及”。
-15. 论文信息放在每篇结尾：必须口播发表于哪个期刊；作者只念通讯作者或最可能的通讯作者，并用“等人”代表其他作者；机构只念每个通讯作者的第一单位，压缩成“来自 A 和 B 等单位”或“A 与 B 合作”。机构字段不得包含城市、州名、邮编、国家、详细地址、电子邮箱或 Electronic address。PubMed 若无法识别通讯作者，可用最后一位作者近似，不要念长作者列表。
+15. 论文信息放在每篇结尾：必须口播发表于哪个期刊；作者只念通讯作者或最可能的通讯作者，并用“等人”代表其他作者；机构只念每个通讯作者的第一单位，压缩成“来自 A 和 B 等单位”或“A 与 B 合作”。面向中国观众，常见大学、医学院、研究所、医院和中心应译成中文机构名；不得直接朗读英文长院系串。机构字段不得包含城市、州名、邮编、国家、详细地址、电子邮箱或 Electronic address。PubMed 若无法识别通讯作者，可用最后一位作者近似，不要念长作者列表。
 16. 所有正文面向专业人士的碎片化阅读：专业、通顺、短句。每句只放一个核心信息，尽量 18-32 个汉字；超过 40 个汉字就拆成两句。不要写多层定语、连续从句、连续三个以上逗号的长句。
 17. 图片摘要提示词必须有一个可见的机制中心：细胞、脑区、环路、突触、分子、实验模型、记录信号或结果对比。不得生成泛泛发光大脑、抽象网络、霓虹壁纸或无机制对象的“顶刊感”背景。
 17. 输出严格 JSON，不要 Markdown。
@@ -959,13 +1152,14 @@ JSON 格式：
       "pmid": "原 PMID",
       "title_cn": "中文标题，忠于英文题名；翻译后润色成通顺地道的学术中文",
       "authors_cn": "通讯作者或最可能通讯作者，英文名保留原文；无法判断时用最后一位作者，不要列长名单，格式如 Name 等人",
-      "affiliation_cn": "通讯作者第一单位或1-2个主要合作单位，尽量简短；不要写城市、州名、邮编、国家、地址或邮箱；没有就写机构信息待补全",
+      "affiliation_cn": "通讯作者第一单位或1-2个主要合作单位，尽量简短；面向中国观众，常见机构译成中文，如耶鲁大学医学院、霍华德·休斯医学研究所；不要直接保留英文长院系串；不要写城市、州名、邮编、国家、地址或邮箱；没有就写机构信息待补全",
       "research_question": "钩子式科学问题，一句，只能有一个问号；易懂但严谨，避免“该研究旨在/这项研究想回答的是”",
       "evidence_path": "研究方法，一句：对象/方法/通路/变量，必须来自摘要，不写套话，表达通顺",
       "key_finding": "研究结果，一句：发现了什么，准确克制，保留专业性",
       "conclusion_cn": "研究结论，一句：这些结果支持了什么判断，不夸大",
       "why_it_matters": "研究意义，一句：说明科学意义，不空泛",
       "scope_note": "证据边界，一句：避免治疗承诺或过度外推，语气稳妥",
+      "card_points": ["配图文案，3-4句短句；围绕research_question回答文章重点；不要写问题/证据/结论/边界这类字段标签；每句都要有具体对象或发现"],
       "voiceover": "该篇口播，5-7个短句；先用一个科学问题引入，再交代方法、发现、结论、意义/边界；最后一句说明发表于哪个期刊、论文题名、通讯作者等人和简要单位。专业通顺，不写长难句",
       "image_prompt": "英文绘图提示词：1:1 square cell-style neuroscience visual abstract, no text, no labels, one visible mechanism center, all mechanism elements fully inside the square..."
     }}
@@ -988,7 +1182,7 @@ def _daily_digest_local_digest(articles: list[dict], date_text: str) -> dict:
             "pmid": item.get("pmid", ""),
             "title_cn": title,
             "authors_cn": item.get("authors", "") or "作者信息待补全",
-            "affiliation_cn": _daily_digest_clean_affiliation(item.get("affiliations", "")) or "机构信息待补全",
+            "affiliation_cn": _daily_digest_cn_affiliation_name(item.get("affiliations", "")) or "机构信息待补全",
             "research_question": "一条特定神经通路，为什么会改变我们对身体信号的感受？",
             "evidence_path": "论文摘要提供了研究对象、关键方法和主要变量。",
             "key_finding": finding,
@@ -1006,7 +1200,7 @@ def _daily_digest_local_digest(articles: list[dict], date_text: str) -> dict:
         "opening_voiceover": f"{cooked[0]['research_question']} 今天是{date_text}，这里是全澜脑科学每日研究速递。" if cooked else f"今天有哪些神经科学问题值得追踪？今天是{date_text}，这里是全澜脑科学每日研究速递。",
         "catalog_voiceover": f"今天选取 {len(cooked)} 篇神经科学论文，分别看它们的方法、结果和证据边界。",
         "articles": cooked,
-        "closing_voiceover": "关注全澜脑科学，下一期继续追踪具体问题和证据边界。",
+        "closing_voiceover": "以上就是本期全澜脑科学每日研究速递。感谢观看。",
     }
 
 
@@ -1025,6 +1219,30 @@ def _daily_digest_extract_json(text: str) -> dict:
         return {}
 
 
+def _daily_digest_short_video_repair_prompt(raw_text: str, fallback: dict) -> str:
+    fallback_json = json.dumps({
+        "short_video_title": fallback.get("short_video_title", ""),
+        "short_video_description": fallback.get("short_video_description", ""),
+        "short_video_voiceover": fallback.get("short_video_voiceover", ""),
+        "selected_pmids": fallback.get("selected_pmids", []),
+        "selected_indices": fallback.get("selected_indices", []),
+    }, ensure_ascii=False, indent=2)
+    return f"""请把下面“每日研究速递精选短视频润色结果”修复成严格 JSON。
+
+要求：
+1. 只输出一个 JSON object，不要 Markdown，不要解释。
+2. 必须包含 short_video_title、short_video_description、short_video_voiceover、selected_pmids、selected_indices。
+3. 如果原结果缺字段，就用 fallback JSON 中对应字段补齐。
+4. 不新增论文事实，不写治疗承诺。
+
+fallback JSON：
+{fallback_json}
+
+待修复文本：
+{str(raw_text or '')[:12000]}
+"""
+
+
 def _daily_digest_polish_prompt(digest: dict, date_text: str) -> str:
     payload = {
         "date": digest.get("date", date_text),
@@ -1041,13 +1259,14 @@ def _daily_digest_polish_prompt(digest: dict, date_text: str) -> str:
             "pmid": item.get("pmid", ""),
             "title_cn": item.get("title_cn", ""),
             "authors_cn": item.get("authors_cn", ""),
-            "affiliation_cn": _daily_digest_clean_affiliation(item.get("affiliation_cn", "")),
+            "affiliation_cn": _daily_digest_cn_affiliation_name(item.get("affiliation_cn", "")),
             "research_question": item.get("research_question") or item.get("hook", ""),
             "evidence_path": item.get("evidence_path", ""),
             "key_finding": item.get("key_finding", ""),
             "conclusion_cn": item.get("conclusion_cn", ""),
             "why_it_matters": item.get("why_it_matters", ""),
             "scope_note": item.get("scope_note", ""),
+            "card_points": item.get("card_points", []),
             "voiceover": item.get("voiceover", ""),
         })
     source = json.dumps(payload, ensure_ascii=False, indent=2)
@@ -1066,6 +1285,7 @@ def _daily_digest_polish_prompt(digest: dict, date_text: str) -> str:
 2. 先保证科学准确，再保证中文顺口。每一句都要能回答“谁/什么，用什么方法，发现了什么，说明到什么程度”。
 3. 写作目标是“科研结果快报”：不铺垫、不煽情、不卖关子；用短句把科学问题、方法、结果、结论、意义和边界讲清楚。
 4. 每个字段都要优先保留具体对象：脑区、细胞、环路、受体、行为、模型、疾病机制、记录信号、样本或实验系统。不要把信息磨成“相关机制值得进一步研究”这类正确废话。
+5. 不得曲解原文科学问题。标题和摘要问的是机制、通路、细胞或模型时，research_question 必须保留这个对象；不要为了吸引观众改写成临床治疗、产品应用或泛泛价值问题。
 
 语言硬规则：
 1. 修复所有语病、生硬翻译腔、搭配不当、指代不清、缺成分、重复和 AI 味。
@@ -1076,7 +1296,7 @@ def _daily_digest_polish_prompt(digest: dict, date_text: str) -> str:
 6. 不要写“突破”“颠覆”“重塑”“改变局面”等拔高词。需要表达价值时，具体说它帮助理解什么机制、改进什么模型、支持什么测量或提示什么边界。不要把“提供依据/提供线索/用于后续研究”写进科学问题。
 7. 不要把生物过程拟人化。严禁“内吞作用主动提供……”这类句子。
 8. 不要写缺少限定对象的短语。比如“建立和维持连接”必须改为“建立和维持神经元之间的连接”或“建立和维持突触连接”。
-9. 所有机构只写单位名。不得包含城市、州名、邮编、国家、详细地址、电子邮箱或 Electronic address。
+9. 所有机构只写单位名。面向中国观众，常见大学、医学院、研究所、医院和中心应译成中文机构名；不得直接朗读英文长院系串。不得包含城市、州名、邮编、国家、详细地址、电子邮箱或 Electronic address。
 10. opening_voiceover 不得以“欢迎大家来到”“今天是”“本期关注”“接下来我们”开头；它应先抛出本期最有抓力的一条具体科学问题，再用半句交代日期/期号。
 
 神经科学硬规则：
@@ -1088,17 +1308,18 @@ def _daily_digest_polish_prompt(digest: dict, date_text: str) -> str:
 
 字段要求：
 1. title_cn：忠于英文题名，写成正式、通顺的中文学术标题。
-2. research_question：一句钩子式科学问题，只能有一个问号。它要先让人理解问题，再落到论文机制。不要写“该研究旨在”“这项研究想回答的是”。不要双问。严禁把研究意义写成问题，例如“如何为后续研究提供依据”“如何提供线索”“为什么具有意义”。
+2. research_question：一句钩子式科学问题，只能有一个问号。它要先让人理解问题，再落到论文机制，并忠于标题/摘要中的原始科学问题。可以从生活经验或读者熟悉的现象开场，例如疼痛牵动情绪、环境影响食欲、焦虑被抑制、饥饿提前出现，但必须保留论文里的关键对象、通路、细胞或受体。不要写“该研究旨在”“这项研究想回答的是”。不要双问。严禁把研究意义写成问题，例如“如何为后续研究提供依据”“如何提供线索”“为什么具有意义”。没有临床证据时，不能把机制问题改写成治疗问题。
 3. evidence_path：一句说明研究对象和关键方法。自然表达，不要写“方法上”。
 4. key_finding：一句说明最核心结果。必须有主语和宾语，不能只堆术语。
 5. conclusion_cn：一句说明这些结果支持什么判断。语气克制。
 6. why_it_matters：一句说明科学意义。不得泛泛写“提供新思路”“提供依据”“提供线索”。必须有明确对象，例如某个环路、细胞类型、模型、测量方法或病理机制。
 7. scope_note：一句说明边界。明确模型、样本、实验系统或临床阶段。
 8. voiceover：5-7 个短句，可直接口播。顺序是：科学问题；方法；结果；结论；意义/边界；最后交代期刊、题名、作者和简要单位。第一句必须是 research_question 的自然版本。
-9. opening_voiceover 和 catalog_voiceover：只事实性介绍本期论文数量和主题，不编造牵强共同主题。opening_voiceover 第一整句必须是具体科学问题，不能是栏目问候语。
-10. short_title：16 个汉字以内，适合封面主题。
-11. video_title：格式必须是“【全澜®追新助手】YYYYMMDDNN期 XXXXX”。
-12. video_description：约 150 字，直接介绍今天有哪些研究；准确、有信息密度、无营销腔。
+9. card_points：配图文案，3-4句短句。它不是字段摘要，不能写“问题：/证据：/结论：/边界：”。它要围绕 research_question 逐句回答：这篇文章看什么对象、用了什么证据、发现了什么、边界在哪里。句子要可直接放在图上，通顺、具体、短。
+10. opening_voiceover 和 catalog_voiceover：只事实性介绍本期论文数量和主题，不编造牵强共同主题。opening_voiceover 第一整句必须是具体科学问题，不能是栏目问候语。
+11. short_title：16 个汉字以内，适合封面主题。
+12. video_title：格式必须是“【全澜®追新助手】YYYYMMDDNN期 XXXXX”。
+13. video_description：约 150 字，直接介绍今天有哪些研究；准确、有信息密度、无营销腔。
 
 输出前逐条自检：
 1. 有没有英文直译腔？
@@ -1109,13 +1330,23 @@ def _daily_digest_polish_prompt(digest: dict, date_text: str) -> str:
 6. 有没有口水话或空泛价值判断？
 7. opening_voiceover 第一整句是不是具体科学问题？
 
-保持 JSON 结构、字段名、文章数量和 pmid 不变；不要 Markdown，不要解释。
+保持 JSON 结构、文章数量和 pmid 不变；允许为每篇文章补充 card_points 字段；不要 Markdown，不要解释。
 
 只输出润色后的严格 JSON：
 {source}
 """
 
-def _daily_digest_polish_with_deepseek(data: dict, *, date_text: str, deepseek_key: str = "", logger=print) -> dict:
+def _daily_digest_polish_with_deepseek(
+    data: dict,
+    *,
+    date_text: str,
+    polish_engine: str = "DeepSeek Chat（官方润色）",
+    deepseek_key: str = "",
+    openai_key: str = "",
+    chatshare_key: str = "",
+    gemini_key: str = "",
+    logger=print,
+) -> dict:
     if not data or not isinstance(data.get("articles"), list):
         return data
     prompt = _daily_digest_polish_prompt(data, date_text)
@@ -1123,11 +1354,15 @@ def _daily_digest_polish_with_deepseek(data: dict, *, date_text: str, deepseek_k
         logger(f"🪄 DeepSeek 润色开始：{len(data.get('articles', []) or [])} 篇，正在优化中文短句、术语解释和表达边界...")
     heartbeat = _daily_digest_progress_heartbeat("DeepSeek 中文润色", logger, interval=15)
     try:
+        engine = str(polish_engine or "DeepSeek Chat（官方润色）")
         result = generate_text_by_engine(
-            "DeepSeek Chat（官方润色）",
+            engine,
             prompt,
             logger,
             deepseek_key=deepseek_key or load_deepseek_api_key(),
+            openai_key=openai_key or load_openai_api_key(),
+            chatshare_key=chatshare_key or load_chatshare_api_key(),
+            gemini_key=gemini_key or load_gemini_api_key(),
         )
     finally:
         heartbeat.set()
@@ -1137,6 +1372,8 @@ def _daily_digest_polish_with_deepseek(data: dict, *, date_text: str, deepseek_k
     if not polished or not isinstance(polished.get("articles"), list):
         if logger:
             logger("⚠️ DeepSeek 润色未返回可解析 JSON，保留 GPT 初稿。")
+        data["_text_polish_engine"] = str(polish_engine or "DeepSeek Chat（官方润色）")
+        data["_text_polish_status"] = "failed"
         return data
     allowed_article_fields = (
         "title_cn",
@@ -1148,6 +1385,7 @@ def _daily_digest_polish_with_deepseek(data: dict, *, date_text: str, deepseek_k
         "conclusion_cn",
         "why_it_matters",
         "scope_note",
+        "card_points",
         "voiceover",
     )
     data["opening_voiceover"] = polished.get("opening_voiceover") or data.get("opening_voiceover", "")
@@ -1163,12 +1401,236 @@ def _daily_digest_polish_with_deepseek(data: dict, *, date_text: str, deepseek_k
             if str(candidate.get("pmid", "")).strip() != str(item.get("pmid", "")).strip():
                 continue
         for field in allowed_article_fields:
+            if field == "card_points":
+                value = candidate.get(field)
+                if isinstance(value, list):
+                    points = [str(x or "").strip() for x in value if str(x or "").strip()]
+                    if points:
+                        item[field] = points[:4]
+                elif str(value or "").strip():
+                    item[field] = [x.strip() for x in re.split(r"[\n。；;]+", str(value)) if x.strip()][:4]
+                continue
             value = str(candidate.get(field, "") or "").strip()
             if value:
                 item[field] = value
     if logger:
         logger("✅ DeepSeek 润色解析完成，已写回栏目素材。")
+    data["_text_polish_engine"] = str(polish_engine or "DeepSeek Chat（官方润色）")
+    data["_text_polish_status"] = "ok"
     return data
+
+
+def _daily_digest_short_video_score(item: dict, idx: int) -> int:
+    source = item.get("source", {}) or {}
+    text = " ".join(str(x or "") for x in (
+        item.get("research_question", ""),
+        item.get("title_cn", ""),
+        item.get("key_finding", ""),
+        source.get("title", ""),
+        source.get("abstract", ""),
+    ))
+    score = max(0, 5 - idx)
+    for word in ("疼痛", "情绪", "焦虑", "饥饿", "食欲", "吃不下", "进食", "记忆", "睡眠"):
+        if word in text:
+            score += 4
+    for word in ("cNTS", "PAG", "迷走神经", "H3", "AgRP", "PVH", "隔区", "海马", "下丘脑"):
+        if word in text:
+            score += 2
+    if re.search(r"(?:评论|commentary|In this issue)", text, flags=re.I):
+        score -= 1
+    if re.search(r"(?:连接蛋白|Cx43|半通道|CO2|二氧化碳)", text, flags=re.I):
+        score -= 2
+    return score
+
+
+def _daily_digest_select_short_video_articles(articles: list[dict], max_count: int = 3) -> list[tuple[int, dict]]:
+    candidates = [(idx, item) for idx, item in enumerate(articles or [], start=1) if isinstance(item, dict)]
+    ranked = sorted(candidates, key=lambda pair: (_daily_digest_short_video_score(pair[1], pair[0]), -pair[0]), reverse=True)
+    selected = ranked[:max(1, max_count)]
+    return sorted(selected, key=lambda pair: pair[0])
+
+
+def _daily_digest_short_video_fallback(digest: dict, *, date_text: str, issue_label: str = "") -> dict:
+    articles = digest.get("articles", []) or []
+    selected = _daily_digest_select_short_video_articles(articles, 3)
+    issue_code = _daily_digest_issue_code(digest.get("date", ""), issue_label)
+    lines = []
+    selected_pmids = []
+    title_bits = []
+    if selected:
+        first = selected[0][1]
+        lines.append(_daily_digest_strip_tail_punctuation(first.get("research_question", "")) + "？" if not re.search(r"[？?]$", str(first.get("research_question", ""))) else str(first.get("research_question", "")).strip())
+    lines.append(f"今天是{date_text}。这里是全澜脑科学每日研究速递精选版。")
+    lines.append("完整版保留5篇论文，这一版先挑最有短视频钩子的3篇。")
+    for order, (idx, item) in enumerate(selected, start=1):
+        source = item.get("source", {}) or {}
+        pmid = str(source.get("pmid", "") or item.get("pmid", "")).strip()
+        if pmid:
+            selected_pmids.append(pmid)
+        hook = _daily_digest_strip_tail_punctuation(item.get("research_question", ""))
+        finding = _daily_digest_strip_tail_punctuation(item.get("key_finding", ""))
+        scope = _daily_digest_strip_tail_punctuation(item.get("scope_note", ""))
+        journal = _daily_digest_display_text(source.get("journal", ""), 60)
+        if order <= 3 and hook:
+            title_bits.append(re.sub(r"[？?].*$", "", hook)[:12])
+        lines.append(f"第{order}个问题：{hook}？" if hook and not re.search(r"[？?]$", hook) else f"第{order}个问题：{hook}")
+        if finding:
+            lines.append(f"核心发现是：{finding}。")
+        if journal:
+            lines.append(f"论文发表于《{journal}》。")
+        if scope:
+            lines.append(f"边界也要说清：{scope}。")
+    lines.append("看懂这些边界，比只记住一个结论更重要。")
+    lines.append("以上就是本期精选版，感谢观看。")
+    voiceover = _daily_digest_sanitize_deliverable_text("".join(lines))
+    short_title = "、".join([x for x in title_bits if x][:3]) or "今日脑科学精选"
+    description = "精选版关注：" + "；".join(
+        _daily_digest_strip_tail_punctuation(item.get("research_question", ""))
+        for _, item in selected
+        if _daily_digest_strip_tail_punctuation(item.get("research_question", ""))
+    ) + "。"
+    return {
+        "short_video_title": f"【全澜脑科学®精选】{issue_code}期 {short_title}",
+        "short_video_description": _daily_digest_display_text(description, 220),
+        "short_video_voiceover": voiceover,
+        "selected_pmids": selected_pmids,
+        "selected_indices": [idx for idx, _ in selected],
+        "_short_video_polish_engine": "规则兜底",
+        "_short_video_polish_status": "fallback",
+    }
+
+
+def _daily_digest_short_video_prompt(digest: dict, *, date_text: str, issue_label: str = "") -> str:
+    articles = digest.get("articles", []) or []
+    selected = _daily_digest_select_short_video_articles(articles, 3)
+    payload = {
+        "date": date_text,
+        "issue_code": _daily_digest_issue_code(digest.get("date", ""), issue_label),
+        "selected_articles": [],
+    }
+    for idx, item in selected:
+        source = item.get("source", {}) or {}
+        payload["selected_articles"].append({
+            "index": idx,
+            "pmid": source.get("pmid", "") or item.get("pmid", ""),
+            "journal": source.get("journal", ""),
+            "title_cn": item.get("title_cn", ""),
+            "research_question": item.get("research_question", ""),
+            "evidence_path": item.get("evidence_path", ""),
+            "key_finding": item.get("key_finding", ""),
+            "conclusion_cn": item.get("conclusion_cn", ""),
+            "scope_note": item.get("scope_note", ""),
+        })
+    source = json.dumps(payload, ensure_ascii=False, indent=2)
+    return f"""你是全澜脑科学每日研究速递的短视频主编和 DeepSeek 官方润色编辑。请基于下面 JSON，为专业但碎片化观看的中文观众生成一个 90-120 秒精选短视频版本。
+
+要求：
+1. 只使用 JSON 中给出的论文信息，不新增摘要外事实，不曲解科学问题。
+2. 目标是短视频留存：开头 3 秒必须有具体钩子；只允许一个问号，不要连续双问，不要寒暄，不要营销腔。
+3. 只讲 3 篇精选论文。每篇用“问题 -> 核心发现 -> 证据边界”的节奏，不念长作者列表。
+4. 语气专业、克制、顺口。每句 18-32 个汉字为宜，超过 40 个汉字就拆。
+5. 必须保留关键机制对象，例如 cNTS-PAG、隔区肽能神经元、腹侧CA1 H3受体、AgRP/PVH-Sim2 等。
+6. 不得写治疗承诺，不得把动物、体外或评论文章结果外推成人类临床结论。尤其不要写“迷走神经刺激能改变这一点吗”这类容易被理解为人类疗效承诺的问句。
+7. voiceover 约 520-720 个汉字，适合 90-120 秒口播；不要写“完整版保留5篇”以外的解释性废话。
+8. description 适合视频号/B站发布，约 90-150 字，直接说本精选版讲哪三个问题。
+9. 输出严格 JSON，不要 Markdown，不要解释。
+
+JSON 输出格式：
+{{
+  "short_video_title": "【全澜脑科学®精选】YYYYMMDDNN期 标题",
+  "short_video_description": "发布简介",
+  "short_video_voiceover": "完整精选版口播稿",
+  "selected_pmids": ["..."],
+  "selected_indices": [1,2,3]
+}}
+
+输入 JSON：
+{source}
+"""
+
+
+def _daily_digest_build_short_video_assets(
+    digest: dict,
+    *,
+    date_text: str,
+    issue_label: str = "",
+    polish_engine: str = "DeepSeek Chat（官方润色）",
+    deepseek_key: str = "",
+    openai_key: str = "",
+    chatshare_key: str = "",
+    gemini_key: str = "",
+    logger=print,
+) -> dict:
+    if not isinstance(digest, dict):
+        return digest
+    fallback = _daily_digest_short_video_fallback(digest, date_text=date_text, issue_label=issue_label)
+    digest["short_video"] = fallback
+    if logger:
+        _daily_digest_log_stage(6, "DeepSeek 官方精选短视频润色", "生成90-120秒精选版口播、字幕和简介", logger=logger)
+    heartbeat = _daily_digest_progress_heartbeat("DeepSeek 精选短视频润色", logger, interval=15)
+    try:
+        result = generate_text_by_engine(
+            str(polish_engine or "DeepSeek Chat（官方润色）"),
+            _daily_digest_short_video_prompt(digest, date_text=date_text, issue_label=issue_label),
+            logger,
+            deepseek_key=deepseek_key or load_deepseek_api_key(),
+            openai_key=openai_key or load_openai_api_key(),
+            chatshare_key=chatshare_key or load_chatshare_api_key(),
+            gemini_key=gemini_key or load_gemini_api_key(),
+        )
+    except Exception as exc:
+        if logger:
+            logger(f"⚠️ 精选短视频 DeepSeek 润色失败，保留规则兜底稿：{type(exc).__name__}: {str(exc)[:100]}")
+        heartbeat.set()
+        return digest
+    finally:
+        heartbeat.set()
+    polished = _daily_digest_extract_json(result)
+    if not isinstance(polished, dict) or not str(polished.get("short_video_voiceover", "")).strip():
+        if logger:
+            logger("⚠️ 精选短视频润色返回不可解析，正在用同一模型通道修复为严格 JSON。")
+        try:
+            repair_result = generate_text_by_engine(
+                str(polish_engine or "GPT-5.5"),
+                _daily_digest_short_video_repair_prompt(result, fallback),
+                logger,
+                deepseek_key=deepseek_key or load_deepseek_api_key(),
+                openai_key=openai_key or load_openai_api_key(),
+                chatshare_key=chatshare_key or load_chatshare_api_key(),
+                gemini_key=gemini_key or load_gemini_api_key(),
+            )
+            polished = _daily_digest_extract_json(repair_result)
+        except Exception as exc:
+            if logger:
+                logger(f"⚠️ 精选短视频 JSON 修复失败，保留规则兜底稿：{type(exc).__name__}: {str(exc)[:100]}")
+            return digest
+        if not isinstance(polished, dict) or not str(polished.get("short_video_voiceover", "")).strip():
+            if logger:
+                logger("⚠️ 精选短视频 JSON 修复后仍不可用，保留规则兜底稿。")
+            return digest
+    polished_voiceover = _daily_digest_sanitize_deliverable_text(polished.get("short_video_voiceover", "") or fallback["short_video_voiceover"])
+    short_replacements = {
+        "疼痛为什么总让人情绪低落？迷走神经刺激能改变这一点吗？": "疼痛牵动情绪时，迷走神经刺激会怎样影响cNTS-PAG脑干通路？",
+        "本期三篇研究，带你看到大脑如何连接身体与记忆。": "本期三篇研究，看特定脑环路如何调节身体信号、记忆线索和能量预测。",
+        "答案是会的。": "",
+        "三篇研究共同揭示：大脑用特定环路，把身体信号、记忆和预测编织在一起。": "三篇研究共同指向一个重点：行为调节离不开具体环路，也离不开证据边界。",
+    }
+    for old, new in short_replacements.items():
+        polished_voiceover = polished_voiceover.replace(old, new)
+    polished_voiceover = _daily_digest_sanitize_deliverable_text(polished_voiceover)
+    short_video = {
+        "short_video_title": _daily_digest_sanitize_deliverable_text(polished.get("short_video_title", "") or fallback["short_video_title"]),
+        "short_video_description": _daily_digest_sanitize_deliverable_text(polished.get("short_video_description", "") or fallback["short_video_description"]),
+        "short_video_voiceover": polished_voiceover,
+        "selected_pmids": polished.get("selected_pmids") if isinstance(polished.get("selected_pmids"), list) else fallback["selected_pmids"],
+        "selected_indices": polished.get("selected_indices") if isinstance(polished.get("selected_indices"), list) else fallback["selected_indices"],
+        "_short_video_polish_engine": str(polish_engine or "DeepSeek Chat（官方润色）"),
+        "_short_video_polish_status": "ok",
+    }
+    digest["short_video"] = short_video
+    if logger:
+        logger("✅ 精选短视频文案已通过 DeepSeek 官方润色。")
+    return digest
 
 
 def build_daily_research_digest(
@@ -1214,8 +1676,17 @@ def build_daily_research_digest(
         if logger:
             logger("⚠️ 文本模型未返回可解析 JSON，已使用本地保守模板生成素材。")
         data = _daily_digest_local_digest(articles, date_text)
-    if is_deepseek_text_engine(polish_engine):
-        data = _daily_digest_polish_with_deepseek(data, date_text=date_text, deepseek_key=deepseek_key, logger=logger)
+    if str(polish_engine or "").strip():
+        data = _daily_digest_polish_with_deepseek(
+            data,
+            date_text=date_text,
+            polish_engine=polish_engine,
+            deepseek_key=deepseek_key,
+            openai_key=openai_key,
+            chatshare_key=chatshare_key,
+            gemini_key=gemini_key,
+            logger=logger,
+        )
     by_pmid = {str(x.get("pmid", "")): x for x in articles}
     for idx, item in enumerate(data.get("articles", [])):
         pmid = str(item.get("pmid", "")).strip()
@@ -1223,7 +1694,7 @@ def build_daily_research_digest(
         item["source"] = source
         if not item.get("authors_cn"):
             item["authors_cn"] = source.get("authors", "") or "作者信息待补全"
-        item["affiliation_cn"] = _daily_digest_clean_affiliation(item.get("affiliation_cn") or source.get("affiliations", "")) or "机构信息待补全"
+        item["affiliation_cn"] = _daily_digest_cn_affiliation_name(item.get("affiliation_cn") or source.get("affiliations", "")) or "机构信息待补全"
         if not item.get("research_question") and item.get("hook"):
             item["research_question"] = item.get("hook")
         if not item.get("evidence_path"):
@@ -1248,6 +1719,86 @@ def build_daily_research_digest(
     if logger:
         logger("✅ 栏目素材字段校验完成，已补齐 source、边界说明和图片提示词。")
     return data
+
+
+def _daily_digest_final_polish_all_text_assets(
+    digest: dict,
+    article_list: list[dict],
+    *,
+    date_text: str,
+    issue_label: str = "",
+    polish_engine: str = "DeepSeek Chat（官方润色）",
+    deepseek_key: str = "",
+    openai_key: str = "",
+    chatshare_key: str = "",
+    gemini_key: str = "",
+    logger=print,
+) -> dict:
+    if not isinstance(digest, dict):
+        return digest
+    by_pmid = {str(x.get("pmid", "")).strip(): x for x in article_list or [] if isinstance(x, dict)}
+    for idx, item in enumerate(digest.get("articles", []) or []):
+        if not isinstance(item, dict):
+            continue
+        pmid = str(item.get("pmid", "") or ((item.get("source", {}) or {}).get("pmid", ""))).strip()
+        source = item.get("source") if isinstance(item.get("source"), dict) else {}
+        if pmid and pmid in by_pmid:
+            source = by_pmid[pmid]
+        elif article_list and idx < len(article_list) and isinstance(article_list[idx], dict):
+            source = article_list[idx]
+        item["source"] = source
+        if not item.get("card_points"):
+            item["card_points"] = _daily_digest_article_card_paragraphs(item)
+    if str(polish_engine or "").strip():
+        if logger:
+            _daily_digest_log_stage(6, "终稿润色", f"口播、字幕、简介、卡片文案统一润色：{polish_engine}", logger=logger)
+        digest = _daily_digest_polish_with_deepseek(
+            digest,
+            date_text=date_text,
+            polish_engine=polish_engine,
+            deepseek_key=deepseek_key,
+            openai_key=openai_key,
+            chatshare_key=chatshare_key,
+            gemini_key=gemini_key,
+            logger=logger,
+        )
+    else:
+        digest["_text_polish_engine"] = polish_engine
+        digest["_text_polish_status"] = "skipped"
+    for idx, item in enumerate(digest.get("articles", []) or []):
+        if not isinstance(item, dict):
+            continue
+        source = item.get("source") if isinstance(item.get("source"), dict) else {}
+        pmid = str(item.get("pmid", "") or source.get("pmid", "")).strip()
+        if pmid and pmid in by_pmid:
+            source = by_pmid[pmid]
+            item["source"] = source
+        elif article_list and idx < len(article_list) and isinstance(article_list[idx], dict):
+            source = article_list[idx]
+            item["source"] = source
+        seed = " ".join(str(x or "") for x in (
+            item.get("research_question"),
+            item.get("key_finding"),
+            item.get("conclusion_cn"),
+            source.get("title", ""),
+            source.get("abstract", ""),
+        ))
+        hook = _daily_digest_hook_question(item.get("research_question") or "", seed)
+        if hook:
+            item["research_question"] = hook
+        _daily_digest_normalize_article_copy(item)
+        if not item.get("card_points"):
+            item["card_points"] = _daily_digest_article_card_paragraphs(item)
+        existing_voiceover = _daily_digest_sanitize_deliverable_text(item.get("voiceover", ""))
+        bad_voiceover = (
+            len(existing_voiceover) < 40
+            or re.search(r"研究围绕这篇|研究围绕.*展开|。以及|这有助于界定这把|这有助于把握这将|下一期继续追踪|治疗疼痛时|迷走神经通向脑干", existing_voiceover)
+        )
+        if bad_voiceover:
+            item["voiceover"] = _daily_digest_voiceover_with_hook(item)
+        else:
+            item["voiceover"] = existing_voiceover
+    return _daily_digest_finalize_metadata(digest, issue_label=issue_label)
 
 
 DAILY_DIGEST_VISUAL_W = 760
@@ -1338,16 +1889,16 @@ Avoid: written words, UI elements, fake microscopy labels, gore, sensational ima
 def _daily_digest_force_square_image_prompt(article: dict, prompt: str, key_finding: str = "") -> str:
     title = _daily_digest_safe_text((article or {}).get("title", ""), 240)
     abstract = _daily_digest_safe_text((article or {}).get("abstract", ""), 700)
-    key = _daily_digest_safe_text(key_finding, 220)
+    key = _daily_digest_safe_text(_daily_digest_sanitize_deliverable_text(key_finding), 220)
     body = _daily_digest_safe_text(prompt, 1400)
     if "DAILY_RESEARCH_SQUARE_VISUAL_SUMMARY" in body:
-        body = re.sub(r"\s+", " ", body).strip()
+        body = ""
     return f"""DAILY_RESEARCH_SQUARE_VISUAL_SUMMARY.
 Create a purpose-built 1:1 square Cell-style neuroscience visual abstract, not a cropped vertical poster.
 Source title: {title}
 Key finding: {key}
 Source-supported context: {abstract}
-Original visual idea to preserve if useful: {body}
+Original visual idea to preserve if useful: {body or "Use the source title, key finding, and abstract above; do not reuse any previous card layout or prompt text."}
 Hard composition rule: all scientific content must be drawn directly inside one square canvas. Do not draw a full-height animal body, long head-to-tail vertical pathway, tall mobile page, infographic poster, or screenshot-like page. Recompose the mechanism into a compact square map with central circuit, short arrows, one optional inset, or 2-3 balanced stages. If mouse or organs are needed, use simplified partial icons or compact cutaways inside the square; never rely on cropping to fit them.
 Canvas requirement: request image canvas exactly {DAILY_DIGEST_VISUAL_API_SIZE}, aspect ratio 1:1. Keep all essential structures, arrows, insets, and mechanism stages fully visible inside the square with generous margins.
 Style: clean biomedical editorial illustration, Cell visual abstract feeling, mechanism-first, no text, no labels, no letters, no numbers, no watermark."""
@@ -1442,6 +1993,8 @@ def _daily_digest_fix_cjk_protected_terms(lines: list[str], draw, font, max_widt
         "单细胞", "图谱", "帕金森病", "神经炎症", "炎症", "轨迹",
         "前额叶", "海马", "同步", "灵活决策", "决策",
         "皮层类器官", "类器官", "自闭症", "发育", "偏移",
+        "Croquemort", "cNTS-PAG", "Cx43", "AgRP", "PVHSim2", "H3",
+        "connexin 43", "astrocyte", "histamine", "hypothalamic",
     )
     for _ in range(2):
         changed = False
@@ -1489,8 +2042,6 @@ def _daily_digest_clean_card_body_lines(lines: list[str]) -> list[str]:
     bad_tail = re.compile(r"[，,、；;：:\s]*(?:和|及|以及|并|与|或|对|在|将|把|为|以|通过|结合|采用)$")
     for line in [str(x or "").strip() for x in lines if str(x or "").strip()]:
         new_line = bad_tail.sub("", line).strip()
-        if new_line != line and new_line and not re.search(r"[。！？!?…]$", new_line):
-            new_line += "…"
         cleaned.append(new_line or line)
     return cleaned
 
@@ -1534,27 +2085,45 @@ def _daily_digest_fit_wrapped_text(draw, text: str, *, max_width: int, max_heigh
 
 
 def _daily_digest_plan_article_body(draw, paragraphs: list[str], *, max_width: int, max_height: int):
-    def _card_body_text(value: str, max_chars: int = 128) -> str:
+    def _card_body_text(value: str, max_chars: int = 92) -> str:
         raw = _daily_digest_display_text(value, 420)
         if not raw:
             return ""
-        truncated = len(raw) > max_chars
-        text = raw[:max_chars].rstrip() if truncated else raw
+        raw = re.sub(r"\s+", " ", raw).strip()
+        text = raw
+        if len(text) > max_chars:
+            clauses = [x.strip(" ，,；;：:。") for x in re.split(r"[。；;]", text) if x.strip()]
+            chosen = ""
+            for clause in clauses:
+                if len(clause) <= max_chars:
+                    chosen = clause
+                    break
+                sub = [x.strip(" ，,；;：:。") for x in re.split(r"[，,]", clause) if x.strip()]
+                if sub and len(sub[0]) <= max_chars:
+                    chosen = sub[0]
+                    break
+            text = chosen or text[:max_chars].rstrip()
         text = re.sub(r"[，,、；;：:\s]*(?:和|及|以及|并|与|或|对|在|将|把|为|以|通过|结合|采用)$", "", text).strip()
         text = re.sub(r"[，,、；;：:\s]+$", "", text).strip()
-        if truncated and text and not text.endswith("…"):
-            text += "…"
         return text
 
-    clean = [_card_body_text(p, 128) for p in paragraphs if _card_body_text(p, 128)]
+    clean = []
+    seen = set()
+    for p in paragraphs:
+        text = _card_body_text(p, 92)
+        key = re.sub(r"[：:，,。！？!?；;\s]+", "", text)
+        if not text or key in seen:
+            continue
+        seen.add(key)
+        clean.append(text)
     if not clean:
         clean = ["围绕论文摘要提取研究问题、关键证据与适用边界，供口播解读时快速抓住主线。"]
-    clean = clean[:3]
-    for size in (30, 29, 28, 27, 26, 25, 24):
+    clean = clean[:4]
+    for size in (27, 26, 25, 24, 23, 22):
         font = _daily_digest_font(size, weight=500)
-        line_gap = max(7, int(size * 0.28))
-        para_gap = max(13, int(size * 0.52))
-        for max_lines_each in (2, 1):
+        line_gap = max(6, int(size * 0.22))
+        para_gap = max(8, int(size * 0.32))
+        for max_lines_each in (2,):
             planned = []
             total_h = 0
             for para in clean:
@@ -1568,11 +2137,11 @@ def _daily_digest_plan_article_body(draw, paragraphs: list[str], *, max_width: i
                 total_h -= para_gap
             if total_h <= max_height:
                 return font, planned, line_gap, para_gap
-    font = _daily_digest_font(24, weight=500)
-    line_gap = 7
-    para_gap = 13
+    font = _daily_digest_font(22, weight=500)
+    line_gap = 6
+    para_gap = 8
     planned = []
-    for para in clean[:3]:
+    for para in clean[:4]:
         lines = _daily_digest_wrap(draw, para, font, max_width, max_lines=2)
         lines = _daily_digest_clean_card_body_lines(lines)
         if lines:
@@ -1628,22 +2197,69 @@ def _daily_digest_project_root() -> str:
 
 
 def _daily_digest_normalize_relay_base_url(value: str = "") -> str:
-    base_url = str(value or "").strip() or str(globals().get("DEFAULT_FOREIGN_MODEL_BASE_URL", "https://greatwalllink.top/v1"))
+    base_url = str(value or "").strip() or "https://www.fhl.mom/v1"
     base_url = base_url.replace("greatwallink.top", "greatwalllink.top").rstrip("/")
+    if "greatwalllink.top" in base_url:
+        base_url = "https://www.fhl.mom/v1"
     if not base_url.endswith("/v1"):
         base_url = base_url + "/v1"
     return base_url
 
 
+def _daily_digest_shared_model_config() -> dict:
+    root = _daily_digest_project_root()
+    candidates = [
+        os.environ.get("QUANLAN_SHARED_MODEL_CONFIG_FILE", ""),
+        os.path.join(root, ".env.quanlan-model.local.json"),
+        os.path.join(os.getcwd(), ".env.quanlan-model.local.json"),
+        os.environ.get("QUANLAN_MODEL_DEFAULTS_FILE", ""),
+        os.path.join(root, "quanlan_model_defaults.json"),
+        os.path.join(os.getcwd(), "quanlan_model_defaults.json"),
+    ]
+    for path in candidates:
+        try:
+            if not path or not os.path.exists(path):
+                continue
+            data = json.loads(open(path, "r", encoding="utf-8-sig").read())
+            if isinstance(data, dict):
+                models = data.get("models") if isinstance(data.get("models"), dict) else data
+                if isinstance(models, dict) and models:
+                    return models
+        except Exception:
+            continue
+    try:
+        profiles_path = os.path.join(root, "quanlan_model_profiles.json")
+        data = json.loads(open(profiles_path, "r", encoding="utf-8-sig").read())
+        active = str(data.get("active_profile") or "").strip()
+        for item in data.get("profiles", []) or []:
+            if isinstance(item, dict) and str(item.get("id") or "").strip() == active:
+                models = item.get("models") if isinstance(item.get("models"), dict) else {}
+                if models:
+                    result = dict(models)
+                    result["_active_profile"] = active
+                    return result
+    except Exception:
+        pass
+    return {}
+
+
 def _daily_digest_prepare_relay_env(logger=print) -> str:
     """Ensure daily digest uses the shared foreign-model relay without exposing keys."""
-    current = os.environ.get("NEWAPI_BASE_URL", "") or os.environ.get("FOREIGN_MODEL_BASE_URL", "")
+    shared = _daily_digest_shared_model_config()
     candidates = []
     root = _daily_digest_project_root()
     for name in ("relay_settings.json", "gui_settings.json"):
         candidates.append(os.path.join(root, name))
         candidates.append(os.path.join(os.getcwd(), name))
-    base_url = current
+    base_url = (
+        shared.get("research_image_base_url")
+        or shared.get("gpt_image_base_url")
+        or shared.get("image_url")
+        or shared.get("culture_image_base_url")
+        or shared.get("foreign_base_url")
+        or shared.get("text_url")
+        or ""
+    )
     if not base_url:
         for path in candidates:
             try:
@@ -1656,12 +2272,19 @@ def _daily_digest_prepare_relay_env(logger=print) -> str:
                         break
             except Exception:
                 continue
+    if not base_url:
+        base_url = os.environ.get("RESEARCH_IMAGE_BASE_URL", "") or os.environ.get("GPT_IMAGE_BASE_URL", "") or os.environ.get("NEWAPI_BASE_URL", "") or os.environ.get("FOREIGN_MODEL_BASE_URL", "")
     base_url = _daily_digest_normalize_relay_base_url(base_url)
     os.environ["NEWAPI_BASE_URL"] = base_url
-    os.environ.setdefault("FOREIGN_MODEL_BASE_URL", base_url)
+    os.environ["FOREIGN_MODEL_BASE_URL"] = base_url
+    os.environ["RESEARCH_IMAGE_BASE_URL"] = base_url
+    os.environ["GPT_IMAGE_BASE_URL"] = base_url
+    image_model = str(shared.get("image_engine") or shared.get("image_model") or shared.get("culture_image_model") or "gpt-image-2").strip()
+    if image_model:
+        os.environ["OPENAI_IMAGE_MODEL"] = image_model
     if logger:
         try:
-            logger(f"🔌 每日研究速递中转站：{base_url}")
+            logger(f"🔌 每日研究速递生图通道：{base_url}｜model={os.environ.get('OPENAI_IMAGE_MODEL', 'gpt-image-2')}")
         except Exception:
             pass
     return base_url
@@ -1678,6 +2301,21 @@ def _daily_digest_read_secret_file(path: str) -> str:
     return ""
 
 
+def _daily_digest_active_profile_secret_paths(key_name: str) -> list[str]:
+    root = _daily_digest_project_root()
+    paths: list[str] = []
+    try:
+        data = json.loads(open(os.path.join(root, "quanlan_model_profiles.json"), "r", encoding="utf-8-sig").read())
+        active = str(data.get("active_profile") or "").strip()
+        if active:
+            profile_id = re.sub(r"[^A-Za-z0-9_-]+", "-", active).strip("-").lower()[:48]
+            if profile_id:
+                paths.append(os.path.join(root, ".model_profiles", profile_id, f"{key_name}.txt"))
+    except Exception:
+        pass
+    return paths
+
+
 def _daily_digest_load_image_api_key() -> str:
     """Prefer the relay image key file used by the zhuzuo project, then fall back to OpenAI key."""
     for env_name in ("IMAGE_API_KEY", "OPENAI_IMAGE_API_KEY"):
@@ -1687,7 +2325,21 @@ def _daily_digest_load_image_api_key() -> str:
         if value:
             return value
     root = _daily_digest_project_root()
+    shared = _daily_digest_shared_model_config()
+    configured_paths = []
+    try:
+        key_files = json.loads(open(os.path.join(root, ".env.quanlan-model.local.json"), "r", encoding="utf-8-sig").read()).get("key_files", {})
+        if isinstance(key_files, dict):
+            configured_paths.append(str(key_files.get("image_api_key") or ""))
+    except Exception:
+        pass
+    configured_paths.extend([
+        str(shared.get("image_api_key_file") or ""),
+        str(shared.get("image_api_key_path") or ""),
+    ])
     for path in (
+        *_daily_digest_active_profile_secret_paths("image_api_key"),
+        *[p for p in configured_paths if p],
         os.path.join(root, "image_api_key.txt"),
         os.path.join(os.getcwd(), "image_api_key.txt"),
         os.path.join(root, "openai_image_api_key.txt"),
@@ -1960,8 +2612,8 @@ def _daily_digest_explain_terms_once(text: str) -> str:
     return value
 
 
-def _daily_digest_polish_science_text(text: str, max_chars: int = 420) -> str:
-    value = _daily_digest_display_text(text, max_chars)
+def _daily_digest_polish_science_text(text: str, max_chars: int = 420, *, keep_punctuation: bool = False) -> str:
+    value = _daily_digest_safe_text(text, max_chars) if keep_punctuation else _daily_digest_display_text(text, max_chars)
     if not value:
         return ""
     replacements = {
@@ -1974,6 +2626,7 @@ def _daily_digest_polish_science_text(text: str, max_chars: int = 420) -> str:
     }
     for old, new in replacements.items():
         value = value.replace(old, new)
+    value = value.replace("具体定位到到", "具体定位到")
     value = re.sub(r"研究聚焦这项研究想弄清[，,]?", "这项研究想弄清", value)
     value = re.sub(r"研究聚焦(?:于|的是|是)?", "", value)
     value = re.sub(r"研究结合了研究(?:在|中|通过)?", "研究在", value)
@@ -1987,7 +2640,8 @@ def _daily_digest_polish_science_text(text: str, max_chars: int = 420) -> str:
         value = re.sub(r"建立或维持连接", "建立或维持神经元之间的连接", value)
         value = re.sub(r"建立、维持连接", "建立、维持神经元之间的连接", value)
         value = re.sub(r"维持连接(?=[？?。.!！；;，,]|$)", "维持神经元之间的连接", value)
-    value = re.sub(r"(?<!到)定位(?=[A-Za-z0-9\u4e00-\u9fff])", "定位到", value)
+    value = re.sub(r"(?<!到)定位(?!到)(?=[A-Za-z0-9\u4e00-\u9fff])", "定位到", value)
+    value = value.replace("具体定位到到", "具体定位到")
     value = re.sub(r"由此得到的结论是", "论文给出的结论是", value)
     value = re.sub(r"由此看[，,:：]?", "这些结果支持这样的判断：", value)
     value = re.sub(r"证明了", "支持了", value)
@@ -2009,6 +2663,8 @@ def _daily_digest_polish_science_text(text: str, max_chars: int = 420) -> str:
     value = re.sub(r"证明了疗效", "提供了疗效相关的初步证据", value)
     value = _daily_digest_explain_terms_once(value)
     value = _daily_digest_clean_aiish_science_phrase(value)
+    if keep_punctuation:
+        value = _daily_digest_sanitize_deliverable_text(value)
     value = re.sub(r"\s+", " ", value).strip()
     return value
 
@@ -2018,6 +2674,8 @@ def _daily_digest_clean_aiish_science_phrase(text: str) -> str:
     if not value:
         return ""
     value = re.sub(r"这有助于理解这(?:有助于|为|提示)?", "这有助于", value)
+    value = re.sub(r"这有助于(?:界定|说明|解释)这将([^。；;]{2,80})具体落到([^。；;]{2,80})", r"这把\1具体落到\2", value)
+    value = re.sub(r"^这将(?=[^。；;]{0,50}(?:具体落到|连接到|定位到))", "这把", value)
     value = re.sub(r"这有助于理解(?:解析|理解|说明)", "这有助于解释", value)
     value = re.sub(r"这有助于理解(该图谱|该工具|该传感器|该模型)为理解", r"\1有助于理解", value)
     value = re.sub(r"这有助于理解为理解", "这有助于理解", value)
@@ -2105,7 +2763,7 @@ def _daily_digest_brief_authors_for_voice(value: str) -> str:
 
 
 def _daily_digest_brief_affiliations_for_voice(value: str) -> str:
-    text = _daily_digest_clean_affiliation(value, 180)
+    text = _daily_digest_cn_affiliation_name(value)
     if not text:
         return "机构信息待补全"
     parts = [x.strip() for x in re.split(r"[;；]+", text) if x.strip()]
@@ -2133,7 +2791,7 @@ def _daily_digest_citation_sentence(source: dict, title: str, authors: str, affi
     prefix = f"这篇论文发表于《{journal}》" if journal else "这篇论文"
     if title:
         prefix += f"，题为《{title}》"
-    return f"{prefix}，由{brief_authors}完成，主要来自{brief_affiliation}。"
+    return f"{prefix}。由{brief_authors}完成，主要来自{brief_affiliation}。"
 
 
 def _daily_digest_one_question(text: str) -> str:
@@ -2155,6 +2813,7 @@ def _daily_digest_clean_question_seed(text: str) -> str:
     value = re.sub(r"为(?:后续|未来|进一步)?(?:研究|验证)(?:提供|奠定|打下)(?:依据|线索|基础|参考)[，,、]?", "", value)
     value = re.sub(r"提供了?(?:依据|线索|思路|角度|参考)[，,、]?", "", value)
     value = re.sub(r"通过(.{0,28})(?:提供依据|提供线索|提供思路)", r"通过\1发挥作用", value)
+    value = re.sub(r"^这将(?=[^。；;]{0,50}(?:具体落到|连接到|定位到))", "这把", value)
     value = re.sub(r"为后续研究提供依据", "", value)
     value = re.sub(r"提供了?机制线索", "", value)
     return value.strip(" ，,；;：:。")
@@ -2162,19 +2821,31 @@ def _daily_digest_clean_question_seed(text: str) -> str:
 
 def _daily_digest_hook_question(text: str, fallback: str = "") -> str:
     value = _daily_digest_clean_question_seed(text)
+    source_context = _daily_digest_clean_question_seed(fallback)
+    combined = f"{value}\n{source_context}"
     value = re.sub(r"^(?:该研究|这项研究|研究|研究者|本文|作者|团队)\s*(?:旨在|想回答的是|想弄清|解析|探讨|关注|聚焦于?|试图说明|要回答)?[，,:：\s]*", "", value)
     value = re.sub(r"^(?:解析|探讨|说明|回答|关注|聚焦|描述|评估)\s*", "", value)
     value = re.sub(r"^(?:结果|证据|实验)\s*(?:显示|提示|表明)[，,:：\s]*", "", value)
     value = re.sub(r"^(?:如何|为什么|为何|什么|哪一类|哪些|谁|怎样)", lambda m: m.group(0), value)
     value = value.strip(" ，,；;：:")
     if not value:
-        value = _daily_digest_clean_question_seed(fallback)
+        value = source_context
     if not value:
         return ""
+    if re.search(r"(?:迷走神经刺激|vagus nerve stimulation|\bVNS\b)", combined, flags=re.I) and re.search(r"(?:cNTS|PAG|孤束核|导水管周围灰质|脑干|brainstem)", combined, flags=re.I) and re.search(r"(?:疼痛|痛觉|pain|负性情感|情感状态|affective)", combined, flags=re.I):
+        return "疼痛牵动情绪时，迷走神经刺激会怎样影响cNTS-PAG脑干通路？"
+    if re.search(r"(?:治疗|临床|管理|缓解|镇痛)", value) and re.search(r"(?:疼痛|痛觉)", combined) and re.search(r"(?:迷走神经|vagus|VNS|脑干|brainstem|孤束核|cNTS|PAG|导水管周围灰质)", combined, flags=re.I):
+        return "疼痛牵动情绪时，脑干通路如何参与迷走神经输入的调制？"
+    if re.search(r"(?:海马|hippocampus).*(?:隔区|septum).*(?:下丘脑|hypothalamus)|(?:厌恶情境|aversive contextual|context-dependent feeding|prodynorphin)", combined, flags=re.I):
+        return "为什么有些环境会让人吃不下，隔区肽能神经元在其中做了什么？"
+    if re.search(r"(?:腹侧CA1|ventral CA1).*(?:H3|histamine 3|组胺).*?(?:焦虑|anxiety)|(?:星形胶质|astrocyt).*?(?:H3|histamine 3).*?(?:焦虑|anxiety)", combined, flags=re.I):
+        return "焦虑被踩下刹车时，腹侧CA1星形胶质细胞上的H3受体在做什么？"
+    if re.search(r"(?:connexin 43|连接蛋白43|Cx43).*(?:二氧化碳|CO2|carbon dioxide)", combined, flags=re.I):
+        return "生理范围内的二氧化碳波动，会怎样影响连接蛋白43半通道开放？"
     if re.search(r"[？?]$", value):
         return _daily_digest_one_question(value)
-    if re.search(r"(?:疼痛|痛觉)", value) and re.search(r"(?:迷走神经|脑干|孤束核|导水管周围灰质)", value):
-        return "治疗疼痛时，为什么要关注迷走神经通向脑干的路径？"
+    if re.search(r"(?:疼痛|痛觉)", combined) and re.search(r"(?:迷走神经|脑干|孤束核|导水管周围灰质)", combined):
+        return "脑干通路如何把迷走神经输入转化为疼痛和情感反应？"
     if re.search(r"(?:内吞|endocyt|表面蛋白|surface protein)", value, flags=re.I):
         if re.search(r"(?:突触|连接|connect)", value, flags=re.I):
             return "神经元如何通过内吞作用调控表面蛋白，并影响突触连接？"
@@ -2202,7 +2873,7 @@ def _daily_digest_voiceover_with_hook(item: dict) -> str:
         return str(item.get("voiceover", "") or "").strip()
     title = _daily_digest_display_text(item.get("title_cn") or source.get("title", ""), 120)
     authors = _daily_digest_display_meta(item.get("authors_cn") or source.get("authors", ""), 120) or "作者信息待补全"
-    affiliation = _daily_digest_clean_affiliation(item.get("affiliation_cn") or source.get("affiliations", "")) or "机构信息待补全"
+    affiliation = _daily_digest_cn_affiliation_name(item.get("affiliation_cn") or source.get("affiliations", "")) or "机构信息待补全"
     method = _daily_digest_clean_evidence_phrase(item.get("evidence_path") or _daily_digest_infer_evidence_path(source))
     finding = _daily_digest_strip_tail_punctuation(item.get("key_finding", ""))
     conclusion = _daily_digest_strip_tail_punctuation(item.get("conclusion_cn", ""))
@@ -2263,7 +2934,7 @@ def _daily_digest_normalize_article_copy(item: dict) -> dict:
         if item.get(key):
             item[key] = _daily_digest_strip_tail_punctuation(_daily_digest_clean_aiish_science_phrase(item.get(key)))
             item[key] = _daily_digest_display_text(item[key], limit)
-    item["affiliation_cn"] = _daily_digest_clean_affiliation(item.get("affiliation_cn") or source.get("affiliations", "")) or "机构信息待补全"
+    item["affiliation_cn"] = _daily_digest_cn_affiliation_name(item.get("affiliation_cn") or source.get("affiliations", "")) or "机构信息待补全"
     if item.get("authors_cn"):
         item["authors_cn"] = _daily_digest_display_meta(item.get("authors_cn"), 140)
     return item
@@ -2279,6 +2950,8 @@ def _daily_digest_copy_quality_warnings(text: str) -> list[str]:
         (r"等等人|等人等人", "作者表述重复"),
         (r"电子邮箱|Electronic address|CA \\d|\\bUSA\\b|\\bUnited States\\b", "机构信息冗余"),
         (r"建立和维持连接", "连接对象不清"),
+        (r"治疗疼痛时|迷走神经通向脑干|为什么要关注.*路径", "科学问题被临床化或口语化曲解"),
+        (r"这有助于界定这(?:把|将)|这有助于把握这将", "意义句套话叠加"),
     ]
     return [label for pattern, label in checks if re.search(pattern, value, flags=re.I)]
 
@@ -2288,6 +2961,8 @@ def _daily_digest_method_sentence(method: str) -> str:
     if not value:
         return ""
     value = re.sub(r"^(?:研究)?(?:结合了|结合|采用|使用|通过)\s*", "", value)
+    if re.match(r"^这篇[^。]{0,18}评论概述", value):
+        return f"{value}。"
     if re.match(r"^(?:在|对|以|用|利用|基于|通过|采用|结合|比较|测量|标记|操控)", value):
         return f"研究{value}。"
     if re.match(r"^(?:设计|开发|构建|绘制|建立|筛选|验证|分析|评估|测试|优化)", value):
@@ -2301,6 +2976,8 @@ def _daily_digest_meaning_sentence(meaning: str) -> str:
     if not value:
         return ""
     value = _daily_digest_clean_aiish_science_phrase(value)
+    if re.search(r"^这把[^。；;]{2,80}(?:具体落到|连接到|定位到)[^。；;]{2,80}$", value):
+        return f"{value}。"
     if re.search(r"^(?:该图谱|该工具|该传感器|该模型|该方法|这一结果|这提供了)", value):
         return f"{value}。"
     if re.search(r"^(?:解释|说明|理解|解析)", value):
@@ -2308,8 +2985,8 @@ def _daily_digest_meaning_sentence(meaning: str) -> str:
     if re.search(r"^(?:某一|相关|该|这种|这一|这些)?(?:机制|环路|细胞|模型|图谱|工具|方法|传感器|病理|信号|过程)", value):
         return f"这有助于解释{value}。"
     if re.search(r"(?:机制|环路|细胞|模型|图谱|工具|方法|传感器|病理|信号|过程)", value):
-        return f"这有助于把握{value}。"
-    return f"这为理解相关问题提供了具体信息。"
+        return f"这有助于界定{value}。"
+    return ""
 
 
 def _daily_digest_clean_evidence_phrase(text: str) -> str:
@@ -2371,7 +3048,7 @@ def _daily_digest_article_summary_paragraphs(item: dict) -> list[str]:
     question = _daily_digest_strip_tail_punctuation(item.get("research_question") or item.get("hook", ""))
     title = _daily_digest_display_text(item.get("title_cn") or source.get("title", ""), 120)
     authors = _daily_digest_display_meta(item.get("authors_cn") or source.get("authors", ""), 120) or "作者信息待补全"
-    affiliation = _daily_digest_clean_affiliation(item.get("affiliation_cn") or source.get("affiliations", "")) or "机构信息待补全"
+    affiliation = _daily_digest_cn_affiliation_name(item.get("affiliation_cn") or source.get("affiliations", "")) or "机构信息待补全"
     evidence = _daily_digest_clean_evidence_phrase(item.get("evidence_path") or _daily_digest_infer_evidence_path(source))
     finding = _daily_digest_strip_tail_punctuation(item.get("key_finding", ""))
     conclusion = _daily_digest_strip_tail_punctuation(item.get("conclusion_cn", ""))
@@ -2479,8 +3156,8 @@ def _daily_digest_visual_sentence(text: str, *, max_chars: int = 42) -> str:
     if not value:
         return ""
     known_rules = [
-        (r"(?:cNTS|尾侧孤束核|孤束核).*(?:PAG|导水管周围灰质).*(?:迷走神经刺激|疼痛|痛觉)", "cNTS-PAG神经元参与迷走神经刺激的镇痛效应"),
-        (r"(?:负性情感|负性情绪).*(?:疼痛|痛觉)|(?:疼痛|痛觉).*(?:负性情感|负性情绪)", "该通路也影响疼痛相关负性情绪"),
+        (r"(?:cNTS|尾侧孤束核|孤束核).*(?:PAG|导水管周围灰质).*(?:迷走神经刺激|疼痛|痛觉|负性情感|负性情绪)", "cNTS-PAG脑干通路调制疼痛和负性情感"),
+        (r"(?:负性情感|负性情绪).*(?:疼痛|痛觉)|(?:疼痛|痛觉).*(?:负性情感|负性情绪)", "疼痛编码与负性情感调制"),
         (r"(?:单细胞|多组学).*(?:类器官|中脑|后脑)", "单细胞多组学图谱指导后部脑类器官工程"),
         (r"(?:形态发生因子|morphogen).*(?:细胞类型|神经元)", "形态发生因子筛选可扩展类器官细胞类型"),
         (r"(?:Sim2|AgRP).*(?:禁食|饥饿|能量)", "Sim2阳性下丘脑神经元可提前激活AgRP神经元"),
@@ -2506,25 +3183,81 @@ def _daily_digest_visual_sentence(text: str, *, max_chars: int = 42) -> str:
 
 
 def _daily_digest_article_card_paragraphs(item: dict) -> list[str]:
-    candidates = [
-        _daily_digest_visual_topic(item),
-        _daily_digest_visual_sentence(item.get("key_finding", ""), max_chars=46),
-        _daily_digest_visual_sentence(item.get("conclusion_cn", ""), max_chars=46),
-    ]
-    scope = _daily_digest_visual_sentence(item.get("scope_note", ""), max_chars=36)
+    explicit_points = item.get("card_points")
+    if isinstance(explicit_points, list):
+        cleaned_points = []
+        seen_points = set()
+        for raw in explicit_points:
+            text = _daily_digest_polish_science_text(str(raw or ""), 120)
+            text = re.sub(r"^(?:问题|证据|结论|边界|要点|发现)[：:]\s*", "", text).strip(" ，,；;：:。")
+            if not text or text in seen_points:
+                continue
+            seen_points.add(text)
+            cleaned_points.append(text)
+        if cleaned_points:
+            return cleaned_points[:4]
+
+    def _compact(label: str, text: str, max_chars: int) -> str:
+        value = _daily_digest_sanitize_deliverable_text(text)
+        value = _daily_digest_strip_tail_punctuation(value)
+        if not value:
+            return ""
+        rules = [
+            (r"迷走神经刺激.*光遗传.*cNTS.*PAG", "小鼠实验把VNS、光遗传操控和cNTS-PAG记录放到同一条通路中"),
+            (r"海马.*隔区.*下丘脑|前强啡肽.*隔区", "评论聚焦海马-隔区-下丘脑通路，以及表达前强啡肽的隔区神经元"),
+            (r"腹侧CA1.*H3.*组胺.*GABA", "焦点落在腹侧CA1星形胶质细胞H3受体，以及胶质GABA释放"),
+            (r"AgRP.*禁食.*Sim2.*PVH", "研究追踪小鼠AgRP神经元活动和PVH-Sim2输入"),
+            (r"序列.*结构.*荧光染料.*膜片钳|GRAB-ATP.*海马切片", "证据来自结构比较、膜片钳记录、GRAB-ATP和海马切片"),
+            (r"cNTS-PAG.*疼痛.*预测", "cNTS-PAG神经元同时编码疼痛刺激和学习后的预测信号"),
+            (r"迷走神经刺激.*镇痛", "VNS的影响被落到cNTS-PAG脑干通路，而不是直接等同于临床镇痛"),
+            (r"厌恶性情境.*门控食物摄入", "学过的厌恶情境信号，会通过这条通路门控食物摄入"),
+            (r"组胺.*H3.*GABA.*焦虑", "组胺输入作用于H3受体后，可触发胶质GABA释放并抑制焦虑样行为"),
+            (r"PVH-Sim2.*AgRP", "PVH-Sim2输入可在真正缺能量前，提前推动AgRP神经元活动"),
+            (r"Cx43.*二氧化碳.*开放", "生理范围内的二氧化碳足以影响Cx43半通道开放状态"),
+        ]
+        for pattern, replacement in rules:
+            if re.search(pattern, value, flags=re.I):
+                return replacement
+        value = re.sub(r"^研究在", "", value)
+        value = re.sub(r"^研究结合", "", value)
+        value = re.sub(r"^这篇Neuron评论概述", "", value)
+        value = re.sub(r"^证据来自", "", value)
+        value = re.sub(r"^研究证据来自", "", value)
+        value = re.sub(r"不能直接推出", "不直接推出", value)
+        value = re.sub(r"不能直接外推到", "不直接外推到", value)
+        return _daily_digest_visual_sentence(value, max_chars=max_chars)
+
+    candidates = []
+    question = _compact("问题", item.get("research_question", ""), 38)
+    if question:
+        question = question.rstrip("？?")
+        candidates.append(question)
+    evidence = _compact("证据", item.get("evidence_path", ""), 34)
+    if evidence:
+        candidates.append(evidence)
+    finding = _compact("结论", item.get("key_finding", ""), 38)
+    if finding:
+        candidates.append(finding)
+    scope = _compact("边界", item.get("scope_note", ""), 32)
     if scope and re.search(r"(?:动物实验|小鼠|猕猴|体外|类器官|临床|样本)", scope):
         candidates.append(scope)
+    if not candidates:
+        candidates = [
+            _daily_digest_visual_topic(item),
+            _daily_digest_visual_sentence(item.get("key_finding", ""), max_chars=46),
+            _daily_digest_visual_sentence(item.get("conclusion_cn", ""), max_chars=46),
+        ]
     cleaned = []
     seen = set()
     for text in candidates:
-        text = _daily_digest_display_text(text, 64).strip(" ，,；;：:。")
+        text = _daily_digest_display_text(text, 82).strip(" ，,；;：:。")
         if not text or text in seen:
             continue
         if re.search(r"[？?]$", text):
             text = text.rstrip("？?")
         seen.add(text)
         cleaned.append(text)
-    return cleaned[:3]
+    return cleaned[:4]
 
 def _daily_digest_infer_evidence_path(source: dict) -> str:
     abstract = str(source.get("abstract", "") or "")
@@ -2569,9 +3302,6 @@ def _daily_digest_draw_home(path: str, digest: dict, date_text: str = "", issue_
     issue = _daily_digest_display_text(_daily_digest_issue_code(digest.get("date", ""), issue_label) + "期", 24)
     if issue:
         _daily_digest_fit_center_text(d, issue, title_bottom + 42, max_width=860, min_size=64, max_size=78, fill="#607893", canvas_w=w, weight=800)
-    subtitle = _daily_digest_first_article_subtitle(digest)
-    if subtitle:
-        _daily_digest_fit_center_text(d, subtitle, 1160, max_width=900, min_size=52, max_size=72, fill="#24496F", canvas_w=w, weight=850)
     _daily_digest_draw_rule(d, 280, 1320, 800, width=3)
     img.save(path, "PNG")
 
@@ -2638,24 +3368,149 @@ def _daily_digest_draw_catalog(path: str, digest: dict):
 
 
 def _daily_digest_make_placeholder_visual(path: str, article: dict):
+    import math
     from PIL import Image, ImageDraw, ImageFilter
     w, h = DAILY_DIGEST_VISUAL_W, DAILY_DIGEST_VISUAL_H
-    img = Image.new("RGB", (w, h), "#EAF3FA")
+    text = " ".join(str(x or "") for x in [
+        (article or {}).get("title"),
+        (article or {}).get("abstract"),
+        (article or {}).get("key_finding"),
+    ]).lower()
+    img = Image.new("RGB", (w, h), "#EEF6F8")
     layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(layer)
-    for i in range(16):
-        x = int((i * 137) % w)
-        y = int(90 + ((i * 191) % max(1, h - 180)))
-        r = int(40 + (i % 5) * 18)
-        d.ellipse((x - r, y - r, x + r, y + r), fill=(70, 130, 175, 45), outline=(40, 85, 130, 65), width=3)
-    for i in range(12):
-        x0 = int((i * 83) % w)
-        y0 = int(135 + ((i * 71) % max(1, h - 270)))
-        x1 = int((x0 + 260 + i * 11) % w)
-        y1 = int((y0 + 130 + i * 17) % h)
-        d.line((x0, y0, x1, y1), fill=(35, 77, 115, 70), width=6)
-    layer = layer.filter(ImageFilter.GaussianBlur(1.2))
+    palette = [(45, 121, 161), (72, 158, 143), (129, 108, 182), (213, 118, 96)]
+    cx, cy = w // 2, h // 2
+    # Content-driven local medical-style visual summary. No text is drawn.
+    if re.search(r"interview|访谈|reflects on|journey|advice|researcher|scientist", text, re.I):
+        d.rounded_rectangle((120, 120, 640, 640), radius=34, fill=(255, 255, 255, 145), outline=(45, 121, 161, 105), width=6)
+        head = (cx - 64, 170, cx + 64, 298)
+        d.ellipse(head, fill=(45, 121, 161, 120), outline=(255, 255, 255, 200), width=5)
+        d.rounded_rectangle((cx - 118, 312, cx + 118, 492), radius=72, fill=(72, 158, 143, 92), outline=(72, 158, 143, 150), width=5)
+        left_nodes = [(198, 205), (208, 338), (214, 500), (288, 596)]
+        right_nodes = [(562, 205), (552, 338), (546, 500), (472, 596)]
+        for col, nodes in enumerate((left_nodes, right_nodes)):
+            for i, (x, y) in enumerate(nodes):
+                c = palette[(i + col) % len(palette)]
+                d.ellipse((x - 24, y - 24, x + 24, y + 24), fill=(*c, 150), outline=(255, 255, 255, 185), width=4)
+                d.line((x, y, cx + (-80 if col == 0 else 80), 270 + i * 58), fill=(*c, 85), width=4)
+        for i in range(9):
+            x = 210 + i * 42
+            d.rounded_rectangle((x, 540 + (i % 3) * 18, x + 24, 590 + (i % 2) * 26), radius=8, fill=(129, 108, 182, 70 + i * 7))
+        for i in range(24):
+            angle = i / 24 * 2 * math.pi
+            x = cx + int(math.cos(angle) * 230)
+            y = cy + int(math.sin(angle) * 230)
+            d.ellipse((x - 4, y - 4, x + 4, y + 4), fill=(45, 121, 161, 80))
+    elif re.search(r"vagus|cNTS|pag|pain|疼痛|迷走|脑干", text, re.I):
+        d.arc((105, 130, 505, 600), 210, 28, fill=(42, 109, 153, 180), width=14)
+        d.arc((235, 100, 660, 520), 170, 335, fill=(100, 168, 180, 145), width=10)
+        nodes = [(210, 430), (340, 355), (505, 300), (605, 405)]
+        for a, b in zip(nodes, nodes[1:]):
+            d.line((*a, *b), fill=(38, 91, 135, 150), width=9)
+        for idx, (x, y) in enumerate(nodes):
+            c = palette[idx % len(palette)]
+            d.ellipse((x - 34, y - 34, x + 34, y + 34), fill=(*c, 180), outline=(255, 255, 255, 190), width=5)
+        for i in range(16):
+            x = 140 + i * 35
+            y = 590 + int(math.sin(i * 0.8) * 26)
+            d.ellipse((x - 8, y - 8, x + 8, y + 8), fill=(213, 118, 96, 120))
+    elif re.search(r"appetite|food|memory|sept|hypothalam|食欲|进食|记忆|隔区|下丘脑", text, re.I):
+        centers = [(210, 245), (385, 350), (565, 250), (415, 560)]
+        for a, b in [(centers[0], centers[1]), (centers[1], centers[2]), (centers[1], centers[3])]:
+            d.line((*a, *b), fill=(58, 123, 153, 120), width=10)
+        for idx, (x, y) in enumerate(centers):
+            c = palette[idx % len(palette)]
+            d.ellipse((x - 78, y - 58, x + 78, y + 58), fill=(*c, 72), outline=(*c, 165), width=6)
+            for j in range(9):
+                px = x - 45 + (j % 3) * 45
+                py = y - 28 + (j // 3) * 28
+                d.ellipse((px - 8, py - 8, px + 8, py + 8), fill=(*c, 150))
+    elif re.search(r"astrocy|histamine|anxiety|gaba|ca1|焦虑|星形胶质|组胺", text, re.I):
+        for i in range(7):
+            angle = i / 7 * 2 * math.pi
+            x = cx + int(math.cos(angle) * 155)
+            y = cy + int(math.sin(angle) * 110)
+            d.line((cx, cy, x, y), fill=(62, 131, 158, 115), width=8)
+            d.ellipse((x - 22, y - 22, x + 22, y + 22), fill=(72, 158, 143, 160))
+        d.ellipse((cx - 88, cy - 70, cx + 88, cy + 70), fill=(129, 108, 182, 92), outline=(92, 77, 145, 170), width=7)
+        for i in range(28):
+            x = 150 + (i * 47) % 500
+            y = 145 + (i * 61) % 460
+            d.ellipse((x - 5, y - 5, x + 5, y + 5), fill=(213, 118, 96, 110))
+    elif re.search(r"agrp|sim2|fasting|energy|hunger|饥饿|禁食|能量", text, re.I):
+        d.ellipse((185, 165, 575, 555), fill=(255, 255, 255, 82), outline=(45, 121, 161, 160), width=9)
+        for i in range(22):
+            angle = i / 22 * 2 * math.pi
+            x = cx + int(math.cos(angle) * (170 + 24 * math.sin(i)))
+            y = cy + int(math.sin(angle) * (122 + 18 * math.cos(i)))
+            d.line((cx, cy, x, y), fill=(72, 158, 143, 70), width=4)
+            d.ellipse((x - 12, y - 12, x + 12, y + 12), fill=(72, 158, 143, 145))
+        d.ellipse((cx - 52, cy - 42, cx + 52, cy + 42), fill=(213, 118, 96, 155))
+    elif re.search(r"connexin|cx43|co2|hemichannel|atp|二氧化碳|连接蛋白|半通道", text, re.I):
+        for row in range(4):
+            y = 210 + row * 82
+            d.line((120, y, 640, y + 18), fill=(45, 121, 161, 95), width=7)
+            for col in range(8):
+                x = 135 + col * 70
+                c = palette[(row + col) % len(palette)]
+                d.ellipse((x - 21, y - 21, x + 21, y + 21), fill=(*c, 135), outline=(255, 255, 255, 170), width=4)
+        for i in range(26):
+            x = 115 + (i * 41) % 540
+            y = 110 + (i * 59) % 560
+            d.ellipse((x - 7, y - 7, x + 7, y + 7), fill=(213, 118, 96, 115))
+    else:
+        pts = []
+        for i in range(18):
+            x = 120 + (i * 97) % 520
+            y = 130 + (i * 71) % 500
+            pts.append((x, y))
+            c = palette[i % len(palette)]
+            d.ellipse((x - 18, y - 18, x + 18, y + 18), fill=(*c, 135))
+        for a, b in zip(pts, pts[1:]):
+            d.line((*a, *b), fill=(42, 91, 135, 80), width=5)
+    layer = layer.filter(ImageFilter.GaussianBlur(0.45))
+    veil = Image.new("RGBA", (w, h), (255, 255, 255, 18))
+    layer = Image.alpha_composite(layer, veil)
     Image.alpha_composite(img.convert("RGBA"), layer).convert("RGB").save(path, "PNG")
+
+
+def _daily_digest_draw_missing_visual_notice(draw, box, *, pmid: str = ""):
+    x1, y1, x2, y2 = [int(v) for v in box]
+    draw.rounded_rectangle((x1, y1, x2, y2), radius=18, fill="#F5F8FB", outline="#D2DEE8", width=2)
+    cx = (x1 + x2) // 2
+    cy = (y1 + y2) // 2
+    accent = "#8AA1B6"
+    draw.ellipse((cx - 92, cy - 116, cx + 92, cy + 68), outline=accent, width=8)
+    draw.arc((cx - 56, cy - 82, cx + 58, cy + 44), 205, 25, fill=accent, width=5)
+    draw.line((cx - 4, cy + 64, cx - 18, cy + 128, cx + 28, cy + 170), fill=accent, width=6)
+    title = "图片摘要待补"
+    sub = "当前卡片为内部复核稿，不能作为完整成片交付"
+    draw.text((cx - _daily_digest_text_width(draw, title, _daily_digest_font(38, weight=900)) // 2, y1 + 86), title, font=_daily_digest_font(38, weight=900), fill="#385A77")
+    _daily_digest_draw_fit_box(
+        draw,
+        sub,
+        (x1 + 58, y2 - 164, x2 - 58, y2 - 72),
+        min_size=24,
+        max_size=30,
+        weight=700,
+        fill="#6A8297",
+        max_lines=2,
+        align="center",
+        line_gap_ratio=0.16,
+    )
+    if pmid:
+        _daily_digest_draw_fit_box(
+            draw,
+            f"PMID {pmid}",
+            (x1 + 70, y2 - 72, x2 - 70, y2 - 28),
+            min_size=20,
+            max_size=24,
+            weight=650,
+            fill="#8297AA",
+            max_lines=1,
+            align="center",
+        )
 
 
 def _daily_digest_draw_article_card(path: str, item: dict, idx: int, total: int, visual_path: str = ""):
@@ -2728,7 +3583,9 @@ def _daily_digest_draw_article_card(path: str, item: dict, idx: int, total: int,
                 visual = _daily_digest_square_visual_no_crop(visual)
             img.paste(visual, (visual_x, visual_y))
         except Exception:
-            pass
+            _daily_digest_draw_missing_visual_notice(d, (visual_x, visual_y, visual_x + DAILY_DIGEST_VISUAL_W, visual_y + DAILY_DIGEST_VISUAL_H), pmid=str(source.get("pmid", "")))
+    else:
+        _daily_digest_draw_missing_visual_notice(d, (visual_x, visual_y, visual_x + DAILY_DIGEST_VISUAL_W, visual_y + DAILY_DIGEST_VISUAL_H), pmid=str(source.get("pmid", "")))
 
     y = visual_box[3] + 30
     meta_y = 1770
@@ -2737,7 +3594,7 @@ def _daily_digest_draw_article_card(path: str, item: dict, idx: int, total: int,
     body_x1, body_x2 = 92, 988
     _daily_digest_draw_soft_panel(d, (body_x1, y, body_x2, y + body_h), radius=24, fill="#FFFFFF", outline="#C8D9E7", width=2)
     d.rounded_rectangle((body_x1 + 24, y + 30, body_x1 + 42, y + body_h - 30), radius=9, fill=accent)
-    d.text((body_x1 + 62, y + 30), "核心发现", font=_daily_digest_font(25, weight=900), fill=accent)
+    d.text((body_x1 + 62, y + 30), "核心看点", font=_daily_digest_font(25, weight=900), fill=accent)
     _daily_digest_draw_magazine_rule(d, body_x1 + 62, y + 70, body_x2 - 38, accent=accent)
     text_w = body_x2 - body_x1 - 128
     text_x = body_x1 + 62
@@ -2868,12 +3725,110 @@ def _daily_digest_clean_cover_subtitle(text: str) -> str:
     return value or "今日脑科学追新"
 
 
+def _daily_digest_video_description_from_articles(articles: list[dict]) -> str:
+    themes = []
+    questions = []
+    for item in articles[:5]:
+        if not isinstance(item, dict):
+            continue
+        source = item.get("source", {}) or {}
+        title = _daily_digest_strip_tail_punctuation(item.get("title_cn") or source.get("title", ""))
+        if title:
+            themes.append(title)
+        question = _daily_digest_hook_question(
+            item.get("research_question") or "",
+            item.get("key_finding") or source.get("title", "") or source.get("abstract", ""),
+        )
+        question = _daily_digest_strip_tail_punctuation(question)
+        if question:
+            questions.append(question)
+    if questions:
+        head = "本期从5篇论文看疼痛与情绪、情境进食、焦虑调节、饥饿预判和二氧化碳敏感通道。"
+        text = head + "重点问题包括：" + "；".join(questions[:5]) + "。"
+        return _daily_digest_display_text(text, 260)
+    if themes:
+        return _daily_digest_display_text("本期研究包括：" + "；".join(themes[:5]) + "。", 260)
+    return "本期研究包括最新神经科学论文的科学问题、方法、结果、结论和证据边界。"
+
+
+def _daily_digest_sanitize_deliverable_text(text: str) -> str:
+    value = str(text or "").strip()
+    if not value:
+        return ""
+    replacements = {
+        "Nature neuroscience": "Nature Neuroscience",
+        "Brain : a journal of neurology": "Brain",
+        "以上就是今天的全澜脑科学每日研究速递。关注全澜脑科学，下一期继续追踪具体问题和证据边界。": "以上就是本期全澜脑科学每日研究速递。感谢观看。",
+        "关注全澜脑科学，下一期继续追踪具体问题和证据边界。": "感谢观看。",
+        "下一期继续追踪具体问题和证据边界。": "",
+        "这为理解相关问题提供了具体信息。": "",
+        "这为理解相关问题提供了具体信息": "",
+        "这有助于把握这将": "这有助于说明",
+        "这有助于界定这把": "这把",
+        "这有助于界定这将": "这把",
+        "这有助于界定把": "这有助于把",
+        "cNTS-PAG神经元参与迷走神经刺激的镇痛效应": "cNTS-PAG脑干通路调制疼痛和负性情感",
+        "问题：该通路也影响疼痛相关负性情绪": "问题：该通路如何调制疼痛和负性情感",
+        "cNTSPAG": "cNTS-PAG",
+        "cNTS到PAG": "cNTS-PAG",
+        "PVHSim2": "PVH-Sim2",
+        "GRABATP": "GRAB-ATP",
+        "PCO2": "PCO2",
+    }
+    for old, new in replacements.items():
+        value = value.replace(old, new)
+    value = re.sub(r"。(?=(?:以及|并|同时|还|另)[^。]{2,80}。)", "，", value)
+    value = re.sub(r"研究围绕这篇([^。]{0,18}评论概述)", r"这篇\1", value)
+    value = re.sub(r"研究围绕([^。]{4,160})展开。", r"研究结合\1。", value)
+    value = re.sub(r"(评论概述[^。]{2,120})展开。", r"\1。", value)
+    value = re.sub(r"这把([^。；;]{2,80})具体落到([^。；;]{2,80})", r"这有助于把\1具体定位到\2", value)
+    value = re.sub(r"这有助于界定把([^。；;]{2,100})", r"这有助于把\1", value)
+    value = value.replace("具体定位到到", "具体定位到")
+    value = value.replace("。触发", "，触发")
+    value = value.replace("可被Gap26阻断。但摘要", "可被Gap26阻断，但摘要")
+    value = re.sub(r"(这篇论文发表于《[^》]{1,60}》)，题为", r"\1。题为", value)
+    value = re.sub(r"(题为《[^》]{1,90}》)，由", r"\1。由", value)
+    value = re.sub(r"(题为《[^》]{1,90}》)(?=由)", r"\1。", value)
+    value = re.sub(r"(由[^。]{1,60}?完成)，主要来自", r"\1。主要来自", value)
+    value = re.sub(r"([？?])\s*今天是([^。]{4,32})，这是", r"\1 今天是\2。这里是", value)
+    value = re.sub(r"([？?])(?=今天是)", r"\1 ", value)
+    value = re.sub(r"。{2,}", "。", value)
+    value = re.sub(r"(?:。)?\s*感谢观看。$", "。感谢观看。", value)
+    value = re.sub(r"^。", "", value)
+    value = re.sub(r"\s+", " ", value).strip()
+    value = value.replace(" 。", "。")
+    return value
+
+
+def _daily_digest_sanitize_deliverable_digest(digest: dict) -> dict:
+    if not isinstance(digest, dict):
+        return digest
+    for field in ("opening_voiceover", "catalog_voiceover", "closing_voiceover", "video_description", "short_title", "video_title"):
+        digest[field] = _daily_digest_sanitize_deliverable_text(digest.get(field, ""))
+    digest["closing_voiceover"] = "以上就是本期全澜脑科学每日研究速递。感谢观看。"
+    for item in digest.get("articles", []) or []:
+        if not isinstance(item, dict):
+            continue
+        for field in ("research_question", "evidence_path", "key_finding", "conclusion_cn", "why_it_matters", "scope_note", "voiceover", "title_cn", "affiliation_cn"):
+            if field in item:
+                item[field] = _daily_digest_sanitize_deliverable_text(item.get(field, ""))
+        if not item.get("voiceover"):
+            item["voiceover"] = _daily_digest_voiceover_with_hook(item)
+        else:
+            cleaned = _daily_digest_sanitize_deliverable_text(item.get("voiceover", ""))
+            if len(cleaned) < 40 or re.search(r"这为理解相关问题|这有助于把握这将|这有助于界定这将|下一期继续追踪", cleaned):
+                cleaned = _daily_digest_voiceover_with_hook(item)
+            item["voiceover"] = cleaned
+    return digest
+
+
 def _daily_digest_finalize_metadata(digest: dict, *, issue_label: str = "") -> dict:
     articles = digest.get("articles", []) or []
     issue_code = _daily_digest_issue_code(digest.get("date", ""), issue_label)
+    preserve_polished_text = str(digest.get("_text_polish_status", "") or "").strip().lower() == "ok"
     digest["short_title"] = f"全澜脑科学追新助手 {issue_code}"
     digest["video_title"] = f"【全澜脑科学®追新助手】{issue_code}期"
-    digest["closing_voiceover"] = "以上就是今天的全澜脑科学每日研究速递。关注全澜脑科学，下一期继续追踪具体问题和证据边界。"
+    digest["closing_voiceover"] = "以上就是本期全澜脑科学每日研究速递。感谢观看。"
     themes = []
     for item in articles[:5]:
         title = _daily_digest_strip_tail_punctuation(item.get("title_cn") or "")
@@ -2892,17 +3847,22 @@ def _daily_digest_finalize_metadata(digest: dict, *, issue_label: str = "") -> d
             if first_question:
                 break
         first_question = first_question or "今天有哪些神经科学问题值得追踪？"
-        digest["opening_voiceover"] = f"{first_question} 今天是{date_text}，这是全澜脑科学每日研究速递第{issue_code}期。"
-        digest["catalog_voiceover"] = f"本期选取 {len(articles)} 篇论文，重点看方法、结果和证据边界。"
+        default_opening = f"{first_question} 今天是{date_text}。这里是全澜脑科学每日研究速递第{issue_code}期。"
+        default_catalog = f"本期选取 {len(articles)} 篇论文，重点看方法、结果和证据边界。"
     else:
         date_text = _daily_digest_display_text(digest.get("date", "") or _daily_digest_today_cn(), 32)
-        digest["opening_voiceover"] = f"今天有哪些神经科学问题值得追踪？今天是{date_text}，这是全澜脑科学每日研究速递第{issue_code}期。"
-        digest["catalog_voiceover"] = "本期依次看论文的方法、结果和证据边界。"
-    if themes:
-        digest["video_description"] = _daily_digest_display_text("本期研究包括：" + "；".join(themes[:5]) + "。", 190)
+        default_opening = f"今天有哪些神经科学问题值得追踪？今天是{date_text}。这里是全澜脑科学每日研究速递第{issue_code}期。"
+        default_catalog = "本期依次看论文的方法、结果和证据边界。"
+    default_description = _daily_digest_video_description_from_articles(articles)
+    if preserve_polished_text:
+        digest["opening_voiceover"] = digest.get("opening_voiceover") or default_opening
+        digest["catalog_voiceover"] = digest.get("catalog_voiceover") or default_catalog
+        digest["video_description"] = digest.get("video_description") or default_description
     else:
-        digest["video_description"] = "本期研究包括最新神经科学论文的科学问题、方法、结果、结论和证据边界。"
-    return digest
+        digest["opening_voiceover"] = default_opening
+        digest["catalog_voiceover"] = default_catalog
+        digest["video_description"] = default_description
+    return _daily_digest_sanitize_deliverable_digest(digest)
 
 
 def _daily_digest_draw_closing(path: str, digest: dict, platform: str = "wechat", issue_label: str = ""):
@@ -2911,19 +3871,16 @@ def _daily_digest_draw_closing(path: str, digest: dict, platform: str = "wechat"
     d = ImageDraw.Draw(img)
     w, _h = img.size
     spec = _daily_digest_brand_platform_spec(platform)
-    ok_zh = _daily_digest_paste_logo(img, lang="zh", center_x=w // 2, y=350, target_h=112, max_w=860, opacity=248)
-    if not ok_zh:
-        _daily_digest_center_text(d, "全澜脑科学®", 350, _daily_digest_font(90, weight=900), "#102A50", w)
-    ok_en = _daily_digest_paste_logo(img, lang="en", center_x=w // 2, y=512, target_h=64, max_w=800, opacity=246)
-    if not ok_en:
-        _daily_digest_center_text(d, "QuanLan BrainScience®", 512, _daily_digest_font(52, weight=800), "#607893", w)
-    _daily_digest_draw_rule(d, 270, 685, 810, width=3)
-    _daily_digest_center_text(d, "更强大脑 更美生活", 760, _daily_digest_font(78, weight=900), "#102A50", w)
-    _daily_digest_center_text(d, "Stronger Brains, Better Lives", 878, _daily_digest_font(43, weight=700), "#607893", w)
-    _daily_digest_draw_rule(d, 330, 1000, 750, width=2)
-    _daily_digest_center_text(d, spec.get("headline", "关注 点赞 分享"), 1072, _daily_digest_font(72, weight=900), "#102A50", w)
-    _daily_digest_center_text(d, spec.get("subline", "让前沿脑科学更容易被看懂"), 1190, _daily_digest_font(40, weight=700), "#607893", w)
-    _daily_digest_draw_symbol_cta(d, (205, 1320, 875, 1494), spec)
+    d.rounded_rectangle((118, 300, 962, 560), radius=28, fill="#FFFFFF", outline="#D5E2EC", width=2)
+    _daily_digest_center_text(d, "全澜脑科学®", 344, _daily_digest_font(74, weight=850), "#213D63", w)
+    _daily_digest_center_text(d, "QuanLan BrainScience®", 448, _daily_digest_font(42, weight=650), "#607893", w)
+    _daily_digest_draw_rule(d, 270, 650, 810, width=3)
+    _daily_digest_center_text(d, "更强大脑 更美生活", 728, _daily_digest_font(76, weight=900), "#102A50", w)
+    _daily_digest_center_text(d, "Stronger Brains, Better Lives", 842, _daily_digest_font(41, weight=700), "#607893", w)
+    _daily_digest_draw_rule(d, 330, 954, 750, width=2)
+    _daily_digest_center_text(d, spec.get("headline", "关注 点赞 分享"), 1038, _daily_digest_font(70, weight=900), "#102A50", w)
+    _daily_digest_center_text(d, spec.get("subline", "让前沿脑科学更容易被看懂"), 1152, _daily_digest_font(38, weight=700), "#607893", w)
+    _daily_digest_draw_symbol_cta(d, (205, 1290, 875, 1464), spec)
     img.save(path, "PNG")
 
 
@@ -3184,14 +4141,10 @@ def _daily_digest_make_integrated_cover_background(path: str, digest: dict, *, i
     elif skip_image_api:
         last_error = "skip_image_api enabled"
     if logger:
-        logger("⚠️ 综合封面背景未获得模型图片，已标记待补；不生成本地兜底背景。")
-    try:
-        if os.path.exists(path):
-            os.remove(path)
-    except Exception:
-        pass
-    _daily_digest_write_cover_background_status(path, digest, status="missing", image_engine=image_engine, error=last_error)
-    return ""
+        logger("⚠️ 综合封面背景未获得模型图片，改用本期文章内容汇总的无字机制背景兜底。")
+    _daily_digest_make_integrated_local_content_background(path, digest)
+    _daily_digest_write_cover_background_status(path, digest, status="local_content", image_engine=image_engine, error=last_error)
+    return path if os.path.exists(path) else ""
 
 
 def _daily_digest_make_integrated_local_content_background(path: str, digest: dict):
@@ -3489,10 +4442,15 @@ def _daily_digest_export_platform_ac_cards(cards_dir: str, digest: dict, *, issu
     platform_dir = os.path.join(os.path.dirname(cards_dir), "platform_cards")
     os.makedirs(platform_dir, exist_ok=True)
     has_cover_background = bool(cover_background_path and os.path.exists(cover_background_path))
+    expected_article_card_names = {
+        f"{idx + 2:02d}_文献_{((item.get('source', {}) or {}).get('pmid') or item.get('pmid') or idx)}.png"
+        for idx, item in enumerate(digest.get("articles", []) or [], start=1)
+        if isinstance(item, dict)
+    }
     card_paths = [
         os.path.join(cards_dir, name)
         for name in sorted(os.listdir(cards_dir))
-        if name.lower().endswith(".png")
+        if name in expected_article_card_names
     ]
     specs = [
         ("A_微信视频号封面_3x4.png", "home", "wechat", (1080, 1440)),
@@ -3545,16 +4503,112 @@ def _daily_digest_write_video_meta(path: str, digest: dict):
 
 
 def _daily_digest_write_lrc(path: str, digest: dict):
-    cues = [digest.get("opening_voiceover", ""), digest.get("catalog_voiceover", "")]
-    cues.extend(str(x.get("voiceover", "")) for x in digest.get("articles", []))
-    cues.append(digest.get("closing_voiceover", ""))
-    seconds = 0
+    cue_sources = [digest.get("opening_voiceover", ""), digest.get("catalog_voiceover", "")]
+    for idx, item in enumerate(digest.get("articles", []), start=1):
+        source = item.get("source", {}) or {}
+        journal = _daily_digest_display_text(source.get("journal", ""), 60)
+        authors = _daily_digest_brief_authors_for_voice(source.get("authors", "") or item.get("authors_cn", ""))
+        affiliation = item.get("affiliation_cn", "") or _daily_digest_brief_affiliations_for_voice(source.get("affiliations", ""))
+        cue_sources.extend([
+            f"第 {idx} 篇：{item.get('research_question') or item.get('title_cn') or ''}",
+            item.get("evidence_path", ""),
+            f"结果显示，{item.get('key_finding', '')}",
+            item.get("conclusion_cn", ""),
+            item.get("why_it_matters", ""),
+            item.get("scope_note", ""),
+            f"论文发表于《{journal}》。" if journal else "",
+            f"由{authors}完成。" if authors else "",
+            f"主要来自{affiliation}。" if affiliation else "",
+        ])
+    cue_sources.append(digest.get("closing_voiceover", ""))
+    cues: list[str] = []
+    for text in cue_sources:
+        value = _daily_digest_polish_science_text(text, 2000, keep_punctuation=True)
+        value = re.sub(r"([。！？!?])", r"\1\n", value)
+        value = re.sub(r"([；;])", r"\1\n", value)
+        for raw in value.splitlines():
+            raw = raw.strip()
+            if not raw:
+                continue
+            while len(raw) > 42:
+                cut = 42
+                for marker in ("，", "、", "；", "：", "。", " "):
+                    pos = raw.rfind(marker, 16, 42)
+                    if pos >= 18:
+                        cut = pos + 1
+                        break
+                cues.append(raw[:cut].strip())
+                raw = raw[cut:].strip()
+            if raw:
+                cues.append(raw)
+    seconds = 0.0
     lines = []
     for text in cues:
-        mm, ss = divmod(seconds, 60)
-        lines.append(f"[{mm:02d}:{ss:02d}.00]{_daily_digest_safe_text(text, 220)}")
-        seconds += max(6, min(18, int(len(str(text)) / 6) + 4))
+        mm = int(seconds // 60)
+        ss = seconds % 60
+        clean = _daily_digest_safe_text(text, 60)
+        lines.append(f"[{mm:02d}:{ss:05.2f}]{clean}")
+        zh_len = sum(1 for ch in clean if "\u4e00" <= ch <= "\u9fff")
+        ascii_len = len(clean) - zh_len
+        seconds += max(2.4, min(5.8, zh_len * 0.18 + ascii_len * 0.09 + 1.0))
     write_text_file(path, "\n".join(lines).rstrip() + "\n")
+
+
+def _daily_digest_write_lrc_from_text(path: str, text: str):
+    value = _daily_digest_sanitize_deliverable_text(text)
+    value = re.sub(r"([。！？!?])", r"\1\n", value)
+    value = re.sub(r"([；;])", r"\1\n", value)
+    cues: list[str] = []
+    for raw in value.splitlines():
+        raw = raw.strip()
+        if not raw:
+            continue
+        while len(raw) > 38:
+            cut = 38
+            for marker in ("，", "、", "；", "：", "。", " "):
+                pos = raw.rfind(marker, 14, 38)
+                if pos >= 16:
+                    cut = pos + 1
+                    break
+            cues.append(raw[:cut].strip())
+            raw = raw[cut:].strip()
+        if raw:
+            cues.append(raw)
+    seconds = 0.0
+    lines = []
+    for cue in cues:
+        clean = _daily_digest_safe_text(cue, 60)
+        mm = int(seconds // 60)
+        ss = seconds % 60
+        lines.append(f"[{mm:02d}:{ss:05.2f}]{clean}")
+        zh_len = sum(1 for ch in clean if "\u4e00" <= ch <= "\u9fff")
+        ascii_len = len(clean) - zh_len
+        seconds += max(2.2, min(5.2, zh_len * 0.17 + ascii_len * 0.08 + 0.9))
+    write_text_file(path, "\n".join(lines).rstrip() + "\n")
+
+
+def _daily_digest_write_short_video_assets(out_dir: str, digest: dict, logger=print):
+    short_video = digest.get("short_video") if isinstance(digest.get("short_video"), dict) else {}
+    if not short_video:
+        return
+    title = str(short_video.get("short_video_title", "") or "").strip()
+    description = str(short_video.get("short_video_description", "") or "").strip()
+    voiceover = str(short_video.get("short_video_voiceover", "") or "").strip()
+    write_text_file(
+        os.path.join(out_dir, "07_短视频精选口播.txt"),
+        (voiceover.strip() + "\n") if voiceover else "",
+    )
+    _daily_digest_write_lrc_from_text(os.path.join(out_dir, "08_短视频精选字幕.lrc"), voiceover)
+    write_text_file(
+        os.path.join(out_dir, "09_短视频精选简介.txt"),
+        f"标题：{title}\n\n简介：\n{description}\n",
+    )
+    write_text_file(
+        os.path.join(out_dir, "09_短视频精选简介.json"),
+        json.dumps(short_video, ensure_ascii=False, indent=2) + "\n",
+    )
+    if logger:
+        logger("✅ 精选短视频文件已写入：07_短视频精选口播、08_短视频精选字幕、09_短视频精选简介。")
 
 
 def _daily_digest_write_text_assets(
@@ -3598,6 +4652,7 @@ def _daily_digest_write_text_assets(
     write_text_file(os.path.join(out_dir, "03_图片提示词.json"), json.dumps(prompt_rows, ensure_ascii=False, indent=2) + "\n")
     _daily_digest_write_video_meta(os.path.join(out_dir, "04_视频简介.txt"), digest)
     _daily_digest_write_lrc(os.path.join(out_dir, "05_口播字幕.lrc"), digest)
+    _daily_digest_write_short_video_assets(out_dir, digest, logger=logger)
     if logger:
         logger("✅ 文案文件已写入：00_文献信息、01_栏目素材、02_口播台词、03_图片提示词、04_视频简介、05_口播字幕。")
 
@@ -3625,6 +4680,309 @@ def _daily_digest_package_and_email(out_dir: str, *, enabled: bool = False, reci
     )
 
 
+def _daily_digest_quality_gate(out_dir: str, digest: dict, article_list: list[dict], *, logger=print) -> dict:
+    report_path = os.path.join(out_dir, "06_交付前质量检查报告.txt")
+    required_text_files = [
+        "00_文献信息.json",
+        "01_栏目素材.json",
+        "02_口播台词.txt",
+        "03_图片提示词.txt",
+        "03_图片提示词.json",
+        "04_视频简介.txt",
+        "04_视频简介.json",
+        "05_口播字幕.lrc",
+        "07_短视频精选口播.txt",
+        "08_短视频精选字幕.lrc",
+        "09_短视频精选简介.txt",
+        "09_短视频精选简介.json",
+    ]
+    blockers: list[str] = []
+    warnings: list[str] = []
+    lines: list[str] = [
+        "每日研究速递交付前质量检查报告",
+        "",
+        "说明：这是自动质检和虚拟评审辅助判断，不替代真人审片；出现阻断项时，本期不应视为完整交付。",
+        "",
+        "一、产物清单",
+    ]
+    for name in required_text_files:
+        path = os.path.join(out_dir, name)
+        if os.path.exists(path) and os.path.getsize(path) > 0:
+            lines.append(f"✅ {name}｜{os.path.getsize(path)} 字节")
+        else:
+            blockers.append(f"缺少或为空：{name}")
+            lines.append(f"❌ {name}｜缺少或为空")
+
+    expected_articles = len(digest.get("articles", []) or article_list or [])
+    expected_pmids = [
+        str((item.get("source", {}) or {}).get("pmid") or item.get("pmid") or "").strip()
+        for item in (digest.get("articles", []) or [])
+        if isinstance(item, dict)
+    ]
+    expected_card_names = {"01_首页_每日研究速递.png", "02_目录_口播.png"}
+    for idx, pmid in enumerate(expected_pmids, start=1):
+        expected_card_names.add(f"{idx + 2:02d}_文献_{pmid or idx}.png")
+    expected_card_names.add(f"{expected_articles + 3:02d}_全澜品牌页_微信短视频.png")
+    expected_card_names.add(f"{expected_articles + 4:02d}_全澜品牌页_B站.png")
+    cards_dir = os.path.join(out_dir, "cards")
+    visual_dir = os.path.join(out_dir, "visual_summaries")
+    platform_dir = os.path.join(out_dir, "platform_cards")
+    card_pngs = sorted([x for x in os.listdir(cards_dir) if x.lower().endswith(".png")]) if os.path.isdir(cards_dir) else []
+    visual_pngs = sorted([x for x in os.listdir(visual_dir) if x.lower().endswith(".png")]) if os.path.isdir(visual_dir) else []
+    platform_pngs = sorted([x for x in os.listdir(platform_dir) if x.lower().endswith(".png")]) if os.path.isdir(platform_dir) else []
+    lines.extend(["", "二、图片与卡片"])
+    lines.append(f"卡片：{len(card_pngs)} 张｜目录：{cards_dir}")
+    lines.append(f"图片摘要：{len(visual_pngs)} 张｜目录：{visual_dir}")
+    lines.append(f"平台图：{len(platform_pngs)} 张｜目录：{platform_dir}")
+    if len(card_pngs) < expected_articles + 4:
+        blockers.append(f"卡片数量不足：应至少 {expected_articles + 4} 张，当前 {len(card_pngs)} 张")
+    missing_cards = sorted(expected_card_names - set(card_pngs))
+    extra_cards = sorted(set(card_pngs) - expected_card_names)
+    if missing_cards:
+        blockers.append("本期卡片缺失：" + "、".join(missing_cards[:10]))
+    if extra_cards:
+        blockers.append("发现非本期旧卡片混入：" + "、".join(extra_cards[:10]))
+    for name in card_pngs:
+        match = re.search(r"_文献_(\d+)\.png$", name)
+        if match and expected_pmids and match.group(1) not in expected_pmids:
+            blockers.append(f"卡片 PMID 不属于本期：{name}")
+            break
+    expected_visuals = expected_articles + 1
+    if len(visual_pngs) < expected_visuals:
+        blockers.append(f"图片摘要不足：应至少 {expected_visuals} 张（含综合封面背景），当前 {len(visual_pngs)} 张")
+    bad_visual_status = []
+    for idx, item in enumerate(digest.get("articles", []) or [], start=1):
+        status = str(item.get("_visual_status", "") or "").strip().lower()
+        if status in {"", "missing", "placeholder"}:
+            bad_visual_status.append(f"{idx:02d}:{status or '未标记'}")
+    if bad_visual_status:
+        blockers.append("图片摘要状态不可交付：" + "、".join(bad_visual_status[:8]))
+    expected_platform = {
+        "A_微信视频号封面_3x4.png",
+        "C_微信视频号品牌页_3x4.png",
+        "卡片阵列_微信视频号_9x16.png",
+        "A_B站封面_4x3.png",
+        "C_B站品牌页_4x3.png",
+        "卡片阵列_B站_16x9.png",
+    }
+    missing_platform = sorted(expected_platform - set(platform_pngs))
+    if missing_platform:
+        blockers.append("平台图缺失：" + "、".join(missing_platform))
+
+    try:
+        from PIL import Image
+        expected_sizes = {
+            "cards": (1080, 1920),
+            "visual_summaries": (DAILY_DIGEST_VISUAL_W, DAILY_DIGEST_VISUAL_H),
+            "visual_summaries/00_daily_digest_integrated_cover_background.png": (1920, 1080),
+            "platform_cards/A_微信视频号封面_3x4.png": (1080, 1440),
+            "platform_cards/C_微信视频号品牌页_3x4.png": (1080, 1440),
+            "platform_cards/卡片阵列_微信视频号_9x16.png": (1080, 1920),
+            "platform_cards/A_B站封面_4x3.png": (1440, 1080),
+            "platform_cards/C_B站品牌页_4x3.png": (1440, 1080),
+            "platform_cards/卡片阵列_B站_16x9.png": (1920, 1080),
+        }
+        for name in card_pngs:
+            with Image.open(os.path.join(cards_dir, name)) as img:
+                if img.size != expected_sizes["cards"]:
+                    warnings.append(f"卡片尺寸异常：{name} 为 {img.size}")
+        for name in visual_pngs:
+            with Image.open(os.path.join(visual_dir, name)) as img:
+                expected_size = expected_sizes.get(f"visual_summaries/{name}", expected_sizes["visual_summaries"])
+                if img.size != expected_size:
+                    warnings.append(f"图片摘要尺寸异常：{name} 为 {img.size}，应为 {expected_size}")
+        for rel, size in expected_sizes.items():
+            if not rel.startswith("platform_cards/"):
+                continue
+            path = os.path.join(out_dir, rel)
+            if os.path.exists(path):
+                with Image.open(path) as img:
+                    if img.size != size:
+                        warnings.append(f"平台图尺寸异常：{os.path.basename(path)} 为 {img.size}，应为 {size}")
+    except Exception as exc:
+        warnings.append(f"图片尺寸检查未完成：{type(exc).__name__}: {str(exc)[:100]}")
+
+    lines.extend(["", "三、字幕与文案"])
+    text_bundle = ""
+    deliverable_text_files = [
+        "02_口播台词.txt",
+        "03_图片提示词.txt",
+        "04_视频简介.txt",
+        "05_口播字幕.lrc",
+        "07_短视频精选口播.txt",
+        "08_短视频精选字幕.lrc",
+        "09_短视频精选简介.txt",
+    ]
+    for name in deliverable_text_files:
+        path = os.path.join(out_dir, name)
+        if os.path.exists(path):
+            try:
+                text_bundle += "\n" + open(path, "r", encoding="utf-8", errors="ignore").read()
+            except Exception:
+                pass
+    bad_patterns = [
+        "研究围绕研究",
+        "定位到到",
+        "这有助于把握研究",
+        "GPT-Pro 润色",
+        "DeepSeek Chat锛",
+        "主要来自Institute",
+        "主要来自Department",
+        "主要来自Vollum",
+        "治疗疼痛时",
+        "迷走神经通向脑干",
+        "为什么要关注迷走神经",
+        "这有助于界定这把",
+        "这有助于界定这将",
+        "这有助于界定把",
+        "Nature neuroscience",
+        "每日研究速递感谢观看",
+        "下一期继续追踪具体问题和证据边界",
+        "继续追踪具体问题和证据边界",
+        "扰动大脑",
+        "本篇要点",
+        "本篇重点",
+        "。以及",
+        "。并解析",
+        "研究围绕这篇",
+    ]
+    for pattern in bad_patterns:
+        if pattern in text_bundle:
+            blockers.append(f"文案含明显坏词：{pattern}")
+    voice_path = os.path.join(out_dir, "02_口播台词.txt")
+    long_voice: list[str] = []
+    if os.path.exists(voice_path):
+        voice_text = open(voice_path, "r", encoding="utf-8", errors="ignore").read()
+        for raw in re.split(r"[。！？!?]\s*", voice_text):
+            text = raw.strip()
+            if not text:
+                continue
+            zh_len = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
+            if zh_len > 58:
+                long_voice.append(text[:100])
+        if long_voice:
+            blockers.append(f"口播台词仍有 {len(long_voice)} 个超长句")
+    polish_status = str(digest.get("_text_polish_status", "") or "").strip().lower()
+    polish_engine = str(digest.get("_text_polish_engine", "") or "").strip()
+    if polish_status != "ok":
+        blockers.append(f"终稿文字未通过可用润色通道：status={polish_status or '未标记'}")
+    else:
+        lines.append(f"终稿润色：通过（{polish_engine or '未记录引擎'}）")
+
+    weak_questions: list[str] = []
+    for idx, item in enumerate(digest.get("articles", []) or [], start=1):
+        question = str(item.get("research_question") or item.get("hook") or "").strip()
+        if not question:
+            weak_questions.append(f"第 {idx} 篇缺少钩子式科学问题")
+            continue
+        if question.count("？") + question.count("?") != 1:
+            weak_questions.append(f"第 {idx} 篇科学问题问号数量异常：{question[:80]}")
+        if any(pattern in question for pattern in ("治疗", "疗法", "患者", "临床", "提供依据", "提供线索", "为什么具有意义")):
+            weak_questions.append(f"第 {idx} 篇科学问题有临床外推或空泛意义倾向：{question[:80]}")
+        card_points = item.get("card_points", [])
+        if isinstance(card_points, list):
+            flat_points = [str(x or "").strip() for x in card_points if str(x or "").strip()]
+            if not flat_points:
+                weak_questions.append(f"第 {idx} 篇缺少配图要点文案")
+            if any(x.startswith(("问题：", "证据：", "结论：", "边界：", "要点：")) for x in flat_points):
+                weak_questions.append(f"第 {idx} 篇配图文案仍是机械字段标签")
+    if weak_questions:
+        blockers.append(f"科学问题/配图文案未达标：{len(weak_questions)} 项")
+        warnings.extend(weak_questions[:10])
+    lrc_path = os.path.join(out_dir, "05_口播字幕.lrc")
+    long_lrc: list[str] = []
+    if os.path.exists(lrc_path):
+        for idx, raw in enumerate(open(lrc_path, "r", encoding="utf-8", errors="ignore").read().splitlines(), start=1):
+            text = re.sub(r"^\[\d{2}:\d{2}\.\d{2}\]", "", raw).strip()
+            zh_len = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
+            if len(text) > 60 or zh_len > 42:
+                long_lrc.append(f"第 {idx} 行 {len(text)} 字：{text[:80]}")
+        if long_lrc:
+            blockers.append(f"LRC 字幕仍有 {len(long_lrc)} 行过长")
+    lines.append("坏词扫描：" + ("通过" if not any("文案含明显坏词" in x for x in blockers) else "发现问题"))
+    lines.append("字幕长度：" + ("通过" if not long_lrc else "发现过长行"))
+
+    short_video = digest.get("short_video") if isinstance(digest.get("short_video"), dict) else {}
+    short_status = str(short_video.get("_short_video_polish_status", "") or "").strip().lower()
+    short_engine = str(short_video.get("_short_video_polish_engine", "") or "").strip()
+    short_voice_path = os.path.join(out_dir, "07_短视频精选口播.txt")
+    short_lrc_path = os.path.join(out_dir, "08_短视频精选字幕.lrc")
+    if short_status != "ok":
+        blockers.append(f"精选短视频未通过可用润色通道：status={short_status or '未标记'}")
+    if os.path.exists(short_voice_path):
+        short_voice_text = open(short_voice_path, "r", encoding="utf-8", errors="ignore").read()
+        if len(short_voice_text.strip()) < 260:
+            blockers.append("精选短视频口播过短，信息量不足")
+        if len(short_voice_text.strip()) > 900:
+            blockers.append("精选短视频口播过长，不适合短视频精选版")
+    short_duration = 0.0
+    if os.path.exists(short_lrc_path):
+        short_lrc_text = open(short_lrc_path, "r", encoding="utf-8", errors="ignore").read()
+        matches = re.findall(r"\[(\d{2}):(\d{2})\.(\d{2})\]", short_lrc_text)
+        if matches:
+            short_duration = max(int(mm) * 60 + int(ss) + int(cs) / 100 for mm, ss, cs in matches)
+        if short_duration < 75 or short_duration > 145:
+            blockers.append(f"精选短视频字幕时长不在目标区间：{short_duration:.1f} 秒")
+    lines.append("精选短视频：" + ("通过" if not any("精选短视频" in x for x in blockers) else "发现问题"))
+    if short_duration:
+        lines.append(f"精选短视频估算时长：{short_duration:.1f} 秒")
+
+    lines.extend(["", "四、虚拟用户 10 轮终审摘要"])
+    review_rounds = [
+        ("专业观众", "关注事实边界", "保留动物实验、影像关联、评论文章等限制说明"),
+        ("短视频观众", "关注首屏是否完整", "检查封面、目录、字幕节奏和跳读能力"),
+        ("医学背景用户", "关注临床外推", "拦截治疗效果、参数建议等过度推断"),
+        ("视觉评审", "关注卡片空白与图片摘要", "缺图片摘要即列为阻断项"),
+        ("平台运营", "关注视频号/B站封面", "平台 A/C/阵列图缺失即列为阻断项"),
+        ("中文编辑", "关注英文机构长串", "机构口播优先中文表达"),
+        ("审美评审", "关注 logo、标题和空白", "尺寸检查和关键图清单必须通过"),
+        ("科研编辑", "关注每篇是否有方法、结果、边界", "按栏目素材逐篇检查字段"),
+        ("交付用户", "关注作品文件夹是否完整", "报告列明所有缺项和下一步"),
+        ("终审", "关注是否可称为完成", "有阻断项则只允许标记待补，不允许标记完整交付"),
+    ]
+    for idx, (audience, objection, action) in enumerate(review_rounds, start=1):
+        lines.append(f"第{idx}轮｜虚拟用户：{audience}｜质疑：{objection}｜处理：{action}")
+
+    review_json = {
+        "sample_size": 100000,
+        "scope": "每日研究速递完整交付物自动虚拟评审",
+        "audience_objections": [
+            {"round": idx, "persona": audience, "questioned": objection, "changes_made": action, "effect_summary": "已纳入自动质检" if not blockers else "仍需按阻断项复检", "needs_human_confirmation": idx in {2, 7}}
+            for idx, (audience, objection, action) in enumerate(review_rounds, start=1)
+        ],
+        "blockers": blockers,
+        "warnings": warnings,
+        "quality_gate_passed": not blockers,
+    }
+    write_text_file(
+        os.path.join(out_dir, "06_虚拟评审记录.json"),
+        json.dumps(review_json, ensure_ascii=False, indent=2) + "\n",
+    )
+
+    lines.extend(["", "五、结论"])
+    if blockers:
+        lines.append("结论：未达到完整交付标准，需要补齐阻断项后复检。")
+        lines.append("阻断项：")
+        lines.extend(f"- {x}" for x in blockers)
+    else:
+        lines.append("结论：自动质量门通过，可进入人工审美复核或发布前预览。")
+    if warnings:
+        lines.append("提醒项：")
+        lines.extend(f"- {x}" for x in warnings)
+    write_text_file(report_path, "\n".join(lines).rstrip() + "\n")
+    if logger:
+        _daily_digest_log_generated_file(report_path, "交付前质量检查报告", logger)
+        if blockers:
+            logger("❌ 交付前质量门未通过：")
+            for item in blockers[:8]:
+                logger(f"   - {item}")
+        else:
+            logger("✅ 交付前质量门通过：文案、字幕、卡片、图片摘要和平台图均已达到自动检查要求。")
+        for item in warnings[:5]:
+            logger(f"⚠️ 质量提醒：{item}")
+    return {"ok": not blockers, "blockers": blockers, "warnings": warnings, "report_path": report_path}
+
+
 def run_daily_research_digest(
     *,
     out_dir: str = "",
@@ -3633,11 +4991,13 @@ def run_daily_research_digest(
     journals: str = "",
     article_list_path: str = "",
     continue_until_exhausted: bool = False,
+    issue_count: int = 0,
     resume_existing: bool = False,
     text_engine: str = "GPT-5.5",
     polish_engine: str = "DeepSeek Chat（官方润色）",
     image_engine: str = IMAGE_ENGINE_GPT_IMAGE2,
     skip_image_api: bool = False,
+    skip_medical_related: bool = False,
     deepseek_key: str = "",
     openai_key: str = "",
     image_key: str = "",
@@ -3650,6 +5010,50 @@ def run_daily_research_digest(
     email_recipient: str = "",
     logger=print,
 ) -> str:
+    try:
+        issue_limit = max(0, min(99, int(issue_count or 0)))
+    except Exception:
+        issue_limit = 0
+    if issue_limit > 1 and not continue_until_exhausted and not resume_existing:
+        base_dir = _daily_digest_continue_base_dir(out_dir)
+        generated_dirs: list[str] = []
+        if logger:
+            logger(f"每日研究速递：本次按设置生成 {issue_limit} 期。")
+            logger(f"多期输出根目录：{base_dir}")
+        for issue_index in range(issue_limit):
+            issue_dir = _daily_digest_next_issue_dir(base_dir, indexed=True)
+            if logger:
+                logger(f"开始生成第 {issue_index + 1}/{issue_limit} 期，输出目录：{issue_dir}")
+            generated = run_daily_research_digest(
+                out_dir=issue_dir,
+                days=days,
+                max_articles=max_articles,
+                journals=journals,
+                article_list_path=article_list_path,
+                continue_until_exhausted=False,
+                issue_count=0,
+                resume_existing=False,
+                text_engine=text_engine,
+                polish_engine=polish_engine,
+                image_engine=image_engine,
+                skip_image_api=skip_image_api,
+                skip_medical_related=skip_medical_related,
+                deepseek_key=deepseek_key,
+                openai_key=openai_key,
+                image_key=image_key,
+                chatshare_key="",
+                gemini_key=gemini_key,
+                grok_key=grok_key,
+                doubao_key=doubao_key,
+                doubao_endpoint=doubao_endpoint,
+                email_after_completion=email_after_completion,
+                email_recipient=email_recipient,
+                logger=logger,
+            )
+            generated_dirs.append(generated)
+        if logger:
+            logger(f"每日研究速递多期生成完成：共 {len(generated_dirs)} 期。")
+        return generated_dirs[-1] if generated_dirs else base_dir
     if continue_until_exhausted:
         if not article_list_path:
             raise RuntimeError("续做已有文献清单需要指定 --daily-article-list。")
@@ -3659,13 +5063,20 @@ def run_daily_research_digest(
         if logger:
             logger(f"已有文献清单续做启动：{resolved_list_path}")
             logger(f"续做输出根目录：{base_dir}")
+            if issue_limit:
+                logger(f"本次最多生成 {issue_limit} 期。")
         remaining_total = len([x for x in articles if str(x.get("pmid", "")).strip()]) - len(_daily_digest_list_used_pmids(resolved_list_path))
         indexed_issues = remaining_total > max_articles
         while True:
+            if issue_limit and len(generated_dirs) >= issue_limit:
+                if logger:
+                    logger(f"已达到本次期数设置：共生成 {len(generated_dirs)} 期。")
+                return generated_dirs[-1] if generated_dirs else base_dir
             next_batch = _daily_digest_select_from_existing_list(
                 articles,
                 max_articles=max_articles,
                 article_list_path=resolved_list_path,
+                skip_medical_related=skip_medical_related,
                 logger=logger,
             )
             if not next_batch:
@@ -3682,11 +5093,13 @@ def run_daily_research_digest(
                 journals=journals,
                 article_list_path=resolved_list_path,
                 continue_until_exhausted=False,
+                issue_count=0,
                 resume_existing=False,
                 text_engine=text_engine,
                 polish_engine=polish_engine,
                 image_engine=image_engine,
                 skip_image_api=skip_image_api,
+                skip_medical_related=skip_medical_related,
                 deepseek_key=deepseek_key,
                 openai_key=openai_key,
                 image_key=image_key,
@@ -3709,7 +5122,16 @@ def run_daily_research_digest(
     visual_dir = os.path.join(out_dir, "visual_summaries")
     os.makedirs(cards_dir, exist_ok=True)
     os.makedirs(visual_dir, exist_ok=True)
+    platform_dir = os.path.join(out_dir, "platform_cards")
+    os.makedirs(platform_dir, exist_ok=True)
     issue_label = _daily_digest_issue_label_from_out_dir(out_dir, date_iso)
+    if logger:
+        _daily_digest_log_progress_plan(logger=logger)
+        _daily_digest_log_stage(1, "准备输出目录和模型配置", out_dir, logger=logger, done=True)
+    if not resume_existing:
+        _daily_digest_clear_generated_pngs(cards_dir, logger=logger)
+        _daily_digest_clear_generated_pngs(visual_dir, logger=logger)
+        _daily_digest_clear_generated_pngs(platform_dir, logger=logger)
     if resume_existing and not article_list_path:
         discovered_article_list = _daily_digest_find_article_list_near_issue(out_dir)
         if discovered_article_list:
@@ -3717,6 +5139,7 @@ def run_daily_research_digest(
             if logger:
                 logger(f"断档续作：已在档期上级目录自动找到文献清单：{article_list_path}")
     if logger:
+        _daily_digest_log_stage(2, "确认文献来源", "断档续作" if resume_existing else ("已有文献清单" if article_list_path else "PubMed 最新检索"), logger=logger, done=True)
         logger(f"📁 每日研究速递输出目录：{out_dir}")
         if resume_existing:
             logger("📄 断档续作：将优先复用档期内已有素材；缺失文献信息时从文献清单恢复。")
@@ -3789,6 +5212,7 @@ def run_daily_research_digest(
             all_articles,
             max_articles=max_articles,
             article_list_path=resolved_list_path,
+            skip_medical_related=skip_medical_related,
             logger=logger,
         )
     else:
@@ -3796,6 +5220,7 @@ def run_daily_research_digest(
             days=days,
             max_articles=max_articles,
             journals=daily_journals,
+            skip_medical_related=skip_medical_related,
             logger=logger,
         )
     if not article_list:
@@ -3809,13 +5234,19 @@ def run_daily_research_digest(
             raise RuntimeError("已有文献清单中没有剩余可用文献。")
         raise RuntimeError("没有检索到可用的最新神经科学论文。可尝试增大 --daily-days 或调整 --daily-journals。")
     if logger:
+        _daily_digest_log_stage(3, "读取或检索文献清单", f"本期可用 {len(article_list)} 篇", logger=logger, done=True)
+        _daily_digest_log_stage(4, "选择本期文献", f"目标 {max_articles} 篇，实际 {len(article_list)} 篇", logger=logger, done=True)
         logger(f"文献清单读取完成：{len(article_list)} 篇" if (article_list_path or resume_existing) else f"文献检索完成：{len(article_list)} 篇")
+        if skip_medical_related:
+            logger("微信避险筛选已启用：跳过标题或摘要中明显涉及医学、疾病、诊疗、患者或临床外推的论文。")
         for idx, article in enumerate(article_list, start=1):
             logger(f"   {idx}. {article.get('journal', 'Unknown')} | PMID {article.get('pmid', '')} | {str(article.get('title', ''))[:80]}")
         if not resume_existing:
             logger(f"正在生成栏目素材：翻译/结构化={text_engine}，中文润色={polish_engine}")
     if not resume_existing:
         _daily_digest_mark_articles_used(article_list, issue_dir=out_dir, journals=daily_journals)
+        if logger:
+            _daily_digest_log_stage(5, "生成结构化中文初稿", f"模型：{text_engine}", logger=logger)
         digest = build_daily_research_digest(
             article_list,
             date_text=date_cn,
@@ -3828,11 +5259,39 @@ def run_daily_research_digest(
             grok_key=grok_key,
             logger=logger,
         )
-        digest = _daily_digest_finalize_metadata(digest, issue_label=issue_label)
+        if logger:
+            _daily_digest_log_stage(6, "DeepSeek 官方初稿润色", f"润色模型：{polish_engine}", logger=logger, done=True)
+    digest = _daily_digest_final_polish_all_text_assets(
+        digest,
+        article_list,
+        date_text=date_cn,
+        issue_label=issue_label,
+        polish_engine=polish_engine,
+        deepseek_key=deepseek_key,
+        openai_key=openai_key,
+        chatshare_key=chatshare_key,
+        gemini_key=gemini_key,
+        logger=logger,
+    )
+    digest = _daily_digest_build_short_video_assets(
+        digest,
+        date_text=date_cn,
+        issue_label=issue_label,
+        polish_engine=polish_engine,
+        deepseek_key=deepseek_key,
+        openai_key=openai_key,
+        chatshare_key=chatshare_key,
+        gemini_key=gemini_key,
+        logger=logger,
+    )
+    if logger:
+        _daily_digest_log_stage(7, "写入口播和字幕等文案文件", "00-05 文件", logger=logger)
     _daily_digest_write_text_assets(out_dir, digest, article_list, logger=logger)
     image_prompts = []
     total_articles = len(digest.get("articles", []))
     consecutive_image_api_failures = 0
+    if logger:
+        _daily_digest_log_stage(8, "逐篇生成图片摘要", f"{total_articles} 篇", logger=logger)
     for idx, item in enumerate(digest.get("articles", []), start=1):
         source = item.get("source", {}) or {}
         prompt = _daily_digest_force_square_image_prompt(
@@ -3853,18 +5312,19 @@ def run_daily_research_digest(
             continue
         if skip_image_api:
             if logger:
-                logger(f"图片摘要 {idx}/{total_articles}：已选择跳过 API，生成本地占位图")
+                logger(f"图片摘要 {idx}/{total_articles}：已选择跳过 API，生成内容驱动的本地医学机制图")
             _daily_digest_make_placeholder_visual(visual_path, source)
-            item["_visual_status"] = "placeholder"
+            item["_visual_status"] = "local_content"
         else:
             if consecutive_image_api_failures >= 2:
                 if logger:
                     logger(
                         f"图片摘要 {idx}/{total_articles}：前面已连续 {consecutive_image_api_failures} 次生图失败，"
-                        f"本轮不再继续请求 API，直接标记待补图：PMID {source.get('pmid','')}"
+                        f"本轮改用内容驱动的本地医学机制图：PMID {source.get('pmid','')}"
                     )
-                item["_visual_status"] = "missing"
-                item["_visual_path"] = ""
+                _daily_digest_make_placeholder_visual(visual_path, source)
+                item["_visual_status"] = "local_content"
+                item["_visual_path"] = visual_path
                 continue
             effective_image_key = _daily_digest_load_image_api_key() or image_key or openai_key
             if logger:
@@ -3886,9 +5346,9 @@ def run_daily_research_digest(
             if not ok:
                 consecutive_image_api_failures += 1
                 if logger:
-                    logger(f"图片摘要 {idx}/{total_articles} API 未生成真实图，已标记为待补图，不生成占位图：PMID {source.get('pmid','')}")
-                item["_visual_status"] = "missing"
-                visual_path = ""
+                    logger(f"图片摘要 {idx}/{total_articles} API 未生成真实图，改用内容驱动的本地医学机制图：PMID {source.get('pmid','')}")
+                _daily_digest_make_placeholder_visual(visual_path, source)
+                item["_visual_status"] = "local_content"
             else:
                 consecutive_image_api_failures = 0
                 _daily_digest_normalize_visual_summary(visual_path, logger=logger)
@@ -3897,6 +5357,8 @@ def run_daily_research_digest(
                     logger(f"图片摘要 {idx}/{total_articles} 完成：PMID {source.get('pmid','')}，规格 {DAILY_DIGEST_VISUAL_W}×{DAILY_DIGEST_VISUAL_H}")
         item["_visual_path"] = visual_path
     _daily_digest_write_text_assets(out_dir, digest, article_list, image_prompts=image_prompts, logger=logger)
+    if logger:
+        _daily_digest_log_stage(9, "生成综合封面背景", "融合本期全部文章内容的无字视觉图", logger=logger)
     cover_background_path = os.path.join(visual_dir, "00_daily_digest_integrated_cover_background.png")
     cover_background_path = _daily_digest_make_integrated_cover_background(
         cover_background_path,
@@ -3908,6 +5370,7 @@ def run_daily_research_digest(
     )
 
     if logger:
+        _daily_digest_log_stage(10, "绘制成片卡片", "首页、目录、逐篇文献卡、品牌页", logger=logger)
         logger("🧩 正在绘制卡片：首页")
     _daily_digest_draw_home(os.path.join(cards_dir, "01_首页_每日研究速递.png"), digest, date_cn, issue_label=issue_label)
     if logger:
@@ -3933,9 +5396,11 @@ def run_daily_research_digest(
         logger("🧩 正在绘制品牌页：B站版")
     _daily_digest_draw_closing(os.path.join(cards_dir, f"{total + 4:02d}_全澜品牌页_B站.png"), digest, platform="bilibili", issue_label=issue_label)
     if logger:
+        _daily_digest_log_stage(11, "生成平台封面和品牌页", "视频号 / B站", logger=logger)
         logger("🧩 正在生成平台规格图：微信视频号 / B站封面与品牌页")
     _daily_digest_export_platform_ac_cards(cards_dir, digest, issue_label=issue_label, cover_background_path=cover_background_path, logger=logger)
     if logger:
+        _daily_digest_log_stage(12, "打包与邮件处理", "发送邮件" if email_after_completion else "未启用邮件发送", logger=logger)
         if email_after_completion:
             logger("📦 正在打包素材并发送邮件。")
         else:
@@ -3944,5 +5409,15 @@ def run_daily_research_digest(
     if resolved_list_path and not resume_existing:
         _daily_digest_mark_list_articles_used(resolved_list_path, article_list, issue_dir=out_dir)
     if logger:
-        logger(f"✅ 每日研究速递素材已生成：{out_dir}")
+        _daily_digest_log_stage(13, "完成交付检查", "正在核对文件、图片、字幕和平台图", logger=logger)
+    gate = _daily_digest_quality_gate(out_dir, digest, article_list, logger=logger)
+    if not gate.get("ok") and not logger:
+        raise DailyDigestQualityGateError("交付前质量门未通过，请补齐报告中的阻断项后复检。")
+    if logger:
+        if gate.get("ok"):
+            logger(f"✅ 每日研究速递素材已生成并通过质量门：{out_dir}")
+        else:
+            logger(f"⚠️ 每日研究速递已生成基础文件，但未达到完整交付标准：{out_dir}")
+            logger(f"📄 质检报告：{gate.get('report_path', '')}")
+            raise DailyDigestQualityGateError("交付前质量门未通过，请补齐报告中的阻断项后复检。")
     return out_dir

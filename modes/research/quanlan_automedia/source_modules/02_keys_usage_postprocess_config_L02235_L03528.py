@@ -100,6 +100,7 @@ def sanitize_openai_api_key(api_key: str) -> str:
     """清洗 OpenAI API Key，避免 SDK 参数里混入换行、空格、引号或误粘贴的 Bearer 前缀。"""
     key = api_key or ""
     key = key.replace("\ufeff", "").replace("\u200b", "").replace("\u200c", "").replace("\u200d", "")
+    key = "".join(ch for ch in key if ord(ch) >= 32 and ord(ch) != 127)
     key = key.strip().strip('"\'')
     if key.lower().startswith("bearer "):
         key = key[7:]

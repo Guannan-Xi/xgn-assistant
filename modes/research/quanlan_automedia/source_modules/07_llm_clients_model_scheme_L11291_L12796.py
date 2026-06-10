@@ -624,7 +624,7 @@ class OpenAITextClient:
             if "openai_model_for_text_engine" in globals():
                 resolved_model = openai_model_for_text_engine(requested_model) if requested_model else OpenAITextClient.MODEL_NAME
             logger(f"🌐 正在通过中转站请求 OpenAI {resolved_model}...")
-            client = OpenAI(api_key=api_key, base_url=foreign_model_base_url(), timeout=600, max_retries=0)
+            client = OpenAI(api_key=api_key, base_url=foreign_model_base_url(), timeout=600, max_retries=2)
             system_instruction = ""
             response = client.responses.create(
                 model=resolved_model,
@@ -1813,6 +1813,7 @@ def _persistent_task_page_slot(slot: dict) -> dict:
         return {}
     text_engine = normalize_text_engine_choice(slot.get("text_engine"), DEFAULT_MODEL_SCHEME["text_engine"])
     review_engine = normalize_text_engine_choice(slot.get("review_engine"), DEFAULT_MODEL_SCHEME["review_engine"])
+    current_toc = slot.get("current_toc") if isinstance(slot.get("current_toc"), list) else []
     return {
         "slot_index": int(slot.get("slot_index", 0) or 0),
         "pdf_path": str(slot.get("pdf_path") or slot.get("current_pdf_path") or ""),
@@ -1827,6 +1828,8 @@ def _persistent_task_page_slot(slot: dict) -> dict:
         "flow_script": bool(slot.get("flow_script", True)),
         "flow_image": bool(slot.get("flow_image", True)),
         "clear_existing_images_before_draw": bool(slot.get("clear_existing_images_before_draw", False)),
+        "test_b_image_limit": max(0, int(slot.get("test_b_image_limit", 0) or 0)),
+        "current_toc": current_toc,
         "email_after_completion": bool(slot.get("email_after_completion", False)),
         "email_recipient": normalize_email_recipient(slot.get("email_recipient", "")),
     }

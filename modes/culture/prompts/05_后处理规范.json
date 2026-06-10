@@ -5,8 +5,8 @@
     "name": "知识慢炖",
     "slogan": "让经典不再高冷，让智慧人人可用",
     "end_heading": "下集预告",
-    "follow_text": "想看完整论证，可以回到原书。",
-    "cta_text": "想读完整原书，可以看下方链接",
+    "follow_text": "创作不易，欢迎在下方链接购买原书支持我们",
+    "cta_text": "关注【知识慢炖】，下一集继续把问题讲透",
     "share_text": "转给正被类似问题困住的人"
   },
   "assets": {
@@ -1062,8 +1062,8 @@
     }
   },
   "rendering": {
-    "engine": "pillow",
-    "fallback_engine": "pillow"
+    "engine": "playwright_html",
+    "fallback_engine": ""
   },
   "visual_controls": {
     "preset": "magazine_prime",

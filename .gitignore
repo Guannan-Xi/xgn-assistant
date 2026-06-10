@@ -9,6 +9,9 @@ __pycache__/
 .ruff_cache/
 
 .workbench_runtime/
+_temp/
+.codex_self_learning/
+.model_update_backup_*/
 chapter_pdf_direct_output/
 outputs/
 output/
@@ -35,6 +38,7 @@ gui_settings.json
 quanlan_email_settings.json
 relay_settings.json
 quanlan_model_scheme.json
+quanlan_model_connection_library.json
 
 *.mp4
 *.mov

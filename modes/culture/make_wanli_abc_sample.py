@@ -369,7 +369,7 @@ def _clean_sample_config(config_path: Path, base: Path) -> tuple[Path, Path, dic
     _set_nested(payload, "style.cover.editorial_layout.wide_tagline", "把晚明政治，讲成看得懂的因果线索")
     _set_nested(payload, "style.cover.editorial_layout.wide_note", "从一次午朝传言，看见皇帝和文官集团的长期拉扯。")
     _set_nested(payload, "style.endcard.editorial_layout.teaser_subtitle", "下一集，我们看申时行如何在皇帝和文官之间寻找平衡。")
-    payload["rendering"] = {"engine": "pillow", "fallback_engine": "pillow"}
+    payload["rendering"] = {"engine": "playwright_html", "fallback_engine": ""}
     config_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     meta = {

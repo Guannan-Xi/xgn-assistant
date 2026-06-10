@@ -384,6 +384,63 @@ def rebuild_image_prompt_text_from_pairs_with_visual_summary(image_prompt_text: 
     return "\n".join(out).rstrip() + "\n"
 
 
+def build_test_b_fallback_science_script(
+    chapter_title: str,
+    chapter_title_cn: str,
+    chapter_number: str,
+    source_text: str,
+    next_theme: str = "",
+) -> str:
+    """Build a local-only script so science B-image tests can exercise the image chain after text API timeouts."""
+    title_en = str(chapter_title or "").strip() or f"Chapter {chapter_number or ''}".strip() or "Untitled Chapter"
+    title_cn = str(chapter_title_cn or "").strip() or title_en
+    chapter_no = str(chapter_number or "").strip() or "1"
+    source_compact = re.sub(r"\s+", " ", str(source_text or "")).strip()
+    if len(source_compact) > 420:
+        source_compact = source_compact[:420].rstrip(" ,.;，。；") + "..."
+    if not source_compact:
+        source_compact = "本章本地解析文本为空；该兜底稿仅用于测试 B 图生成链路，不用于正式发布。"
+    next_hint = str(next_theme or "").strip() or "下一章主题待核对"
+    return f"""【章节名翻译】
+章节序号：{chapter_no}
+原始章节名：{title_en}
+中文章节名：{title_cn}
+英文章节名：{title_en}
+
+【纯台词脚本】
+A2：本章先用一个问题打开：行为为什么能够从脑内活动中产生？
+B01：从本章材料看，我们要把脑看成一个分层系统：感觉输入、神经元网络、运动输出和经验反馈彼此连接。测试图需要呈现这种从外界刺激到行为反应的机制链。
+C：这一章先建立脑与行为的整体框架，下一章将继续核对：{next_hint}。
+
+【绘图提示词】
+Production Asset Plan
+
+Shot_01:
+Page Type: A1. WeChat Cover Page
+AI Image Layer Prompt: No-text scientific key visual for chapter {chapter_no}, {title_en}. Show a whole-chapter biomedical concept map about brain and behavior: sensory input entering neural circuits, cellular signaling inside the brain, and an observable behavior output. Clean modern neuroscience textbook style, accurate, no labels, no words, no letters, no watermark.
+
+Shot_02:
+Page Type: A2. WeChat Home Page
+AI Image Layer Prompt: Reuse A1_Master_Background_母图.png only. Crop for WeChat home page; do not generate an independent image, do not add new objects, no text.
+
+Shot_03:
+Page Type: A01. Bilibili Cover Page
+AI Image Layer Prompt: Reuse A1_Master_Background_母图.png only. Crop for Bilibili cover; do not generate an independent image, do not add new objects, no text.
+
+Shot_04:
+Page Type: A02. Bilibili Home Page
+AI Image Layer Prompt: Reuse A1_Master_Background_母图.png only. Crop for Bilibili home page; do not generate an independent image, do not add new objects, no text.
+
+Shot_05:
+Page Type: B. Main Content Page
+AI Image Layer Prompt: No-text educational neuroscience diagram for B01. Visualize one concrete mechanism chain from sensory stimulus to neural circuit processing to behavior output. Include a brain cross-section, simplified neurons, directional signal flow, and a final movement or decision cue. Keep it source-grounded and clean, no labels, no letters, no numbers, no watermark. Source cue: {source_compact}
+
+Final Shot:
+Page Type: C. Brand Page
+AI Image Layer Prompt: No-text closing biomedical background summarizing the chapter: brain circuits link input, internal processing, and behavior. Leave calm empty space for later overlay, no logo, no text, no pseudo-text, no watermark.
+"""
+
+
 class ScriptParser:
     """提取分镜提示词（支持复杂换行）"""
 
@@ -1164,7 +1221,8 @@ def worker_logic():
                         f"🚀 每日研究速递开始：days={int(task.get('days', 14) or 14)}，"
                         f"max_articles={int(task.get('max_articles', 5) or 5)}，"
                         f"text={task.get('text_engine', 'GPT-5.5')}，"
-                        f"image={task.get('image_engine', IMAGE_ENGINE_GPT_IMAGE2)}"
+                        f"image={task.get('image_engine', IMAGE_ENGINE_GPT_IMAGE2)}，"
+                        f"微信避险={'开' if bool(task.get('skip_medical_related', False)) else '关'}"
                     )
                     out_path = run_daily_research_digest(
                         out_dir=task.get("out_dir", ""),
@@ -1175,6 +1233,7 @@ def worker_logic():
                         polish_engine=task.get("polish_engine", "DeepSeek Chat（官方润色）"),
                         image_engine=task.get("image_engine", IMAGE_ENGINE_GPT_IMAGE2),
                         skip_image_api=bool(task.get("skip_image_api", False)),
+                        skip_medical_related=bool(task.get("skip_medical_related", False)),
                         deepseek_key=task.get("deepseek_key", "") or deepseek_key,
                         openai_key=task.get("openai_key", "") or openai_key,
                         image_key=task.get("image_key", "") or image_key,
@@ -1692,6 +1751,15 @@ def worker_logic():
                                 else:
                                     script_text = web_text_result_or_export(ch_dir, "01_脚本初稿", combined_prompt, text_engine, ui_manager.log)
 
+                            elif test_b_image_limit:
+                                script_text = build_test_b_fallback_science_script(
+                                    chapter_title_clean,
+                                    chapter_title_cn_translated,
+                                    chapter_number,
+                                    md_content,
+                                    next_theme,
+                                )
+                                ui_manager.log("🧪 测试 B 图模式：跳过长脚本大模型请求，使用本地兜底科学脚本直接验证生图和后处理链路。")
                             else:
                                 script_text = generate_text_by_engine(
                                     text_engine, combined_prompt, ui_manager.log,
@@ -1699,6 +1767,15 @@ def worker_logic():
                                     grok_key=grok_key, gemini_key=gemini_key, openai_key=openai_key, chatshare_key=chatshare_key, deepseek_key=deepseek_key, doubao_key=doubao_key, doubao_endpoint=doubao_endpoint,
                                     pdf_path=direct_chapter_pdf_for_request
                                 )
+                            if job_state["is_running"] and not script_text and test_b_image_limit:
+                                script_text = build_test_b_fallback_science_script(
+                                    chapter_title_clean,
+                                    chapter_title_cn_translated,
+                                    chapter_number,
+                                    md_content,
+                                    next_theme,
+                                )
+                                ui_manager.log("⚠️ 文本模型未返回脚本，测试 B 图模式启用本地兜底脚本，仅用于链路验证。")
                             if job_state["is_running"] and script_text:
                                 raw_backup_path = os.path.splitext(script_path)[0] + "_完整脚本原稿.txt"
                                 script_text_for_backup = prepend_raw_script_title_header(script_text, chapter_number, chapter_title_clean, chapter_title_cn_translated, english_title=chapter_title_clean)
@@ -1744,7 +1821,7 @@ def worker_logic():
                                 # 2) 生成“绘图提示词 + 台词一一对应脚本”，再从这个中间稿拆分，保证 LRC 配图有真实锚点。
                                 paired_script_text = ""
                                 alignment_result = ""
-                                if raw_voiceover_base.strip() and image_prompt_text.strip():
+                                if raw_voiceover_base.strip() and image_prompt_text.strip() and not test_b_image_limit:
                                     ui_manager.log(f"🔗 正在使用 {describe_text_engine(review_engine_resolved)} 生成图文一一对应脚本，用于 LRC 配图锚点...")
                                     alignment_prompt = build_voice_image_alignment_prompt(raw_voiceover_base, image_prompt_text)
                                     if not str(alignment_prompt or "").strip():
@@ -1830,7 +1907,9 @@ def worker_logic():
                                     + "\n\n"
                                     + render_prompt_fragment("voiceover_polish_extra_rules.md", {}, fallback="")
                                 )
-                                if web_manual:
+                                if test_b_image_limit:
+                                    reviewed_text = ""
+                                elif web_manual:
                                     reviewed_text = web_text_result_or_export(ch_dir, "02_润色台词", review_prompt, review_engine_resolved, ui_manager.log)
                                     if not reviewed_text:
                                         write_text_file(os.path.join(get_web_bridge_dir(ch_dir), "01_脚本初稿_已拆分台词.txt"), raw_voiceover_text)
@@ -1869,6 +1948,9 @@ def worker_logic():
                                     )
 
                                     ui_manager.log("✅ 三步骤完成：已生成图文台词一一对应总脚本、润色台词，并输出短视频总结；最终保留 LRC 台词、绘图提示词、短视频总结和图片。")
+                                elif job_state["is_running"] and test_b_image_limit and raw_voiceover_text.strip() and final_image_prompt_text.strip():
+                                    save_voiceover_prompts_and_lrc(script_path, raw_voiceover_text, final_image_prompt_text, raw_script_text=script_text_for_backup, logger=ui_manager.log)
+                                    ui_manager.log("⚠️ 测试 B 图模式：台词润色模型未返回结果，已使用本地兜底台词保存最终脚本以继续验证配图链路。")
 
 
                     if do_image and job_state["is_running"]:
@@ -1876,6 +1958,7 @@ def worker_logic():
                             if clear_existing_images:
                                 clear_generated_image_folder(images_dir, ui_manager.log)
                             prompts, pending_images, done_count = summarize_image_resume_state(script_path, images_dir, ui_manager.log)
+                            failed_images = []
                             if test_b_image_limit:
                                 filtered_pending = []
                                 used_in_chapter = 0
@@ -1903,7 +1986,7 @@ def worker_logic():
 
                             else:
 
-                                generate_pending_images(
+                                failed_images = generate_pending_images(
 
                                     pending_images,
 
@@ -1920,6 +2003,26 @@ def worker_logic():
                                     chatshare_key=chatshare_key,
 
                                 )
+                            if job_state["is_running"] and failed_images:
+                                chapter_status = f"失败：{len(failed_images)}张配图生成失败"
+                                ui_manager.log(f"❌ 配图生成失败 {len(failed_images)} 张，本章不再标记为完成。")
+                            if job_state["is_running"] and test_b_image_limit:
+                                b_image_paths = []
+                                for p_name, p_text in prompts:
+                                    if detect_visual_role(p_name, p_text) != "content_diagram_27_48":
+                                        continue
+                                    target_path = os.path.join(images_dir, f"{p_name}.png")
+                                    existing_path = target_path if is_nonempty_file(target_path, min_bytes=1000) else ""
+                                    finder = globals().get("_find_existing_image_for_prompt")
+                                    if not existing_path and callable(finder):
+                                        existing_path = finder(images_dir, p_name)
+                                    if existing_path and is_nonempty_file(existing_path, min_bytes=1000):
+                                        b_image_paths.append(existing_path)
+                                if b_image_paths:
+                                    ui_manager.log(f"✅ 测试 B 图验收通过：已发现 {len(b_image_paths)} 张可用 B 图。")
+                                else:
+                                    chapter_status = "失败：测试B图未生成"
+                                    ui_manager.log("❌ 测试 B 图验收失败：未发现可用 B 图 PNG，本章不再标记为完成。")
                             if job_state["is_running"] and prompts:
                                 if pending_images or clear_existing_images or resume_touch_existing_images_enabled() or resume_force_rebuild_enabled():
                                     ensure_all_generated_images_postprocessed(script_path, images_dir, logger=ui_manager.log)
@@ -1927,6 +2030,7 @@ def worker_logic():
                                     ui_manager.log("♻️ 本章节配图均已存在，断点续作不重新后处理已有图片。")
                         else:
                             ui_manager.log("⚠️ 找不到脚本，跳过配图生成。")
+                            chapter_status = "失败：缺少脚本"
 
                     if job_state["is_running"]:
                         cleanup_final_only_outputs(ch_dir, script_path, images_dir, logger=ui_manager.log)
