@@ -3395,6 +3395,19 @@ def _sync_project_model_keys(root: Path) -> dict[str, Any]:
         for target in _project_model_key_targets(root, key_name):
             _write_secret(target, value)
             copied.append(str(target))
+    target_secret_dir = root / ".model_connection_library"
+    if MODEL_CONNECTION_SECRET_DIR.exists():
+        for src in MODEL_CONNECTION_SECRET_DIR.glob("*/*.txt"):
+            value = src.read_text(encoding="utf-8", errors="replace").strip()
+            if not value:
+                continue
+            try:
+                rel = src.relative_to(MODEL_CONNECTION_SECRET_DIR)
+            except Exception:
+                continue
+            target = target_secret_dir / rel
+            _write_secret(target, value)
+            copied.append(str(target))
     return {"key_files_synced": len(copied), "missing_keys": missing}
 
 
@@ -6398,6 +6411,26 @@ def _build_optimizer_command(project: str, mode: str) -> tuple[str, list[str], P
     raise ValueError("unknown optimizer project")
 
 
+def _audience_material_root() -> str:
+    candidates: list[str] = []
+    for settings_path in (
+        SETTINGS_FILE,
+        ASSISTANT_DEV_ROOT / "quanlan_dual_assistant_settings.json",
+        ASSISTANT_RELEASE_ROOT / "quanlan_dual_assistant_settings.json",
+    ):
+        data = _read_json(settings_path, {})
+        if isinstance(data, dict):
+            value = str(data.get("culture_out_dir") or "").strip().strip('"')
+            if value and value not in candidates:
+                candidates.append(value)
+    for value in candidates:
+        path = Path(value)
+        if path.exists():
+            return str(path)
+    fallback = PROJECT_ROOT / "modes" / "culture" / "outputs"
+    return str(fallback)
+
+
 def _build_audience_command(project: str, mode: str = "once") -> tuple[str, list[str], Path, str]:
     project = str(project or "").strip()
     mode = str(mode or "once").strip()
@@ -6420,6 +6453,9 @@ def _build_audience_command(project: str, mode: str = "once") -> tuple[str, list
     audience_modes = {"once", "quick", "standard", "deep", "preflight"}
     if project == "assistant":
         cmd = [sys.executable, "-m", "modes.culture.automedia_core.audience_test_bot"]
+        material_root = _audience_material_root()
+        if material_root:
+            cmd.extend(["--material-root", material_root])
         if mode in {"standard", "deep", "preflight", "once"}:
             cmd.append("--online")
         if mode == "quick":

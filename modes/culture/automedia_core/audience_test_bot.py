@@ -70,6 +70,11 @@ MATERIAL_FILE_CANDIDATES = {
     "quality": ["230人评审质检清单.json", "230浜鸿瘎瀹¤川妫€娓呭崟.json"],
     "meta": ["封面片尾元数据.json", "灏侀潰鐗囧熬鍏冩暟鎹?json"],
 }
+MATERIAL_FILE_CANDIDATES["intro_json"] = ["04_视频简介.json", *MATERIAL_FILE_CANDIDATES["intro_json"]]
+MATERIAL_FILE_CANDIDATES["intro_txt"] = ["04_视频简介.txt", "05_视频简介.txt", *MATERIAL_FILE_CANDIDATES["intro_txt"]]
+MATERIAL_FILE_CANDIDATES["lrc"] = ["03_台词.lrc", "03_剪辑台词.lrc", "05_口播字幕.lrc", *MATERIAL_FILE_CANDIDATES["lrc"]]
+MATERIAL_FILE_CANDIDATES["script"] = ["02_完整脚本.txt", "02_口播台词.txt", "02_脚本.json", *MATERIAL_FILE_CANDIDATES["script"]]
+MATERIAL_FILE_CANDIDATES["drawing_prompt"] = ["04_绘图提示词.txt"]
 DISCOVERY_MARKERS = [name for names in MATERIAL_FILE_CANDIDATES.values() for name in names]
 
 
