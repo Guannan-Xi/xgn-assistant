@@ -2,25 +2,255 @@
   "foreign_base_url": "https://api.dstopology.com/v1",
   "deepseek_base_url": "https://api.deepseek.com",
   "culture_text_base_url": "https://api.dstopology.com/v1",
-  "culture_polish_base_url": "https://api.dstopology.com/v1",
-  "culture_image_base_url": "https://api.dstopology.com/v1",
+  "culture_polish_base_url": "https://api.deepseek.com/v1",
+  "culture_image_base_url": "https://greatwalllink.top/v1",
   "research_text_base_url": "https://api.dstopology.com/v1",
-  "research_polish_base_url": "https://api.dstopology.com/v1",
-  "research_image_base_url": "https://api.dstopology.com/v1",
+  "research_polish_base_url": "https://api.deepseek.com/v1",
+  "research_image_base_url": "https://greatwalllink.top/v1",
   "culture_text_provider": "openai",
   "culture_text_model": "gpt-5.5",
-  "culture_polish_provider": "openai",
-  "culture_polish_model": "gpt-5.5",
+  "culture_polish_provider": "deepseek",
+  "culture_polish_model": "deepseek-chat",
   "culture_image_provider": "openai",
   "culture_image_model": "gpt-image-2",
   "gpt_base_url": "https://api.dstopology.com/v1",
   "gpt_pro_base_url": "https://www.fhl.mom/v1",
-  "gpt_image_base_url": "https://api.dstopology.com/v1",
+  "gpt_image_base_url": "https://greatwalllink.top/v1",
   "text_engine": "gpt-5.5",
-  "polish_engine": "gpt-5.5",
+  "polish_engine": "deepseek-chat",
   "image_engine": "gpt-image-2",
-  "minimax_base_url": "https://api.53hk.cn",
-  "minimax_tts_model": "speech-2.8-hd",
+  "minimax_base_url": "https://api.minimaxi.com/v1",
+  "minimax_tts_model": "MiniMax-M2.7",
   "gpt_pro_model": "gpt-5.5",
-  "minimax_bgm_model": "music-2.6"
+  "minimax_bgm_model": "music-2.6",
+  "business_steps": {
+    "script_text": {
+      "step": "script_text",
+      "label": "脚本/文案生成",
+      "allowed_roles": [
+        "text"
+      ],
+      "selected": {
+        "id": "text-dst-series-https-api-dstopology-com-v1-gpt",
+        "name": "DST series",
+        "role": "text",
+        "role_label": "GPT / 文本",
+        "provider": "openai",
+        "base_url": "https://api.dstopology.com/v1",
+        "model": "gpt-5.5",
+        "key_name": "openai_api_key",
+        "key_configured": true,
+        "last_tested_at": "2026-06-13 01:37:01",
+        "latency_ms": 3290,
+        "last_test_ok": true
+      },
+      "candidates": [
+        {
+          "id": "text-dst-series-https-api-dstopology-com-v1-gpt",
+          "name": "DST series",
+          "role": "text",
+          "role_label": "GPT / 文本",
+          "provider": "openai",
+          "base_url": "https://api.dstopology.com/v1",
+          "model": "gpt-5.5",
+          "key_name": "openai_api_key",
+          "key_configured": true,
+          "last_tested_at": "2026-06-13 01:37:01",
+          "latency_ms": 3290,
+          "last_test_ok": true
+        },
+        {
+          "id": "text-greatwall-link-series-https-greatwalllink-t",
+          "name": "飞书文档｜openai｜gpt-5.5",
+          "role": "text",
+          "role_label": "GPT / 文本",
+          "provider": "openai",
+          "base_url": "https://greatwalllink.top",
+          "model": "gpt-5.5",
+          "key_name": "openai_api_key",
+          "key_configured": true,
+          "last_tested_at": "2026-06-13 01:36:51",
+          "latency_ms": 8450,
+          "last_test_ok": false
+        }
+      ]
+    },
+    "research_text": {
+      "step": "research_text",
+      "label": "科研速递文本",
+      "allowed_roles": [
+        "text"
+      ],
+      "selected": {
+        "id": "text-dst-series-https-api-dstopology-com-v1-gpt",
+        "name": "DST series",
+        "role": "text",
+        "role_label": "GPT / 文本",
+        "provider": "openai",
+        "base_url": "https://api.dstopology.com/v1",
+        "model": "gpt-5.5",
+        "key_name": "openai_api_key",
+        "key_configured": true,
+        "last_tested_at": "2026-06-13 01:37:01",
+        "latency_ms": 3290,
+        "last_test_ok": true
+      },
+      "candidates": [
+        {
+          "id": "text-dst-series-https-api-dstopology-com-v1-gpt",
+          "name": "DST series",
+          "role": "text",
+          "role_label": "GPT / 文本",
+          "provider": "openai",
+          "base_url": "https://api.dstopology.com/v1",
+          "model": "gpt-5.5",
+          "key_name": "openai_api_key",
+          "key_configured": true,
+          "last_tested_at": "2026-06-13 01:37:01",
+          "latency_ms": 3290,
+          "last_test_ok": true
+        },
+        {
+          "id": "text-greatwall-link-series-https-greatwalllink-t",
+          "name": "飞书文档｜openai｜gpt-5.5",
+          "role": "text",
+          "role_label": "GPT / 文本",
+          "provider": "openai",
+          "base_url": "https://greatwalllink.top",
+          "model": "gpt-5.5",
+          "key_name": "openai_api_key",
+          "key_configured": true,
+          "last_tested_at": "2026-06-13 01:36:51",
+          "latency_ms": 8450,
+          "last_test_ok": false
+        }
+      ]
+    },
+    "polish_text": {
+      "step": "polish_text",
+      "label": "最终文案润色",
+      "allowed_roles": [
+        "polish",
+        "text"
+      ],
+      "selected": {
+        "id": "polish---https-api-deepseek-com-gpt-5-5",
+        "name": "飞书文档｜deepseek｜deepseek-chat",
+        "role": "polish",
+        "role_label": "DeepSeek / 润色",
+        "provider": "deepseek",
+        "base_url": "https://api.deepseek.com",
+        "model": "deepseek-chat",
+        "key_name": "deepseek_api_key",
+        "key_configured": true,
+        "last_tested_at": "2026-06-13 01:37:01",
+        "latency_ms": 630,
+        "last_test_ok": true
+      },
+      "candidates": [
+        {
+          "id": "polish---https-api-deepseek-com-gpt-5-5",
+          "name": "飞书文档｜deepseek｜deepseek-chat",
+          "role": "polish",
+          "role_label": "DeepSeek / 润色",
+          "provider": "deepseek",
+          "base_url": "https://api.deepseek.com",
+          "model": "deepseek-chat",
+          "key_name": "deepseek_api_key",
+          "key_configured": true,
+          "last_tested_at": "2026-06-13 01:37:01",
+          "latency_ms": 630,
+          "last_test_ok": true
+        }
+      ]
+    },
+    "image_generation": {
+      "step": "image_generation",
+      "label": "图片生成",
+      "allowed_roles": [
+        "image"
+      ],
+      "selected": {
+        "id": "image-greatwall-link-series-https-greatwalllink",
+        "name": "GreatWall Link series",
+        "role": "image",
+        "role_label": "gpt-image-2 / 生图",
+        "provider": "image",
+        "base_url": "https://greatwalllink.top/v1",
+        "model": "gpt-image-2",
+        "key_name": "image_api_key",
+        "key_configured": true,
+        "last_tested_at": "2026-06-13 01:37:02",
+        "latency_ms": 610,
+        "last_test_ok": true
+      },
+      "candidates": [
+        {
+          "id": "image-greatwall-link-series-https-greatwalllink",
+          "name": "GreatWall Link series",
+          "role": "image",
+          "role_label": "gpt-image-2 / 生图",
+          "provider": "image",
+          "base_url": "https://greatwalllink.top/v1",
+          "model": "gpt-image-2",
+          "key_name": "image_api_key",
+          "key_configured": true,
+          "last_tested_at": "2026-06-13 01:37:02",
+          "latency_ms": 610,
+          "last_test_ok": true
+        },
+        {
+          "id": "image-dst-series-https-api-dstopology-com-v1-gpt",
+          "name": "飞书文档｜image｜gpt-image-2",
+          "role": "image",
+          "role_label": "gpt-image-2 / 生图",
+          "provider": "image",
+          "base_url": "https://api.dstopology.com",
+          "model": "gpt-image-2",
+          "key_name": "image_api_key",
+          "key_configured": true,
+          "last_tested_at": "2026-06-12 14:36:49",
+          "latency_ms": 1880,
+          "last_test_ok": false
+        }
+      ]
+    },
+    "voice_bgm": {
+      "step": "voice_bgm",
+      "label": "配音/BGM",
+      "allowed_roles": [
+        "minimax"
+      ],
+      "selected": {
+        "id": "minimax-minimax-https-api-minimaxi-com-v1-minima",
+        "name": "飞书文档｜minimax｜MiniMax-M2.7",
+        "role": "minimax",
+        "role_label": "MiniMax / 配音 BGM",
+        "provider": "minimax",
+        "base_url": "https://api.minimaxi.com/v1",
+        "model": "MiniMax-M2.7",
+        "key_name": "minimax_api_key",
+        "key_configured": true,
+        "last_tested_at": "2026-06-13 01:37:02",
+        "latency_ms": 10,
+        "last_test_ok": true
+      },
+      "candidates": [
+        {
+          "id": "minimax-minimax-https-api-minimaxi-com-v1-minima",
+          "name": "飞书文档｜minimax｜MiniMax-M2.7",
+          "role": "minimax",
+          "role_label": "MiniMax / 配音 BGM",
+          "provider": "minimax",
+          "base_url": "https://api.minimaxi.com/v1",
+          "model": "MiniMax-M2.7",
+          "key_name": "minimax_api_key",
+          "key_configured": true,
+          "last_tested_at": "2026-06-13 01:37:02",
+          "latency_ms": 10,
+          "last_test_ok": true
+        }
+      ]
+    }
+  }
 }

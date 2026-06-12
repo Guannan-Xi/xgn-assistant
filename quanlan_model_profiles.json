@@ -1,5 +1,5 @@
 {
-  "active_profile": "fhl",
+  "active_profile": "dst",
   "profiles": [
     {
       "id": "greatwall-link",
@@ -28,7 +28,9 @@
         "image_engine": "gpt-image-2",
         "minimax_base_url": "https://api.minimaxi.com/v1",
         "minimax_tts_model": "speech-2.8-hd"
-      }
+      },
+      "deprecated_default": true,
+      "note": "Preserved for history only; not used as active/default route."
     },
     {
       "id": "fhl",
@@ -57,7 +59,9 @@
         "image_engine": "gpt-image-2",
         "minimax_base_url": "https://api.minimaxi.com/v1",
         "minimax_tts_model": "speech-2.8-hd"
-      }
+      },
+      "deprecated_default": true,
+      "note": "Preserved for history only; not used as active/default route."
     },
     {
       "id": "dst",
@@ -67,26 +71,27 @@
         "foreign_base_url": "https://api.dstopology.com/v1",
         "deepseek_base_url": "https://api.deepseek.com",
         "culture_text_base_url": "https://api.dstopology.com/v1",
-        "culture_polish_base_url": "https://api.deepseek.com",
+        "culture_polish_base_url": "https://api.dstopology.com/v1",
         "culture_image_base_url": "https://api.dstopology.com/v1",
         "research_text_base_url": "https://api.dstopology.com/v1",
-        "research_polish_base_url": "https://api.deepseek.com",
+        "research_polish_base_url": "https://api.dstopology.com/v1",
         "research_image_base_url": "https://api.dstopology.com/v1",
         "culture_text_provider": "openai",
         "culture_text_model": "gpt-5.5",
-        "culture_polish_provider": "deepseek",
-        "culture_polish_model": "deepseek-chat",
+        "culture_polish_provider": "openai",
+        "culture_polish_model": "gpt-5.5",
         "culture_image_provider": "openai",
         "culture_image_model": "gpt-image-2",
         "gpt_base_url": "https://api.dstopology.com/v1",
-        "gpt_pro_base_url": "",
+        "gpt_pro_base_url": "https://www.fhl.mom/v1",
         "gpt_image_base_url": "https://api.dstopology.com/v1",
         "text_engine": "gpt-5.5",
-        "polish_engine": "deepseek-chat",
+        "polish_engine": "gpt-5.5",
         "image_engine": "gpt-image-2",
-        "minimax_base_url": "https://api.minimaxi.com/v1",
+        "minimax_base_url": "https://api.53hk.cn",
         "minimax_tts_model": "speech-2.8-hd",
-        "gpt_pro_model": "gpt-5.5"
+        "gpt_pro_model": "gpt-5.5",
+        "minimax_bgm_model": "music-2.6"
       }
     }
   ]

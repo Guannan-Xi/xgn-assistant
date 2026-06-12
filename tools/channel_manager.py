@@ -39,6 +39,7 @@ EXCLUDE_DIRS = {
 EXCLUDE_NAMES = {
     ".env",
     "quanlan_dual_assistant_settings.json",
+    "release_channel_state.json",
     "gui_settings.json",
     "quanlan_email_settings.json",
     "relay_settings.json",
@@ -174,6 +175,13 @@ def package_update(args: argparse.Namespace) -> int:
     update_dir = _update_dir(release_root)
     update_dir.mkdir(parents=True, exist_ok=True)
     channel = str(args.channel or "test").strip().lower()
+    _set_state(
+        release_root,
+        channel=channel,
+        dev_root=str(PROJECT_ROOT),
+        release_root=str(release_root),
+        explicit_update_required=True,
+    )
     package_name = f"xgn-assistant-{channel}-update-{_stamp()}.zip"
     package_path = update_dir / package_name
     manifest = {

@@ -1,17 +1,17 @@
 {
   "version": 1,
-  "updated_at": "2026-06-10T01:01:02",
+  "updated_at": "2026-06-12T14:56:28",
   "slots": [
     {
       "slot_index": 0,
       "pdf_path": "D:\\Quanlan\\全澜脑科学视频号\\神经科学经典\\神经科学原理\\原文\\Principles of Neural Science, Sixth Edition -- Eric R_ Kandel (editor); Steven Siegelbaum (editor); Sarah -- Sixth edition, New York, 2021 -- McGraw -- isbn13 9781259642234 .pdf",
       "current_pdf_path": "D:\\Quanlan\\全澜脑科学视频号\\神经科学经典\\神经科学原理\\原文\\Principles of Neural Science, Sixth Edition -- Eric R_ Kandel (editor); Steven Siegelbaum (editor); Sarah -- Sixth edition, New York, 2021 -- McGraw -- isbn13 9781259642234 .pdf",
-      "out_dir": "D:\\Quanlan\\全澜脑科学视频号\\神经科学经典\\神经科学原理\\原文\\Principles of Neural Science, Sixth Edition_章节PDF直传结果",
-      "content_style": "科学经典解读",
+      "out_dir": "D:/tmp/science",
+      "content_style": "绉戝缁忓吀瑙ｈ",
       "text_engine": "GPT-5.5",
-      "review_engine": "GPT-5.5",
-      "image_engine": "生图专用｜GPT Image 2",
-      "call_mode": "API 自动调用",
+      "review_engine": "DeepSeek Chat锛堝畼鏂规鼎鑹诧級",
+      "image_engine": "鐢熷浘涓撶敤锝淕PT Image 2",
+      "call_mode": "API 鑷姩璋冪敤",
       "flow_parse": true,
       "flow_script": true,
       "flow_image": true,

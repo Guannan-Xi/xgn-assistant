@@ -45,9 +45,9 @@ deepseek_api_key.txt
 
 ## 模型调用方案
 
-- 国外文本/生图模型默认通过 OpenAI-compatible 中转站访问：`https://greatwalllink.top/v1`。可用环境变量 `NEWAPI_BASE_URL` 或 `FOREIGN_MODEL_BASE_URL` 覆盖。
-- 台词润色/全文终审默认使用 DeepSeek 官方接口：`https://api.deepseek.com`。可用环境变量 `DEEPSEEK_BASE_URL` 覆盖。
-- 默认方案：脚本初稿 `GPT-5.5`，全文终审 `DeepSeek Chat（官方润色）`，配图 `GPT Image 2`。
+- 文本、脚本、研究速递文案和终稿润色默认读取总控台同步的 `.env.quanlan-model.local(.json)` / 连接库配置。当前默认：OpenAI-compatible `https://api.dstopology.com/v1`，模型 `gpt-5.5`。
+- 生图默认读取同一总控配置：`https://api.dstopology.com/v1`，模型 `gpt-image-2`。
+- 不再回退到旧 FHL 文本默认、旧 DeepSeek 官方润色默认或官方 MiniMax 默认；MiniMax 当前默认使用 `https://api.53hk.cn` / `speech-2.8-hd`。
 
 ## 每日研究速递
 
@@ -55,7 +55,7 @@ deepseek_api_key.txt
 
 - 自动从 PubMed / NCBI E-utilities 检索神经科学顶刊最新论文摘要。
 - 默认期刊包括 `Nature Neuroscience`、`Neuron`、`Nature`、`Science`、`Cell`、`Brain`、`Journal of Neuroscience` 等。
-- DeepSeek 官方生成中文栏目口播、目录和每篇论文的研究问题、核心发现、意义说明；表达易懂但保持科研严谨。
+- 终稿润色模型生成中文栏目口播、目录和每篇论文的研究问题、核心发现、意义说明；表达易懂但保持科研严谨，并严格以题名/摘要可支撑的信息为边界。
 - GPT Image 2 / image2 生成无字 Cell 风格文献图片摘要。
 - 本地输出卡片播放式素材：首页、目录页、每篇论文卡、全澜品牌页、口播台词、LRC、文献信息 JSON、图片提示词。
 

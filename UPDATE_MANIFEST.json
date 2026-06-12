@@ -1,0 +1,9 @@
+{
+  "created_at": "2026-06-13 01:34:47",
+  "dev_root": "D:\\Quanlan\\Codes\\Python\\xgn-assistant",
+  "release_root": "D:\\Quanlan\\Codes\\Python\\xgn-assistant-release",
+  "channel": "release",
+  "package": "xgn-assistant-release-update-20260613_013447.zip",
+  "note": "quick test one B image per mode",
+  "requires_explicit_apply": true
+}

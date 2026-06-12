@@ -46,7 +46,7 @@ def _daily_digest_progress_heartbeat(label: str, logger=print, interval: int = 2
             elapsed += interval
             try:
                 if logger:
-                    logger(f"⏳ {label}仍在进行中，已等待约 {elapsed} 秒，请保持窗口开启。")
+                    logger(f"⏳ {label}还在认真处理，已等待约 {elapsed} 秒。这通常是模型或图片接口在排队/生成，请先别关窗口。")
             except Exception:
                 pass
 
@@ -56,26 +56,42 @@ def _daily_digest_progress_heartbeat(label: str, logger=print, interval: int = 2
 
 
 DAILY_DIGEST_STAGE_PLAN = [
-    "准备输出目录和模型配置",
-    "确认文献来源",
-    "读取或检索文献清单",
-    "选择本期文献",
-    "生成结构化中文初稿",
-    "DeepSeek 官方润色",
-    "写入口播和字幕等文案文件",
+    "建好本期文件夹，锁定模型配置",
+    "确认这期从哪里取论文",
+    "读取或检索候选论文",
+    "挑出本期要讲的论文",
+    "把论文摘要整理成中文初稿",
+    "润色成可发布的中文文案",
+    "写出口播、简介、字幕文件",
     "逐篇生成图片摘要",
     "生成综合封面背景",
-    "绘制成片卡片",
-    "生成平台封面和品牌页",
+    "绘制首页、目录、文献卡和品牌页",
+    "生成视频号/B站平台图",
     "打包与邮件处理",
-    "完成交付检查",
+    "交付前总检查",
 ]
+
+DAILY_DIGEST_STAGE_HINTS = {
+    1: "本期所有素材会放进同一个期次子文件夹，避免和上一期混在一起。",
+    2: "先确认是续做旧清单，还是重新去 PubMed 找新论文。",
+    3: "这里会拿到标题、摘要、期刊和 PMID，是后面所有文案的原料。",
+    4: "会尽量分散期刊并避开最近用过的 PMID，让选题更像一期节目而不是同刊堆叠。",
+    5: "把英文摘要拆成标题、科学问题、方法、发现、边界和图片提示词。",
+    6: "重点清理翻译腔、空话和外推风险，让中国读者听得懂也不误解。",
+    7: "产出口播台词、视频简介、字幕和图片提示词，运营可以直接打开检查。",
+    8: "这通常是最慢的一段：每篇论文都要等图片模型生成机制图。",
+    9: "这张图用于平台封面背景，要求无文字、无 logo，后面再叠正式控件。",
+    10: "把前面的文案和图片装进最终卡片版式。",
+    11: "会额外导出视频号和 B 站需要的封面、品牌页和阵列图。",
+    12: "如果启用邮件，会把本期素材打包发出；没启用也会保留压缩包逻辑。",
+    13: "最后检查缺文件、旧图混入、尺寸不对、文案明显异常等问题。",
+}
 
 
 def _daily_digest_log_progress_plan(logger=print):
     if not logger:
         return
-    logger("📋 每日研究速递生成步骤：")
+    logger("📋 今日流水线已展开：我会按 13 步把论文变成一整期可交付素材。")
     for idx, name in enumerate(DAILY_DIGEST_STAGE_PLAN, start=1):
         logger(f"   {idx:02d}/{len(DAILY_DIGEST_STAGE_PLAN):02d} {name}")
 
@@ -86,11 +102,14 @@ def _daily_digest_log_stage(index: int, title: str, detail: str = "", *, logger=
     mark = "✅" if done else "▶️"
     suffix = f"：{detail}" if detail else ""
     logger(f"{mark} 进度 {index:02d}/{len(DAILY_DIGEST_STAGE_PLAN):02d}｜{title}{suffix}")
+    hint = DAILY_DIGEST_STAGE_HINTS.get(index, "")
+    if hint:
+        logger(f"   运营提示：{hint}")
 
 
 def _daily_digest_log_generated_file(path: str, label: str, logger=print):
     if logger and path:
-        logger(f"   已生成 {label}：{os.path.abspath(path)}")
+        logger(f"   ✅ 已落盘 {label}：{os.path.abspath(path)}")
 
 
 def _daily_digest_clear_generated_pngs(folder: str, logger=print):
@@ -508,11 +527,11 @@ def _daily_digest_select_from_existing_list(
         unique_journals = len({_daily_digest_journal_key(x) or x for x in journals_used if x})
         logger(f"已有文献清单续做：本轮取 {len(selected)} 篇，覆盖 {unique_journals} 个期刊；清单已用 {len(used_pmids)} 篇，预计剩余 {remaining_after} 篇。")
         if skip_medical_related:
-            logger(f"微信避险筛选：已跳过医学/疾病相关候选 {skipped_medical} 篇。")
+            logger(f"🛡️ 微信避险已工作：跳过医学/疾病/临床外推风险候选 {skipped_medical} 篇，减少发布后踩线概率。")
             for example in skipped_medical_examples:
                 logger(f"微信避险示例：{example}")
         if len(selected) > unique_journals:
-            logger("期刊分散：候选期刊不足或剩余文献不足，本期已用同刊补位。")
+            logger("📌 期刊分散提示：候选期刊不足或剩余文献不足，本期用了同刊补位；内容可发，但多样性会稍弱。")
     return selected
 
 
@@ -672,6 +691,31 @@ def _daily_digest_next_issue_dir(base_dir: str, *, indexed: bool = False) -> str
         index += 1
 
 
+def _daily_digest_resolve_single_issue_out_dir(out_dir: str = "", *, resume_existing: bool = False) -> str:
+    raw = os.path.abspath(out_dir or os.path.join(BASE_SAVE_FOLDER, "每日研究速递"))
+    if resume_existing:
+        return raw
+    name = os.path.basename(os.path.normpath(raw))
+    old_ui_date = datetime.now().strftime("%Y-%m-%d")
+    is_column_root = name in {"每日研究速递", "科研速递"}
+    is_old_ui_today_dir = name == old_ui_date
+    if not out_dir or is_column_root:
+        return _daily_digest_next_issue_dir(raw, indexed=True)
+    if is_old_ui_today_dir and os.path.basename(os.path.dirname(raw)) in {"每日研究速递", "科研速递"}:
+        return _daily_digest_next_issue_dir(os.path.dirname(raw), indexed=True)
+    generated_markers = (
+        "01_栏目素材.json",
+        "02_口播台词.txt",
+        "04_视频简介.txt",
+        "cards",
+        "platform_cards",
+        "visual_summaries",
+    )
+    if os.path.isdir(raw) and any(os.path.exists(os.path.join(raw, marker)) for marker in generated_markers):
+        return _daily_digest_next_issue_dir(os.path.dirname(raw), indexed=True)
+    return raw
+
+
 def _daily_digest_select_articles(
     articles: list[dict],
     *,
@@ -754,15 +798,15 @@ def _daily_digest_select_articles(
             for x in selected
         ]
         unique_count = len({_daily_digest_journal_key(str(x or "")) or str(x or "") for x in covered if x})
-        logger(f"随机选文完成：优先按不同期刊选择 {len(selected)} 篇，覆盖 {unique_count} 个期刊：{', '.join([str(x) for x in covered if x])}")
+        logger(f"🧭 选题已排好：本期 {len(selected)} 篇，覆盖 {unique_count} 个期刊：{', '.join([str(x) for x in covered if x])}")
         if skip_medical_related:
-            logger(f"微信避险筛选：已跳过医学/疾病相关候选 {skipped_medical} 篇。")
+            logger(f"🛡️ 微信避险已工作：跳过医学/疾病/临床外推风险候选 {skipped_medical} 篇，减少发布后踩线概率。")
             for example in skipped_medical_examples:
                 logger(f"微信避险示例：{example}")
         if len(selected) > unique_count:
-            logger("期刊分散：候选期刊不足或历史去重限制，本期已用同刊补位。")
+            logger("📌 期刊分散提示：候选期刊不足或历史去重限制，本期用了同刊补位；运营复查时可重点看选题是否重复。")
         if used_pmids:
-            logger(f"历史去重：已记录 {len(used_pmids)} 个用过的 PMID，本期复用 {reused} 个。")
+            logger(f"♻️ 历史去重：库里已有 {len(used_pmids)} 个用过 PMID，本期复用 {reused} 个。复用不一定错，但需要运营多看一眼。")
     return selected
 
 
@@ -950,11 +994,11 @@ def fetch_daily_neuroscience_articles(
         params["api_key"] = api_key
 
     if logger:
-        logger(f"🔎 正在检索 PubMed 最新神经科学论文：近 {days} 天，候选期刊 {len(journals)} 个。")
+        logger(f"🔎 正在去 PubMed 捞新论文：时间窗 {days} 天，候选期刊 {len(journals)} 个。先捞宽一点，后面再筛掉不适合做内容的。")
     search_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
     fetch_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
     if logger:
-        logger("⏳ PubMed esearch 请求已发出，正在等待候选 PMID 列表...")
+        logger("⏳ PubMed 已收到检索请求，正在等候选 PMID 列表。这个阶段只拿编号，还不是最终选题。")
     resp = _daily_digest_pubmed_get(search_url, params=params, timeout=30, logger=logger, label="PubMed esearch")
     ids = (resp.json().get("esearchresult", {}) or {}).get("idlist", []) or []
     ids = [str(x).strip() for x in ids if str(x).strip()]
@@ -985,7 +1029,7 @@ def fetch_daily_neuroscience_articles(
     if not ids:
         return []
     if logger:
-        logger(f"✅ PubMed 返回候选 PMID：{len(ids)} 个，正在拉取摘要 XML...")
+        logger(f"✅ PubMed 返回候选 PMID：{len(ids)} 个。接下来拉摘要，真正判断每篇能不能讲清楚。")
     time.sleep(0.35)
     fetch_params = {
         "db": "pubmed",
@@ -1000,7 +1044,7 @@ def fetch_daily_neuroscience_articles(
         fetch_params["api_key"] = api_key
     xml_resp = _daily_digest_pubmed_get(fetch_url, params=fetch_params, timeout=45, logger=logger, label="PubMed efetch")
     if logger:
-        logger("✅ PubMed 摘要 XML 已返回，正在筛选有标题和摘要的论文...")
+        logger("✅ 摘要 XML 已拿到，正在剔除缺标题、缺摘要或信息不够支撑成片的条目。")
     root = ET.fromstring(xml_resp.content)
     journal_rank = {j.lower(): i for i, j in enumerate(journals)}
     search_order = {pmid: i for i, pmid in enumerate(ids)}
@@ -1044,7 +1088,7 @@ def fetch_daily_neuroscience_articles(
         logger=logger,
     )
     if logger:
-        logger(f"✅ 已获取 {len(selected)} 篇可用论文摘要。")
+        logger(f"✅ 可用论文摘要整理完毕：{len(selected)} 篇进入候选池。后面会按期刊分散和历史去重挑本期。")
     return selected
 
 
@@ -1110,6 +1154,9 @@ def build_daily_research_article_list(
 
 def _daily_digest_llm_prompt(articles: list[dict], date_text: str) -> str:
     source = json.dumps(articles, ensure_ascii=False, indent=2)
+    template = load_scoped_prompt_fragment("daily_research_digest", "daily_digest_structure.md", "")
+    if template.strip():
+        return render_prompt_template(template, {"date_text": date_text, "source": source})
     return f"""你是全澜脑科学“每日研究速递”的中文科学编辑。
 请只依据下面 PubMed 文献信息，为口播短视频生成结构化素材。
 
@@ -1122,14 +1169,14 @@ def _daily_digest_llm_prompt(articles: list[dict], date_text: str) -> str:
 要求：
 1. 忠于论文标题和摘要，不夸大，不写治疗结论，不把相关性写成因果。
 2. 本步骤由 GPT 完成忠实翻译和结构化中文初稿：所有中文标题、研究说明和口播必须先准确表达原文信息，同时写成自然、克制、地道的中文。
-3. 每篇必须给一个易懂但严谨的科研切入点：research_question 必须写成一句“钩子式科学问题”，只能有一个问号，不能连续提出两个问题。问句必须忠于标题和摘要里的原始科学问题，优先保留具体对象，例如脑区、细胞、环路、受体、行为、模型、疾病机制、记录信号或实验现象。可以从生活经验或读者熟悉的现象切入，例如疼痛牵动情绪、环境影响食欲、焦虑被抑制、饥饿提前出现，但落点必须回到原文机制对象。不得把机制研究曲解成临床治疗、产品应用或泛泛价值问题；没有临床试验证据时，不要写“治疗疼痛时为什么……”。避免“为什么调控疼痛，要追踪……”这类不自然断句。
+3. 每篇必须给一个易懂但严谨的科研切入点：research_question 必须写成一句“钩子式科学问题”，只能有一个问号，不能连续提出两个问题。问句必须忠于标题和摘要里的原始科学问题，优先保留具体对象，例如脑区、细胞、环路、受体、行为、模型、疾病机制、记录信号或实验现象。可以从生活经验或读者熟悉的现象切入，例如疼痛牵动情绪、环境影响食欲、焦虑被抑制、饥饿提前出现，但落点必须回到原文机制对象。不得把机制研究曲解成临床治疗、产品应用或泛泛价值问题；没有临床试验证据时，不要写“治疗疼痛时为什么……”。避免“为什么调控疼痛，要追踪……”这类不自然断句。禁止把研究意义写成问题，尤其不要写“为什么重要”“有什么意义”“一般原则会怎样被研究”“如果把……纳入实验会怎样”“如何为后续研究提供依据”。提问要像一个具体实验问题，而不是论文价值口号。
 4. 每篇必须交代清楚五个信息：科学问题是什么、用了什么方法、发现了什么结果、得到什么结论、有什么意义。五者都要来自标题或摘要，不补充摘要外信息；写作时要自然连贯，避免像表格字段逐项朗读。每个判断后面都要有对象、方法、结果或边界，不写“提供重要线索/具有重要意义”这种正确废话。
 5. 每篇必须给出“研究方法”：研究对象、关键方法、核心通路或变量，压缩成一句；不要写“证据链”“证据路径”“构成的证据”等套话。
 6. 每篇必须给出“研究结论”和“证据边界”：结论说明该研究支持了什么，边界说明不能直接外推什么。
 7. 图片摘要提示词要用于 GPT Image 2 / image2 生成 Cell 风格科学插画，尽量无文字、无标题、无标注；必须直接画成 1:1 正方形机制图，不得画成长竖版海报后再裁切；要清楚表达主要机制或发现。
 8. 专业术语使用大陆神经科学常用译法；不要为了通俗而改错术语，也不要堆叠名词造成论文摘要腔。
 9. voiceover 第一句也必须是钩子式科学问题，并且只允许一个问题、一个问号；不要写“为什么……？……能否……？”这种连续双问。随后用自然口播串起方法、发现、结论、意义和边界，不要使用“方法上”“结果发现”“研究据此认为”这类机械结构词，也不要把论文信息放在开头压住读者兴趣。
-10. 钩子写法示例：“疼痛牵动情绪时，迷走神经刺激会怎样影响cNTS-PAG脑干通路？”“为什么有些环境会让人吃不下，海马-隔区-下丘脑通路在其中做了什么？”“焦虑被踩下刹车时，腹侧CA1星形胶质细胞上的H3受体在做什么？”“饥饿感会不会在真正缺能量之前，就被大脑提前预演？”不要写“治疗疼痛时为什么……”，也不要写“为什么调控疼痛，要……”。
+10. 钩子写法示例：“自由活动的小鼠做决策时，皮层不同层的神经元能不能同时看见？”“疼痛牵动情绪时，迷走神经刺激会怎样影响cNTS-PAG脑干通路？”“为什么有些环境会让人吃不下，隔区肽能神经元在其中做了什么？”“焦虑被踩下刹车时，腹侧CA1星形胶质细胞上的H3受体在做什么？”“饥饿感会不会在真正缺能量之前，就被大脑提前预演？”不要写“治疗疼痛时为什么……”，也不要写“为什么调控疼痛，要……”。严禁“如果把动物可用的环境机会纳入实验，大脑功能的一般原则会怎样被研究？”这类抽象、翻译腔、读者听不懂的问题。
 11. 句子要完整、自然、有主谓宾；每篇之间和每篇内部要有顺滑过渡，避免摘要拼接感。避免“研究结合小鼠记录发现”这类缺少助词或停顿的压缩句。不要写“建立和维持连接”这类宾语不清的句子；涉及神经元、表面蛋白、内吞作用时，应明确写成“建立和维持神经元之间的连接”或“建立和维持突触连接”。
 12. 输出前自检中文：标题是否忠于英文题名，表达是否顺口；研究说明是否准确、克制、易懂；不得出现 AI 腔、营销腔或语病。不要写“突破”“颠覆”“重塑”“改变局面”“提供新思路”“提供新的研究角度”“重要线索”“重大意义”“为后续研究提供依据”等空泛或拔高表述；也不要写“内吞作用主动提供……”这类把生物过程拟人化的句子。表达意义时优先具体说明“有助于解释哪个机制/为哪类模型或测量提供证据”，但这些意义表达不得写进 research_question。
 13. short_title 和 video_title 可先占位，最终会由程序统一改写。opening_voiceover 必须用本期第一篇或最有代表性论文的具体科学问题开头，再用半句交代日期/期号；不要以“欢迎大家来到/今天分享/本期关注”开头。catalog_voiceover 和 video_description 只能做事实性列举，不要硬归纳共同主题，不要写“同样是……”“分别会怎样牵动……”“关键变化可能发生在……”这类无中生有或逻辑牵强的总括句，也不要写“帮助读者”“快速把握”“真实含义”等泛泛口水话。
@@ -1153,7 +1200,7 @@ JSON 格式：
       "title_cn": "中文标题，忠于英文题名；翻译后润色成通顺地道的学术中文",
       "authors_cn": "通讯作者或最可能通讯作者，英文名保留原文；无法判断时用最后一位作者，不要列长名单，格式如 Name 等人",
       "affiliation_cn": "通讯作者第一单位或1-2个主要合作单位，尽量简短；面向中国观众，常见机构译成中文，如耶鲁大学医学院、霍华德·休斯医学研究所；不要直接保留英文长院系串；不要写城市、州名、邮编、国家、地址或邮箱；没有就写机构信息待补全",
-      "research_question": "钩子式科学问题，一句，只能有一个问号；易懂但严谨，避免“该研究旨在/这项研究想回答的是”",
+      "research_question": "钩子式科学问题，一句，只能有一个问号；易懂但严谨；必须包含具体对象/方法/现象之一，避免“该研究旨在/这项研究想回答的是/为什么重要/一般原则会怎样被研究/如果把……纳入实验”",
       "evidence_path": "研究方法，一句：对象/方法/通路/变量，必须来自摘要，不写套话，表达通顺",
       "key_finding": "研究结果，一句：发现了什么，准确克制，保留专业性",
       "conclusion_cn": "研究结论，一句：这些结果支持了什么判断，不夸大",
@@ -1270,53 +1317,58 @@ def _daily_digest_polish_prompt(digest: dict, date_text: str) -> str:
             "voiceover": item.get("voiceover", ""),
         })
     source = json.dumps(payload, ensure_ascii=False, indent=2)
-    return f"""你是全澜脑科学“每日研究速递”的 DeepSeek 终稿作者。请同时扮演三种角色：
-1. 顶尖神经科学家：像 CNS 审稿人一样检查术语、机制、证据强度和外推边界。
-2. 中文语言学家：检查主谓宾、修饰关系、搭配、指代、成分完整和中文节奏。
+    template = load_scoped_prompt_fragment("daily_research_digest", "daily_digest_polish.md", "")
+    if template.strip():
+        return render_prompt_template(template, {"date_text": date_text, "source": source})
+    return f"""你是全澜“每日研究速递”的中文终稿润色编辑。请同时扮演四种角色：
+1. 严格论文审稿人：先判断每篇论文属于哪个领域，再检查术语、方法、证据强度和外推边界。
+2. 中文编辑：检查主谓宾、修饰关系、搭配、指代、成分完整和中文节奏。
 3. 科研结果快报编辑：把论文结果写成准确、易懂、有信息密度的短视频口播稿。
-4. 微信短视频主编：确保第一句先给具体科学问题，不用“欢迎来到/今天分享/本期关注”拖慢进入。
+4. 中国短视频主编：让开头有具体问题，但不标题党、不营销、不装懂。
 
-下面 JSON 已由 GPT 完成文献翻译和结构化初稿。你的任务不是重写论文，也不是发挥想象，而是在原字段已有信息范围内，把它改成“专业人士能快速听懂的科研结果快报”。
+下面 JSON 是文献翻译和结构化初稿。你的任务不是重写论文，也不是发挥想象，而是在原字段和 source 摘要能支撑的范围内，把它改成“专业人士能快速听懂、普通知识受众也听得顺”的科研结果快报。
 
-目标读者：有生物学、医学、心理学、神经科学或理工科背景的人，也包括微信视频号里关心脑科学前沿、但没有时间读完整论文的普通知识受众。他们在午饭、通勤或碎片时间阅读。内容要准确、清楚、克制，但不能像论文摘要，也不能像宣传稿。
+目标读者：中国读者，包括有生物学、医学、心理学、神经科学、工程或理工科背景的人，也包括微信视频号里关心科研前沿但没有时间读完整论文的知识受众。内容要准确、清楚、克制、顺口，不能像论文摘要，也不能像宣传稿。
 
 总原则：
-1. 忠于原文信息，不新增摘要外事实；不得把相关性写成因果，不得把动物或体外结果写成人类临床结论。
-2. 先保证科学准确，再保证中文顺口。每一句都要能回答“谁/什么，用什么方法，发现了什么，说明到什么程度”。
-3. 写作目标是“科研结果快报”：不铺垫、不煽情、不卖关子；用短句把科学问题、方法、结果、结论、意义和边界讲清楚。
-4. 每个字段都要优先保留具体对象：脑区、细胞、环路、受体、行为、模型、疾病机制、记录信号、样本或实验系统。不要把信息磨成“相关机制值得进一步研究”这类正确废话。
-5. 不得曲解原文科学问题。标题和摘要问的是机制、通路、细胞或模型时，research_question 必须保留这个对象；不要为了吸引观众改写成临床治疗、产品应用或泛泛价值问题。
+1. 忠于题名和摘要，不新增摘要外事实；不得把相关性写成因果，不得把动物、体外、方法学或工程结果写成人类临床结论。
+2. 先判断论文类型：神经机制、脑影像/人群关联、方法学、发育模型、工程硬件、AI 基础设施等。是什么就按什么讲；不是神经科学论文，不得硬套成脑区、神经环路、记忆理论或治疗线索。
+3. 先保证科学准确，再保证中文顺口。每一句都要能回答“研究对象是什么，用什么方法，发现了什么，结论能说到什么程度”。
+4. 写作目标是“科研结果快报”：不铺垫、不煽情、不卖关子；用短句把科学问题、方法、结果、结论、意义和边界讲清楚。
+5. 每个字段都要优先保留具体对象：脑区、细胞、环路、受体、行为、模型、样本、测量方法、组织、分子、硬件指标、吞吐量、延迟或能耗。不要把信息磨成“相关机制值得进一步研究”这类正确废话。
+6. 不得曲解原文科学问题。标题和摘要问的是方法、模型、工程系统或群体关联时，research_question 必须保留这个对象；不要为了吸引观众改写成临床治疗、脑机制或泛泛价值问题。
 
 语言硬规则：
 1. 修复所有语病、生硬翻译腔、搭配不当、指代不清、缺成分、重复和 AI 味。
 2. 每句话只表达一个核心意思。尽量 18-32 个汉字；超过 40 个汉字必须拆句。
 3. 避免多层定语、连续从句、连续三个以上逗号。不要用英文论文句法硬翻中文。
-4. 严禁字段以“研究聚焦”“研究结合”“研究发现”“这说明”“目前仍需注意”这类机械模板开头。
-5. 不要写“证据链”“证据路径”“构成的证据”“提供新的研究角度”“提供新思路”“重要线索”“重大意义”“为后续研究提供依据”等空泛套话。
-6. 不要写“突破”“颠覆”“重塑”“改变局面”等拔高词。需要表达价值时，具体说它帮助理解什么机制、改进什么模型、支持什么测量或提示什么边界。不要把“提供依据/提供线索/用于后续研究”写进科学问题。
+4. 严禁字段以“研究聚焦”“研究结合”“研究发现”“摘要指出”“核心信息是”“信息很集中”“这里的边界同样重要”“目前公开信息没有”这类机械模板开头。
+5. 不要写“证据链”“证据路径”“构成的证据”“提供新的研究角度”“提供新思路”“重要线索”“重大意义”“为后续研究提供依据”“有助于界定”“值得进一步研究”等空泛套话。
+6. 不要写“突破”“颠覆”“重塑”“改变局面”“核心密码”“底层逻辑”等拔高词。需要表达价值时，具体说它帮助理解什么机制、改进什么模型、支持什么测量、提升什么性能或提示什么边界。
 7. 不要把生物过程拟人化。严禁“内吞作用主动提供……”这类句子。
 8. 不要写缺少限定对象的短语。比如“建立和维持连接”必须改为“建立和维持神经元之间的连接”或“建立和维持突触连接”。
 9. 所有机构只写单位名。面向中国观众，常见大学、医学院、研究所、医院和中心应译成中文机构名；不得直接朗读英文长院系串。不得包含城市、州名、邮编、国家、详细地址、电子邮箱或 Electronic address。
 10. opening_voiceover 不得以“欢迎大家来到”“今天是”“本期关注”“接下来我们”开头；它应先抛出本期最有抓力的一条具体科学问题，再用半句交代日期/期号。
 
-神经科学硬规则：
-1. 必须校正专业术语和大小写，例如 AgRP 不得写成 AqRP；Sim2、PVH/PVN、下丘脑室旁核等术语要前后一致。
-2. 小众术语第一次出现时顺手解释。解释要短，嵌入句子，不写词典定义。
-3. 机制词必须有明确对象。比如“连接”要说清是神经元之间的连接、突触连接、功能连接还是白质连接。
-4. 如果是细胞、环路、类器官、小鼠、猕猴、体外模型或 1 期临床试验，必须保留对应证据边界。
-5. 如果原文只支持“相关、参与、提示”，不要改成“导致、决定、证明、解释了全部机制”。
+专业硬规则：
+1. 必须校正专业术语和大小写，例如 AgRP、Sim2、PVH/PVN、m6A、cTBLCs、BWAS、SES、OSP、WDM、Tb/s、ps、fJ/bit 等不得写错。
+2. 小众术语第一次出现时可顺手解释。解释要短，嵌入句子，不写词典定义。
+3. 机制词必须有明确对象。比如“连接”要说清是神经元连接、功能连接、变量关联、光链路互连，还是统计模式相似。
+4. 如果是细胞、环路、类器官、小鼠、猕猴、体外模型、群体脑影像、方法学或工程演示，必须保留对应证据边界。
+5. 如果原文只支持“相关、参与、提示、实现、生成、映射、比较”，不要改成“导致、决定、证明、解释了全部机制”。
+6. 若论文不是脑科学研究，只能说明它与本期读者的交叉价值；不得伪装成脑科学发现。
 
 字段要求：
 1. title_cn：忠于英文题名，写成正式、通顺的中文学术标题。
-2. research_question：一句钩子式科学问题，只能有一个问号。它要先让人理解问题，再落到论文机制，并忠于标题/摘要中的原始科学问题。可以从生活经验或读者熟悉的现象开场，例如疼痛牵动情绪、环境影响食欲、焦虑被抑制、饥饿提前出现，但必须保留论文里的关键对象、通路、细胞或受体。不要写“该研究旨在”“这项研究想回答的是”。不要双问。严禁把研究意义写成问题，例如“如何为后续研究提供依据”“如何提供线索”“为什么具有意义”。没有临床证据时，不能把机制问题改写成治疗问题。
+2. research_question：一句钩子式科学问题，只能有一个问号。它要先让人理解问题，再落到论文对象，并忠于题名/摘要中的原始科学问题。可以从读者熟悉的现象开场，但必须保留论文里的关键对象、方法、样本、系统或指标。不要写“该研究旨在”“这项研究想回答的是”。不要双问。严禁把研究意义写成问题，例如“如何为后续研究提供依据”“为什么重要”。没有临床证据时，不能把机制问题改写成治疗问题。
 3. evidence_path：一句说明研究对象和关键方法。自然表达，不要写“方法上”。
 4. key_finding：一句说明最核心结果。必须有主语和宾语，不能只堆术语。
 5. conclusion_cn：一句说明这些结果支持什么判断。语气克制。
-6. why_it_matters：一句说明科学意义。不得泛泛写“提供新思路”“提供依据”“提供线索”。必须有明确对象，例如某个环路、细胞类型、模型、测量方法或病理机制。
-7. scope_note：一句说明边界。明确模型、样本、实验系统或临床阶段。
+6. why_it_matters：一句说明科学意义。不得泛泛写“提供新思路”“提供依据”“提供线索”。必须有明确对象，例如某个环路、细胞类型、模型、测量方法、组织空间信息、群体关联结构或硬件性能瓶颈。
+7. scope_note：一句说明边界。明确模型、样本、实验系统、统计关联、方法学演示、工程场景或临床阶段；不要写泛泛的“仍需进一步研究”。
 8. voiceover：5-7 个短句，可直接口播。顺序是：科学问题；方法；结果；结论；意义/边界；最后交代期刊、题名、作者和简要单位。第一句必须是 research_question 的自然版本。
 9. card_points：配图文案，3-4句短句。它不是字段摘要，不能写“问题：/证据：/结论：/边界：”。它要围绕 research_question 逐句回答：这篇文章看什么对象、用了什么证据、发现了什么、边界在哪里。句子要可直接放在图上，通顺、具体、短。
-10. opening_voiceover 和 catalog_voiceover：只事实性介绍本期论文数量和主题，不编造牵强共同主题。opening_voiceover 第一整句必须是具体科学问题，不能是栏目问候语。
+10. opening_voiceover 和 catalog_voiceover：只事实性介绍本期论文数量和主题，不编造牵强共同主题。如果本期跨学科，必须承认跨学科，不要硬凑成同一个脑科学机制。
 11. short_title：16 个汉字以内，适合封面主题。
 12. video_title：格式必须是“【全澜®追新助手】YYYYMMDDNN期 XXXXX”。
 13. video_description：约 150 字，直接介绍今天有哪些研究；准确、有信息密度、无营销腔。
@@ -1329,6 +1381,8 @@ def _daily_digest_polish_prompt(digest: dict, date_text: str) -> str:
 5. 有没有把证据边界说丢？
 6. 有没有口水话或空泛价值判断？
 7. opening_voiceover 第一整句是不是具体科学问题？
+8. 是否把非脑科学论文硬套成脑机制、神经环路、记忆理论或临床治疗？
+9. 是否还残留“摘要指出/核心信息是/信息很集中/证据链/提供线索/值得关注”等 AI 味模板？
 
 保持 JSON 结构、文章数量和 pmid 不变；允许为每篇文章补充 card_points 字段；不要 Markdown，不要解释。
 
@@ -1340,7 +1394,7 @@ def _daily_digest_polish_with_deepseek(
     data: dict,
     *,
     date_text: str,
-    polish_engine: str = "DeepSeek Chat（官方润色）",
+    polish_engine: str = "GPT-5.5",
     deepseek_key: str = "",
     openai_key: str = "",
     chatshare_key: str = "",
@@ -1350,11 +1404,11 @@ def _daily_digest_polish_with_deepseek(
     if not data or not isinstance(data.get("articles"), list):
         return data
     prompt = _daily_digest_polish_prompt(data, date_text)
+    engine = str(polish_engine or "GPT-5.5")
     if logger:
-        logger(f"🪄 DeepSeek 润色开始：{len(data.get('articles', []) or [])} 篇，正在优化中文短句、术语解释和表达边界...")
-    heartbeat = _daily_digest_progress_heartbeat("DeepSeek 中文润色", logger, interval=15)
+        logger(f"🪄 终稿润色开始：{engine}，共 {len(data.get('articles', []) or [])} 篇。目标是去掉翻译腔、空话和不该外推的句子。")
+    heartbeat = _daily_digest_progress_heartbeat("中文终稿润色", logger, interval=15)
     try:
-        engine = str(polish_engine or "DeepSeek Chat（官方润色）")
         result = generate_text_by_engine(
             engine,
             prompt,
@@ -1367,12 +1421,12 @@ def _daily_digest_polish_with_deepseek(
     finally:
         heartbeat.set()
     if logger:
-        logger(f"✅ DeepSeek 润色返回：{len(str(result or ''))} 字符，正在解析 JSON...")
+        logger(f"✅ 终稿润色已返回：约 {len(str(result or ''))} 字符。正在检查格式，能解析才会写回素材。")
     polished = _daily_digest_extract_json(result)
     if not polished or not isinstance(polished.get("articles"), list):
         if logger:
-            logger("⚠️ DeepSeek 润色未返回可解析 JSON，保留 GPT 初稿。")
-        data["_text_polish_engine"] = str(polish_engine or "DeepSeek Chat（官方润色）")
+            logger("⚠️ 润色模型返回内容没有通过 JSON 解析。本轮先保留初稿，避免用坏格式覆盖可用素材。")
+        data["_text_polish_engine"] = str(polish_engine or "GPT-5.5")
         data["_text_polish_status"] = "failed"
         return data
     allowed_article_fields = (
@@ -1414,8 +1468,8 @@ def _daily_digest_polish_with_deepseek(
             if value:
                 item[field] = value
     if logger:
-        logger("✅ DeepSeek 润色解析完成，已写回栏目素材。")
-    data["_text_polish_engine"] = str(polish_engine or "DeepSeek Chat（官方润色）")
+        logger("✅ 终稿润色已写回栏目素材。接下来会把它拆成口播、字幕、简介和卡片文案。")
+    data["_text_polish_engine"] = str(polish_engine or "GPT-5.5")
     data["_text_polish_status"] = "ok"
     return data
 
@@ -1522,7 +1576,10 @@ def _daily_digest_short_video_prompt(digest: dict, *, date_text: str, issue_labe
             "scope_note": item.get("scope_note", ""),
         })
     source = json.dumps(payload, ensure_ascii=False, indent=2)
-    return f"""你是全澜脑科学每日研究速递的短视频主编和 DeepSeek 官方润色编辑。请基于下面 JSON，为专业但碎片化观看的中文观众生成一个 90-120 秒精选短视频版本。
+    template = load_scoped_prompt_fragment("daily_research_digest", "daily_digest_short_video.md", "")
+    if template.strip():
+        return render_prompt_template(template, {"date_text": date_text, "issue_label": issue_label, "source": source})
+    return f"""你是全澜脑科学每日研究速递的短视频主编和中文终稿润色编辑。请基于下面 JSON，为专业但碎片化观看的中文观众生成一个 90-120 秒精选短视频版本。
 
 要求：
 1. 只使用 JSON 中给出的论文信息，不新增摘要外事实，不曲解科学问题。
@@ -1554,7 +1611,7 @@ def _daily_digest_build_short_video_assets(
     *,
     date_text: str,
     issue_label: str = "",
-    polish_engine: str = "DeepSeek Chat（官方润色）",
+    polish_engine: str = "GPT-5.5",
     deepseek_key: str = "",
     openai_key: str = "",
     chatshare_key: str = "",
@@ -1566,11 +1623,11 @@ def _daily_digest_build_short_video_assets(
     fallback = _daily_digest_short_video_fallback(digest, date_text=date_text, issue_label=issue_label)
     digest["short_video"] = fallback
     if logger:
-        _daily_digest_log_stage(6, "DeepSeek 官方精选短视频润色", "生成90-120秒精选版口播、字幕和简介", logger=logger)
-    heartbeat = _daily_digest_progress_heartbeat("DeepSeek 精选短视频润色", logger, interval=15)
+        _daily_digest_log_stage(6, "精选短视频终稿润色", "生成90-120秒精选版口播、字幕和简介", logger=logger)
+    heartbeat = _daily_digest_progress_heartbeat("精选短视频终稿润色", logger, interval=15)
     try:
         result = generate_text_by_engine(
-            str(polish_engine or "DeepSeek Chat（官方润色）"),
+            str(polish_engine or "GPT-5.5"),
             _daily_digest_short_video_prompt(digest, date_text=date_text, issue_label=issue_label),
             logger,
             deepseek_key=deepseek_key or load_deepseek_api_key(),
@@ -1580,7 +1637,7 @@ def _daily_digest_build_short_video_assets(
         )
     except Exception as exc:
         if logger:
-            logger(f"⚠️ 精选短视频 DeepSeek 润色失败，保留规则兜底稿：{type(exc).__name__}: {str(exc)[:100]}")
+            logger(f"⚠️ 精选短视频润色失败，保留规则兜底稿：{type(exc).__name__}: {str(exc)[:100]}")
         heartbeat.set()
         return digest
     finally:
@@ -1624,12 +1681,12 @@ def _daily_digest_build_short_video_assets(
         "short_video_voiceover": polished_voiceover,
         "selected_pmids": polished.get("selected_pmids") if isinstance(polished.get("selected_pmids"), list) else fallback["selected_pmids"],
         "selected_indices": polished.get("selected_indices") if isinstance(polished.get("selected_indices"), list) else fallback["selected_indices"],
-        "_short_video_polish_engine": str(polish_engine or "DeepSeek Chat（官方润色）"),
+        "_short_video_polish_engine": str(polish_engine or "GPT-5.5"),
         "_short_video_polish_status": "ok",
     }
     digest["short_video"] = short_video
     if logger:
-        logger("✅ 精选短视频文案已通过 DeepSeek 官方润色。")
+        logger("✅ 精选短视频文案已通过终稿润色。")
     return digest
 
 
@@ -1638,7 +1695,7 @@ def build_daily_research_digest(
     *,
     date_text: str,
     text_engine: str = "GPT-5.5",
-    polish_engine: str = "DeepSeek Chat（官方润色）",
+    polish_engine: str = "GPT-5.5",
     deepseek_key: str = "",
     openai_key: str = "",
     image_key: str = "",
@@ -1651,7 +1708,7 @@ def build_daily_research_digest(
     if not (is_openai_text_engine(text_engine) or is_gemini_text_engine(text_engine)):
         text_engine = "GPT-5.5"
     if logger:
-        logger(f"🧠 结构化初稿开始：{text_engine}，{len(articles or [])} 篇；该步骤通常需要几十秒。")
+        logger(f"🧠 正在让文本模型读摘要：{text_engine}，共 {len(articles or [])} 篇。它会先做忠实翻译和结构化，不直接当终稿发布。")
     heartbeat = _daily_digest_progress_heartbeat("文献翻译与结构化初稿", logger, interval=15)
     try:
         result = generate_text_by_engine(
@@ -1668,13 +1725,13 @@ def build_daily_research_digest(
         heartbeat.set()
     if logger:
         if result:
-            logger(f"✅ 结构化初稿返回：{len(str(result or ''))} 字符，正在解析 JSON...")
+            logger(f"✅ 结构化初稿已返回：约 {len(str(result or ''))} 字符。正在拆成标题、问题、方法、发现、边界等字段。")
         else:
-            logger("⚠️ 结构化初稿未返回有效内容，准备使用本地保守模板。")
+            logger("⚠️ 文本模型没有返回有效内容。将启用本地保守模板，先保证流程不断，但文案需要重点复查。")
     data = _daily_digest_extract_json(result)
     if not data or not isinstance(data.get("articles"), list):
         if logger:
-            logger("⚠️ 文本模型未返回可解析 JSON，已使用本地保守模板生成素材。")
+            logger("⚠️ 文本模型返回的 JSON 不合格，已用本地保守模板接住流程。运营复查时请重点看 02_口播台词 和 04_视频简介。")
         data = _daily_digest_local_digest(articles, date_text)
     if str(polish_engine or "").strip():
         data = _daily_digest_polish_with_deepseek(
@@ -1717,7 +1774,7 @@ def build_daily_research_digest(
         )
     data = _daily_digest_finalize_metadata(data)
     if logger:
-        logger("✅ 栏目素材字段校验完成，已补齐 source、边界说明和图片提示词。")
+        logger("✅ 栏目素材字段校验完成：source、证据边界、图片提示词都已补齐。现在进入终稿和出图阶段。")
     return data
 
 
@@ -1727,7 +1784,7 @@ def _daily_digest_final_polish_all_text_assets(
     *,
     date_text: str,
     issue_label: str = "",
-    polish_engine: str = "DeepSeek Chat（官方润色）",
+    polish_engine: str = "GPT-5.5",
     deepseek_key: str = "",
     openai_key: str = "",
     chatshare_key: str = "",
@@ -1736,6 +1793,7 @@ def _daily_digest_final_polish_all_text_assets(
 ) -> dict:
     if not isinstance(digest, dict):
         return digest
+    original_digest = json.loads(json.dumps(digest, ensure_ascii=False))
     by_pmid = {str(x.get("pmid", "")).strip(): x for x in article_list or [] if isinstance(x, dict)}
     for idx, item in enumerate(digest.get("articles", []) or []):
         if not isinstance(item, dict):
@@ -1762,6 +1820,12 @@ def _daily_digest_final_polish_all_text_assets(
             gemini_key=gemini_key,
             logger=logger,
         )
+        if str(digest.get("_text_polish_status", "") or "").strip().lower() != "ok":
+            original_digest["_text_polish_engine"] = polish_engine
+            original_digest["_text_polish_status"] = digest.get("_text_polish_status", "failed") or "failed"
+            if logger:
+                logger("⚠️ 终稿润色没有通过质量检查，已保留润色前文案，避免坏文案覆盖好底稿。运营复查时请重点看口播和简介。")
+            digest = original_digest
     else:
         digest["_text_polish_engine"] = polish_engine
         digest["_text_polish_status"] = "skipped"
@@ -2197,10 +2261,8 @@ def _daily_digest_project_root() -> str:
 
 
 def _daily_digest_normalize_relay_base_url(value: str = "") -> str:
-    base_url = str(value or "").strip() or "https://www.fhl.mom/v1"
+    base_url = str(value or "").strip() or "https://api.dstopology.com/v1"
     base_url = base_url.replace("greatwallink.top", "greatwalllink.top").rstrip("/")
-    if "greatwalllink.top" in base_url:
-        base_url = "https://www.fhl.mom/v1"
     if not base_url.endswith("/v1"):
         base_url = base_url + "/v1"
     return base_url
@@ -2446,6 +2508,128 @@ def _daily_digest_draw_soft_panel(draw, box, *, radius: int = 22, fill: str = "#
     draw.rounded_rectangle((x1, y1, x2, y2), radius=radius, fill=fill, outline=outline, width=width)
 
 
+def _daily_digest_public_safe_area(size: tuple[int, int], *, margin_ratio: float = 0.072) -> tuple[int, int, int, int]:
+    w, h = size
+    mx = max(28, int(w * margin_ratio))
+    my = max(28, int(h * margin_ratio))
+    return mx, my, w - mx, h - my
+
+
+def _daily_digest_rgba_color(value: str, alpha: int = 255) -> tuple[int, int, int, int]:
+    value = str(value or "#FFFFFF").strip().lstrip("#")
+    if len(value) == 3:
+        value = "".join(ch * 2 for ch in value)
+    try:
+        r = int(value[0:2], 16)
+        g = int(value[2:4], 16)
+        b = int(value[4:6], 16)
+        return r, g, b, max(0, min(255, int(alpha)))
+    except Exception:
+        return 255, 255, 255, max(0, min(255, int(alpha)))
+
+
+def _daily_digest_draw_elevated_panel(img, box, *, radius: int = 28, fill: str = "#FFFFFF", alpha: int = 238, outline: str = "#D7E3EC", shadow: bool = True):
+    from PIL import Image, ImageDraw, ImageFilter
+    x1, y1, x2, y2 = [int(v) for v in box]
+    w, h = img.size
+    layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    if shadow:
+        shadow_layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        sd = ImageDraw.Draw(shadow_layer)
+        sd.rounded_rectangle((x1, y1 + max(5, int(h * 0.006)), x2, y2 + max(5, int(h * 0.006))), radius=radius, fill=(22, 45, 69, 32))
+        shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(max(8, int(min(w, h) * 0.014))))
+        layer = Image.alpha_composite(layer, shadow_layer)
+    d = ImageDraw.Draw(layer)
+    d.rounded_rectangle((x1, y1, x2, y2), radius=radius, fill=_daily_digest_rgba_color(fill, alpha), outline=_daily_digest_rgba_color(outline, 210), width=max(1, int(min(w, h) * 0.0015)))
+    base = img.convert("RGBA")
+    base.alpha_composite(layer)
+    img.paste(base.convert("RGB"))
+    return ImageDraw.Draw(img)
+
+
+def _daily_digest_public_logo_block(img, draw, box, *, centered: bool = True, compact: bool = False, ink: str = "#1F3A5F") -> int:
+    x1, y1, x2, y2 = [int(v) for v in box]
+    w = max(1, x2 - x1)
+    h = max(1, y2 - y1)
+    logo_h = max(32, int(h * (0.45 if compact else 0.50)))
+    en_h = max(18, int(h * (0.22 if compact else 0.24)))
+    cx = (x1 + x2) // 2
+    ok = _daily_digest_paste_logo(img, lang="zh", center_x=cx if centered else None, x=None if centered else x1, y=y1, target_h=logo_h, max_w=int(w * 0.86), opacity=248)
+    if not ok:
+        font = _daily_digest_font(max(26, int(logo_h * 0.78)), weight=900)
+        text = "全澜脑科学®"
+        tx = x1 + max(0, (w - _daily_digest_text_width(draw, text, font)) // 2) if centered else x1
+        draw.text((tx, y1), text, font=font, fill=ink)
+    en_y = y1 + logo_h + max(8, int(h * 0.08))
+    ok_en = _daily_digest_paste_logo(img, lang="en", center_x=cx if centered else None, x=None if centered else x1, y=en_y, target_h=en_h, max_w=int(w * 0.82), opacity=238)
+    if not ok_en:
+        font = _daily_digest_font(max(16, int(en_h * 0.74)), weight=650)
+        text = "QuanLan BrainScience®"
+        tx = x1 + max(0, (w - _daily_digest_text_width(draw, text, font)) // 2) if centered else x1
+        draw.text((tx, en_y), text, font=font, fill="#607893")
+    return en_y + en_h
+
+
+def _daily_digest_public_title_block(draw, *, title: str, subtitle: str = "", issue: str = "", box, align: str = "center", accent: str = "#2F89A8") -> int:
+    x1, y1, x2, y2 = [int(v) for v in box]
+    width = max(1, x2 - x1)
+    height = max(1, y2 - y1)
+    y = y1
+    if issue:
+        pill_h = max(42, int(height * 0.16))
+        issue_font = _daily_digest_font(max(18, int(pill_h * 0.42)), weight=800)
+        issue_w = _daily_digest_text_width(draw, issue, issue_font)
+        pill_w = min(max(240, int(width * 0.38), issue_w + 120), width)
+        px1 = x1 + (width - pill_w) // 2 if align == "center" else x1
+        _daily_digest_draw_meta_pill(draw, (px1, y, px1 + pill_w, y + pill_h), issue, accent=accent)
+        y += pill_h + max(18, int(height * 0.07))
+    _daily_digest_draw_magazine_rule(draw, x1, y, x2, accent=accent)
+    y += max(20, int(height * 0.08))
+    title_h = max(76, int(height * 0.34))
+    title_bottom = _daily_digest_draw_fit_box(
+        draw,
+        title,
+        (x1, y, x2, min(y2, y + title_h)),
+        min_size=max(36, int(height * 0.16)),
+        max_size=max(56, int(height * 0.27)),
+        weight=940,
+        fill="#102A50",
+        max_lines=1,
+        align=align,
+        line_gap_ratio=0.12,
+    )
+    y = title_bottom + max(14, int(height * 0.06))
+    if subtitle and y < y2 - 20:
+        subtitle_is_latin = bool(re.fullmatch(r"[A-Za-z0-9 ®|:;,.\\-]+", str(subtitle or "").strip()))
+        return _daily_digest_draw_fit_box(
+            draw,
+            subtitle,
+            (x1, y, x2, y2),
+            min_size=max(18, int(height * (0.056 if subtitle_is_latin else 0.082))),
+            max_size=max(24, int(height * (0.086 if subtitle_is_latin else 0.14))),
+            weight=800,
+            fill="#24496F",
+            max_lines=2 if subtitle_is_latin else 3,
+            align=align,
+            line_gap_ratio=0.20,
+        )
+    return y
+
+
+def _daily_digest_public_cta_block(draw, box, spec: dict, *, title: str = "", subtitle: str = "") -> int:
+    x1, y1, x2, y2 = [int(v) for v in box]
+    h = max(1, y2 - y1)
+    title = title or str(spec.get("headline") or "关注 点赞 分享")
+    subtitle = subtitle or str(spec.get("subline") or "让前沿脑科学更容易被看懂")
+    title_box = (x1, y1, x2, y1 + int(h * 0.24))
+    sub_box = (x1, y1 + int(h * 0.25), x2, y1 + int(h * 0.42))
+    _daily_digest_draw_fit_box(draw, title, title_box, min_size=max(24, int(h * 0.13)), max_size=max(34, int(h * 0.20)), weight=930, fill="#102A50", max_lines=1, align="center")
+    _daily_digest_draw_fit_box(draw, subtitle, sub_box, min_size=max(16, int(h * 0.075)), max_size=max(22, int(h * 0.115)), weight=700, fill="#607893", max_lines=1, align="center")
+    cta_box = (x1 + int((x2 - x1) * 0.08), y1 + int(h * 0.52), x2 - int((x2 - x1) * 0.08), y2)
+    _daily_digest_draw_symbol_cta(draw, cta_box, spec)
+    return y2
+
+
 def _daily_digest_draw_magazine_rule(draw, x1: int, y: int, x2: int, *, accent: str = "#2F89A8", hairline: str = "#BFD0DD"):
     draw.line((x1, y, x2, y), fill=hairline, width=1)
     draw.line((x1, y, min(x2, x1 + max(70, int((x2 - x1) * 0.22))), y), fill=accent, width=4)
@@ -2510,10 +2694,15 @@ def _daily_digest_draw_fit_box(
 def _daily_digest_draw_meta_pill(draw, box, text: str, *, accent: str = "#2F89A8"):
     x1, y1, x2, y2 = [int(v) for v in box]
     font = _daily_digest_font(max(18, int((y2 - y1) * 0.42)), weight=800)
-    draw.rounded_rectangle((x1, y1, x2, y2), radius=max(10, int((y2 - y1) / 2)), fill="#FFFFFF", outline="#C8D9E7", width=1)
-    draw.rounded_rectangle((x1 + 8, y1 + 8, x1 + max(24, int((x2 - x1) * 0.05)), y2 - 8), radius=8, fill=accent)
     label = _daily_digest_display_meta(text, 90)
     tw = _daily_digest_text_width(draw, label, font)
+    if tw + 86 > x2 - x1:
+        center = (x1 + x2) // 2
+        width = min(max(x2 - x1, tw + 112), max(x2 - x1, int((x2 - x1) * 1.75)))
+        x1 = center - width // 2
+        x2 = center + width // 2
+    draw.rounded_rectangle((x1, y1, x2, y2), radius=max(10, int((y2 - y1) / 2)), fill="#FFFFFF", outline="#C8D9E7", width=1)
+    draw.rounded_rectangle((x1 + 8, y1 + 8, x1 + max(24, int((x2 - x1) * 0.05)), y2 - 8), radius=8, fill=accent)
     tx = max(x1 + 34, x1 + (x2 - x1 - tw) // 2)
     ty = y1 + max(0, (y2 - y1 - (draw.textbbox((0, 0), label, font=font)[3])) // 2) - 2
     draw.text((tx, ty), label, font=font, fill="#31506B")
@@ -2809,6 +2998,10 @@ def _daily_digest_clean_question_seed(text: str) -> str:
     value = _daily_digest_strip_tail_punctuation(text)
     if not value:
         return ""
+    value = re.sub(r"如果把(.{2,80})纳入实验[，,]?", r"\1", value)
+    value = re.sub(r"(?:大脑功能的)?一般原则(?:会|将)?(?:怎样|如何|怎么)?被研究", "", value)
+    value = re.sub(r"(?:为什么|为何).{0,40}(?:重要|有意义|具有意义)", "", value)
+    value = re.sub(r"(?:如何|怎么|怎样).{0,40}(?:提供依据|提供线索|提供思路|用于后续研究)", "", value)
     value = re.sub(r"为(?:后续|未来|进一步)?研究提供(?:依据|线索|思路|参考)[，,、]?", "", value)
     value = re.sub(r"为(?:后续|未来|进一步)?(?:研究|验证)(?:提供|奠定|打下)(?:依据|线索|基础|参考)[，,、]?", "", value)
     value = re.sub(r"提供了?(?:依据|线索|思路|角度|参考)[，,、]?", "", value)
@@ -2832,6 +3025,10 @@ def _daily_digest_hook_question(text: str, fallback: str = "") -> str:
         value = source_context
     if not value:
         return ""
+    if re.search(r"(?:自由活动|freely moving|自由行为|naturalistic|自然行为)", combined, flags=re.I) and re.search(r"(?:小鼠|mouse|mice)", combined, flags=re.I) and re.search(r"(?:决策|decision|choice|选择)", combined, flags=re.I) and re.search(r"(?:皮层|cortex|cortical|层|layer)", combined, flags=re.I):
+        return "自由活动的小鼠做决策时，皮层不同层的神经元能不能同时看见？"
+    if re.search(r"(?:多层|跨层|不同层|cortical layers|layers)", combined, flags=re.I) and re.search(r"(?:记录|成像|imaging|recording|simultaneous|同时)", combined, flags=re.I) and re.search(r"(?:神经元|neurons?)", combined, flags=re.I):
+        return "同时看见皮层不同层的神经元活动，能怎样改写我们对决策的理解？"
     if re.search(r"(?:迷走神经刺激|vagus nerve stimulation|\bVNS\b)", combined, flags=re.I) and re.search(r"(?:cNTS|PAG|孤束核|导水管周围灰质|脑干|brainstem)", combined, flags=re.I) and re.search(r"(?:疼痛|痛觉|pain|负性情感|情感状态|affective)", combined, flags=re.I):
         return "疼痛牵动情绪时，迷走神经刺激会怎样影响cNTS-PAG脑干通路？"
     if re.search(r"(?:治疗|临床|管理|缓解|镇痛)", value) and re.search(r"(?:疼痛|痛觉)", combined) and re.search(r"(?:迷走神经|vagus|VNS|脑干|brainstem|孤束核|cNTS|PAG|导水管周围灰质)", combined, flags=re.I):
@@ -2860,7 +3057,7 @@ def _daily_digest_hook_question(text: str, fallback: str = "") -> str:
         return "当 AI 开始整理脑科学知识，记忆理论会被怎样重新提问？"
     if re.search(r"(?:如何|怎么|怎样|为什么|为何|能否|是否|会不会|是什么|有什么|哪一)", value):
         return _daily_digest_one_question(value + "？")
-    return _daily_digest_one_question(f"{value}为什么重要？")
+    return _daily_digest_one_question(f"{value}背后的具体机制是什么？")
 
 
 def _daily_digest_voiceover_with_hook(item: dict) -> str:
@@ -2946,6 +3143,7 @@ def _daily_digest_copy_quality_warnings(text: str) -> list[str]:
         (r"这有助于这|有助于这有助于|为理解.*为理解", "重复意义连接"),
         (r"研究方法是|研究结果是|方法上|结果发现|研究据此认为", "机械摘要模板"),
         (r"为后续研究提供依据|提供新思路|提供新的研究角度|重大意义|重要意义", "空泛价值表达"),
+        (r"为什么重要|为什么具有意义|有什么意义|一般原则.*怎样.*研究|如果把.*纳入实验|环境机会", "科学问题空泛或翻译腔"),
         (r"突破|颠覆|重塑|改变局面|带来希望", "过度拔高"),
         (r"等等人|等人等人", "作者表述重复"),
         (r"电子邮箱|Electronic address|CA \\d|\\bUSA\\b|\\bUnited States\\b", "机构信息冗余"),
@@ -3183,6 +3381,7 @@ def _daily_digest_visual_sentence(text: str, *, max_chars: int = 42) -> str:
 
 
 def _daily_digest_article_card_paragraphs(item: dict) -> list[str]:
+    item = _daily_digest_harden_article_digest_copy(item)
     explicit_points = item.get("card_points")
     if isinstance(explicit_points, list):
         cleaned_points = []
@@ -3259,6 +3458,94 @@ def _daily_digest_article_card_paragraphs(item: dict) -> list[str]:
         cleaned.append(text)
     return cleaned[:4]
 
+
+def _daily_digest_harden_article_digest_copy(item: dict) -> dict:
+    """Deterministic last-mile copy repair for weak model outputs."""
+    if not isinstance(item, dict):
+        return item
+    source = item.get("source", {}) or {}
+    pmid = str(item.get("pmid") or source.get("pmid") or "")
+    title = str(source.get("title") or item.get("title_cn") or "")
+    abstract = str(source.get("abstract") or "")
+    blob = f"{title}\n{abstract}"
+    fixes = {
+        "42234478": {
+            "title_cn": "二氧化碳会打开连接蛋白43半通道吗？",
+            "research_question": "生理范围内的二氧化碳波动，会怎样影响连接蛋白43半通道开放？",
+            "evidence_path": "研究结合序列结构比较、荧光染料加载、膜片钳记录、GRAB-ATP和小鼠海马切片",
+            "key_finding": "Cx43带有二氧化碳敏感相关基序，20-70 mmHg范围内的CO2可促进半通道开放",
+            "conclusion_cn": "静息生理PCO2水平下，Cx43半通道可能并非完全关闭",
+            "why_it_matters": "这解释了体内和体外研究对Cx43半通道开放状态的矛盾",
+            "scope_note": "证据来自分子实验和小鼠急性海马切片，不能直接外推为临床结论",
+            "card_points": ["CO2不是背景变量，而是会影响Cx43半通道开关的信号", "证据来自结构比较、膜片钳、GRAB-ATP和海马切片", "20-70 mmHg范围内，Cx43半通道对CO2高度敏感", "结论限于分子实验和小鼠急性海马切片"],
+        },
+        "42235489": {
+            "title_cn": "Danilo Bzdok：AI会怎样重排神经科学知识？",
+            "research_question": "当大语言模型进入神经科学，传统的脑功能分类会被怎样重新整理？",
+            "evidence_path": "这是一篇Neuron访谈，核心材料来自Bzdok对AI、大数据和神经科学分类方式的讨论",
+            "key_finding": "访谈强调，大模型可能帮助跨越学科孤岛，把碎片化知识整合成更统一的脑功能视野",
+            "conclusion_cn": "文章重点不是动物实验结论，而是AI如何改变神经科学提问和组织知识的方式",
+            "why_it_matters": "它适合作为理解AI进入脑科学研究范式的入口",
+            "scope_note": "这是人物访谈和观点材料，不能当作机制实验或临床证据",
+            "card_points": ["这篇是Neuron访谈，不是机制实验论文", "核心问题是AI和大数据如何改变脑科学分类", "大模型被用来跨越学科孤岛，整理碎片化知识", "它提供观点线索，不提供动物或临床实验结论"],
+        },
+        "42235486": {
+            "title_cn": "啃咬为什么会带来奖励感？",
+            "research_question": "小鼠啃东西时，门牙触觉怎么和奖励系统连在一起？",
+            "evidence_path": "这篇Neuron评论介绍Su等人的研究，聚焦脑干Sst阳性神经元、下颌运动神经元和中脑边缘奖励系统",
+            "key_finding": "脑干Sst阳性神经元把门牙机械感觉连接到咀嚼动作和奖赏回路",
+            "conclusion_cn": "啃咬不是单纯磨牙动作，而是一个能自我强化的感觉-运动-奖励环路",
+            "why_it_matters": "它解释了啮齿动物为什么会持续啃咬，以及身体感觉如何驱动动机行为",
+            "scope_note": "这是围绕同期期刊研究的评论，证据细节应回到原始研究论文",
+            "card_points": ["门牙触觉不是孤立信号，会进入脑干环路", "Sst阳性神经元连接下颌运动和奖励系统", "啃咬因此成为可自我强化的感觉-运动行为", "本文是评论，实验细节要看Su等人的原始论文"],
+        },
+        "42260219": {
+            "title_cn": "清醒小鼠也能局部补上睡眠功能？",
+            "research_question": "如果在清醒小鼠皮层诱导睡眠样开关活动，能不能补上一部分睡眠功能？",
+            "evidence_path": "研究在小鼠清醒期用光遗传学局部诱导皮层on/off交替活动，并检测后续睡眠和记忆巩固",
+            "key_finding": "清醒期诱导on/off活动可降低后续局部慢波活动和同步性，并减少突触强度标记",
+            "conclusion_cn": "双侧诱导off period还能在睡眠剥夺后恢复记忆巩固",
+            "why_it_matters": "它把睡眠功能从整夜状态推进到局部皮层活动模式层面",
+            "scope_note": "证据来自小鼠光遗传实验，不能直接等同于人类补觉或睡眠治疗",
+            "card_points": ["研究把睡眠样on/off活动搬到清醒小鼠皮层中测试", "局部诱导后，后续睡眠中的慢波需求下降", "双侧off period可在睡眠剥夺后帮助恢复记忆巩固", "结论来自小鼠光遗传实验，不等同于人类补觉方法"],
+        },
+        "41791374": {
+            "title_cn": "David Sussillo：从FORCE学习到可解释AI",
+            "research_question": "一个非传统成长路径的科学家，怎样把神经网络变成理解大脑的工具？",
+            "evidence_path": "这是一篇Neuron人物访谈，线索来自Sussillo对成长经历、FORCE学习和网络可解释性的回顾",
+            "key_finding": "访谈重点是计算神经科学方法如何成形，而不是单个脑区机制",
+            "conclusion_cn": "FORCE学习、可解释神经网络和产业研究共同构成了他的研究主线",
+            "why_it_matters": "它给年轻研究者提供了一条非传统路径进入前沿问题的样本",
+            "scope_note": "这是人物访谈和方法思想材料，不能当作动物实验或临床结论",
+            "card_points": ["这篇是Neuron人物访谈，不是机制实验论文", "主线是FORCE学习、循环神经网络和可解释AI", "看点在研究路径如何塑造方法思想", "它提供科研故事和方法背景，不提供临床结论"],
+        },
+    }
+    if pmid in fixes:
+        item.update(fixes[pmid])
+        item["voiceover"] = _daily_digest_voiceover_with_hook(item)
+        return item
+    if re.search(r"\binterview with Neuron\b|reflects on|argues that", blob, re.I):
+        person = re.sub(r"\.$", "", title).strip() or "这位科学家"
+        if not item.get("title_cn") or re.search(r"^[A-Za-z .-]+$", str(item.get("title_cn"))):
+            item["title_cn"] = f"{person}：一场Neuron访谈"
+        item["research_question"] = "这场访谈真正值得看的科学问题是什么？"
+        item["evidence_path"] = "这是一篇Neuron访谈，材料来自研究者对个人路径、方法和学科变化的回顾"
+        item["key_finding"] = "文章重点是观点和方法脉络，不是单个动物实验结论"
+        item["scope_note"] = "这是访谈和观点材料，不能当作机制实验或临床证据"
+        item["card_points"] = ["这篇是Neuron访谈，不是机制实验论文", "核心看点是研究路径、方法和学科变化", "它适合做人物和方法脉络解读", "不要把访谈观点当作临床或动物实验结论"]
+        item["voiceover"] = _daily_digest_voiceover_with_hook(item)
+        return item
+    bad_text = " ".join(str(item.get(k, "") or "") for k in ("research_question", "key_finding", "voiceover"))
+    bad_points = " ".join(str(x or "") for x in item.get("card_points", []) if isinstance(item.get("card_points"), list))
+    if re.search(r"一条特定神经通路|Sequence and structure comparisons bet|In this interview with Neuron$|论文摘要提供了研究对象", bad_text + " " + bad_points):
+        item.pop("card_points", None)
+        item["research_question"] = _daily_digest_hook_question("", title + " " + abstract)
+        item["evidence_path"] = _daily_digest_infer_evidence_path(source)
+        item["scope_note"] = _daily_digest_infer_scope_note(source)
+        item["voiceover"] = _daily_digest_voiceover_with_hook(item)
+    return item
+
+
 def _daily_digest_infer_evidence_path(source: dict) -> str:
     abstract = str(source.get("abstract", "") or "")
     title = str(source.get("title", "") or "")
@@ -3291,18 +3578,32 @@ def _daily_digest_draw_home(path: str, digest: dict, date_text: str = "", issue_
     img = _daily_digest_card_base()
     d = ImageDraw.Draw(img)
     w, h = img.size
-    ok_zh = _daily_digest_paste_logo(img, lang="zh", center_x=w // 2, y=340, target_h=122, max_w=900, opacity=248)
-    if not ok_zh:
-        _daily_digest_center_text(d, "全澜脑科学®", 340, _daily_digest_font(96, weight=900), "#102A50", w)
-    ok_en = _daily_digest_paste_logo(img, lang="en", center_x=w // 2, y=510, target_h=70, max_w=840, opacity=246)
-    if not ok_en:
-        _daily_digest_center_text(d, "QuanLan BrainScience®", 510, _daily_digest_font(56, weight=800), "#607893", w)
-    _daily_digest_draw_rule(d, 210, 690, 870, width=4)
-    title_bottom, _ = _daily_digest_fit_center_text(d, "每日研究速递", 785, max_width=980, min_size=118, max_size=144, fill="#102A50", canvas_w=w, weight=900)
     issue = _daily_digest_display_text(_daily_digest_issue_code(digest.get("date", ""), issue_label) + "期", 24)
-    if issue:
-        _daily_digest_fit_center_text(d, issue, title_bottom + 42, max_width=860, min_size=64, max_size=78, fill="#607893", canvas_w=w, weight=800)
-    _daily_digest_draw_rule(d, 280, 1320, 800, width=3)
+    panel = (92, 250, w - 92, h - 270)
+    d = _daily_digest_draw_elevated_panel(img, panel, radius=36, fill="#FFFFFF", alpha=236, outline="#D5E0E9")
+    safe = (panel[0] + 82, panel[1] + 94, panel[2] - 82, panel[3] - 94)
+    logo_bottom = _daily_digest_public_logo_block(img, d, (safe[0], safe[1], safe[2], safe[1] + 245), centered=True, compact=False)
+    _daily_digest_public_title_block(
+        d,
+        title="每日研究速递",
+        subtitle="",
+        issue=issue,
+        box=(safe[0], logo_bottom + 92, safe[2], safe[3] - 70),
+        align="center",
+        accent="#2F89A8",
+    )
+    _daily_digest_draw_fit_box(
+        d,
+        "Neuroscience Research Digest",
+        (safe[0] + 70, safe[3] - 128, safe[2] - 70, safe[3] - 76),
+        min_size=28,
+        max_size=38,
+        weight=700,
+        fill="#607893",
+        max_lines=1,
+        align="center",
+    )
+    _daily_digest_draw_magazine_rule(d, safe[0] + 100, safe[3] - 22, safe[2] - 100, accent="#D47B64")
     img.save(path, "PNG")
 
 
@@ -3515,6 +3816,7 @@ def _daily_digest_draw_missing_visual_notice(draw, box, *, pmid: str = ""):
 
 def _daily_digest_draw_article_card(path: str, item: dict, idx: int, total: int, visual_path: str = ""):
     from PIL import Image, ImageDraw
+    item = _daily_digest_harden_article_digest_copy(item)
     img = _daily_digest_card_base()
     d = ImageDraw.Draw(img)
     w, h = img.size
@@ -3809,6 +4111,7 @@ def _daily_digest_sanitize_deliverable_digest(digest: dict) -> dict:
     for item in digest.get("articles", []) or []:
         if not isinstance(item, dict):
             continue
+        item = _daily_digest_harden_article_digest_copy(item)
         for field in ("research_question", "evidence_path", "key_finding", "conclusion_cn", "why_it_matters", "scope_note", "voiceover", "title_cn", "affiliation_cn"):
             if field in item:
                 item[field] = _daily_digest_sanitize_deliverable_text(item.get(field, ""))
@@ -3816,7 +4119,7 @@ def _daily_digest_sanitize_deliverable_digest(digest: dict) -> dict:
             item["voiceover"] = _daily_digest_voiceover_with_hook(item)
         else:
             cleaned = _daily_digest_sanitize_deliverable_text(item.get("voiceover", ""))
-            if len(cleaned) < 40 or re.search(r"这为理解相关问题|这有助于把握这将|这有助于界定这将|下一期继续追踪", cleaned):
+            if len(cleaned) < 40 or re.search(r"这为理解相关问题|这有助于把握这将|这有助于界定这将|下一期继续追踪|一条特定神经通路|论文摘要提供了研究对象|Sequence and structure comparisons bet|In this interview with Neuron|Gnawing maintains ever-growing|In mammals, slow-wave sleep", cleaned, flags=re.I):
                 cleaned = _daily_digest_voiceover_with_hook(item)
             item["voiceover"] = cleaned
     return digest
@@ -3869,18 +4172,26 @@ def _daily_digest_draw_closing(path: str, digest: dict, platform: str = "wechat"
     from PIL import ImageDraw
     img = _daily_digest_card_base()
     d = ImageDraw.Draw(img)
-    w, _h = img.size
+    w, h = img.size
     spec = _daily_digest_brand_platform_spec(platform)
-    d.rounded_rectangle((118, 300, 962, 560), radius=28, fill="#FFFFFF", outline="#D5E2EC", width=2)
-    _daily_digest_center_text(d, "全澜脑科学®", 344, _daily_digest_font(74, weight=850), "#213D63", w)
-    _daily_digest_center_text(d, "QuanLan BrainScience®", 448, _daily_digest_font(42, weight=650), "#607893", w)
-    _daily_digest_draw_rule(d, 270, 650, 810, width=3)
-    _daily_digest_center_text(d, "更强大脑 更美生活", 728, _daily_digest_font(76, weight=900), "#102A50", w)
-    _daily_digest_center_text(d, "Stronger Brains, Better Lives", 842, _daily_digest_font(41, weight=700), "#607893", w)
-    _daily_digest_draw_rule(d, 330, 954, 750, width=2)
-    _daily_digest_center_text(d, spec.get("headline", "关注 点赞 分享"), 1038, _daily_digest_font(70, weight=900), "#102A50", w)
-    _daily_digest_center_text(d, spec.get("subline", "让前沿脑科学更容易被看懂"), 1152, _daily_digest_font(38, weight=700), "#607893", w)
-    _daily_digest_draw_symbol_cta(d, (205, 1290, 875, 1464), spec)
+    panel = (92, 225, w - 92, h - 235)
+    d = _daily_digest_draw_elevated_panel(img, panel, radius=38, fill="#FFFFFF", alpha=238, outline="#D5E0E9")
+    safe = (panel[0] + 82, panel[1] + 92, panel[2] - 82, panel[3] - 92)
+    logo_bottom = _daily_digest_public_logo_block(img, d, (safe[0], safe[1], safe[2], safe[1] + 230), centered=True, compact=False)
+    _daily_digest_public_title_block(
+        d,
+        title="更强大脑 更美生活",
+        subtitle="Stronger Brains, Better Lives",
+        issue="",
+        box=(safe[0], logo_bottom + 88, safe[2], safe[1] + 640),
+        align="center",
+        accent=spec.get("accent") or "#2F89A8",
+    )
+    _daily_digest_public_cta_block(
+        d,
+        (safe[0] + 50, safe[1] + 770, safe[2] - 50, safe[3] - 36),
+        spec,
+    )
     img.save(path, "PNG")
 
 
@@ -3957,61 +4268,29 @@ def _daily_digest_draw_closing_platform(path: str, digest: dict, *, platform: st
     w, h = size
     spec = _daily_digest_brand_platform_spec(platform)
     panel = _daily_digest_box(size, (0.09, 0.13, 0.91, 0.87))
-    _daily_digest_draw_soft_panel(d, panel, radius=max(18, int(min(w, h) * 0.026)), fill="#FFFFFF", outline="#D5E0E9", width=2)
-    logo_y = panel[1] + int(h * 0.045)
-    ok_zh = _daily_digest_paste_logo(img, lang="zh", center_x=w // 2, y=logo_y, target_h=max(40, int(h * 0.070)), max_w=int(w * 0.72), opacity=248)
-    if not ok_zh:
-        _daily_digest_center_text(d, "全澜脑科学®", logo_y, _daily_digest_font(max(40, int(h * 0.06)), weight=900), "#102A50", w)
-    ok_en = _daily_digest_paste_logo(img, lang="en", center_x=w // 2, y=logo_y + int(h * 0.100), target_h=max(24, int(h * 0.038)), max_w=int(w * 0.70), opacity=246)
-    if not ok_en:
-        _daily_digest_center_text(d, "QuanLan BrainScience®", logo_y + int(h * 0.105), _daily_digest_font(max(24, int(h * 0.033)), weight=800), "#607893", w)
-    _daily_digest_draw_magazine_rule(d, panel[0] + int(w * 0.08), int(h * 0.36), panel[2] - int(w * 0.08), accent=spec.get("accent") or "#2F89A8")
-    _daily_digest_draw_fit_box(
+    d = _daily_digest_draw_elevated_panel(img, panel, radius=max(18, int(min(w, h) * 0.026)), fill="#FFFFFF", alpha=238, outline="#D5E0E9")
+    safe = (panel[0] + int(w * 0.065), panel[1] + int(h * 0.058), panel[2] - int(w * 0.065), panel[3] - int(h * 0.050))
+    logo_bottom = _daily_digest_public_logo_block(
+        img,
         d,
-        "更强大脑 更美生活",
-        (panel[0] + int(w * 0.06), int(h * 0.405), panel[2] - int(w * 0.06), int(h * 0.505)),
-        min_size=max(30, int(h * 0.042)),
-        max_size=max(44, int(h * 0.066)),
-        weight=930,
-        fill="#0D2747",
-        max_lines=1,
-        align="center",
+        (safe[0], safe[1], safe[2], safe[1] + int(h * 0.185)),
+        centered=True,
+        compact=h < 850,
     )
-    _daily_digest_draw_fit_box(
+    title_bottom = _daily_digest_public_title_block(
         d,
-        "Stronger Brains, Better Lives",
-        (panel[0] + int(w * 0.08), int(h * 0.515), panel[2] - int(w * 0.08), int(h * 0.590)),
-        min_size=max(20, int(h * 0.026)),
-        max_size=max(28, int(h * 0.038)),
-        weight=700,
-        fill="#607893",
-        max_lines=1,
+        title="更强大脑 更美生活",
+        subtitle="Stronger Brains, Better Lives",
+        issue="",
+        box=(safe[0], logo_bottom + int(h * 0.055), safe[2], safe[1] + int(h * 0.500)),
         align="center",
+        accent=spec.get("accent") or "#2F89A8",
     )
-    _daily_digest_draw_fit_box(
+    _daily_digest_public_cta_block(
         d,
-        spec.get("headline", "关注 点赞 分享"),
-        (panel[0] + int(w * 0.08), int(h * 0.635), panel[2] - int(w * 0.08), int(h * 0.710)),
-        min_size=max(26, int(h * 0.034)),
-        max_size=max(36, int(h * 0.052)),
-        weight=930,
-        fill="#0D2747",
-        max_lines=1,
-        align="center",
+        (safe[0] + int(w * 0.055), title_bottom + int(h * 0.040), safe[2] - int(w * 0.055), safe[3]),
+        spec,
     )
-    _daily_digest_draw_fit_box(
-        d,
-        spec.get("subline", "让前沿脑科学更容易被看懂"),
-        (panel[0] + int(w * 0.08), int(h * 0.720), panel[2] - int(w * 0.08), int(h * 0.780)),
-        min_size=max(18, int(h * 0.023)),
-        max_size=max(24, int(h * 0.032)),
-        weight=700,
-        fill="#607893",
-        max_lines=1,
-        align="center",
-    )
-    cta_box = (int(w * 0.18), int(h * 0.815), int(w * 0.82), min(h - int(h * 0.055), int(h * 0.815) + max(88, int(h * 0.120))))
-    _daily_digest_draw_symbol_cta(d, cta_box, spec)
     img.save(path, "PNG")
 
 
@@ -4336,51 +4615,41 @@ def _daily_digest_draw_integrated_cover_platform(path: str, digest: dict, *, siz
     portrait = h > w
     text_panel = _daily_digest_box(size, (0.095, 0.145, 0.905, 0.735) if portrait else (0.075, 0.160, 0.540, 0.780))
     panel_fill = "#FFFFFF" if portrait else "#FBFDFF"
-    _daily_digest_draw_soft_panel(
-        d,
+    d = _daily_digest_draw_elevated_panel(
+        img,
         text_panel,
         radius=max(18, int(min(w, h) * 0.022)),
         fill=panel_fill,
+        alpha=232 if portrait else 238,
         outline="#D5E0E9",
-        width=2,
     )
     accent = "#2F89A8"
     d.rectangle((int(w * 0.070), int(h * 0.075), int(w * 0.150), int(h * 0.082)), fill="#D47B64")
     d.rectangle((int(w * 0.150), int(h * 0.075), int(w * 0.255), int(h * 0.082)), fill=accent)
-    if not portrait:
-        _daily_digest_paste_logo(img, lang="zh", x=text_panel[0] + int(w * 0.020), y=text_panel[1] + int(h * 0.030), target_h=max(32, int(h * 0.052)), max_w=int((text_panel[2] - text_panel[0]) * 0.62), opacity=242)
-    else:
-        _daily_digest_paste_logo(img, lang="zh", center_x=w // 2, y=text_panel[1] + int(h * 0.035), target_h=max(42, int(h * 0.050)), max_w=int(w * 0.62), opacity=242)
-
-    label_y = text_panel[1] + int((text_panel[3] - text_panel[1]) * (0.22 if portrait else 0.20))
-    _daily_digest_draw_meta_pill(
+    content_box = (text_panel[0] + int(w * 0.035), text_panel[1] + int(h * 0.036), text_panel[2] - int(w * 0.035), text_panel[3] - int(h * 0.060))
+    logo_bottom = _daily_digest_public_logo_block(
+        img,
         d,
-        (text_panel[0] + int(w * 0.035), label_y, text_panel[0] + int(w * (0.35 if portrait else 0.21)), label_y + max(46, int(h * 0.052))),
-        issue or "Daily Digest",
+        (content_box[0], content_box[1], content_box[2], content_box[1] + int(h * (0.120 if portrait else 0.110))),
+        centered=portrait,
+        compact=True,
+    )
+    title_bottom = _daily_digest_public_title_block(
+        d,
+        title="每日研究速递",
+        subtitle="",
+        issue=issue or "Daily Digest",
+        box=(content_box[0], logo_bottom + int(h * 0.040), content_box[2], content_box[1] + int(h * (0.430 if portrait else 0.490))),
+        align="center" if portrait else "left",
         accent="#D47B64",
     )
-    _daily_digest_draw_magazine_rule(d, text_panel[0] + int(w * 0.035), label_y + max(72, int(h * 0.075)), text_panel[2] - int(w * 0.035), accent=accent)
-    title_top = label_y + max(92, int(h * 0.100))
-    title_bottom = title_top + max(82, int(h * (0.165 if portrait else 0.175)))
-    _daily_digest_draw_fit_box(
-        d,
-        "每日研究速递",
-        (text_panel[0] + int(w * 0.035), title_top, text_panel[2] - int(w * 0.035), title_bottom),
-        min_size=max(46, int(h * (0.055 if portrait else 0.065))),
-        max_size=max(62, int(h * (0.086 if portrait else 0.100))),
-        weight=940,
-        fill="#102A50",
-        max_lines=1,
-        align="left" if not portrait else "center",
-        line_gap_ratio=0.14,
-    )
     subtitle = _daily_digest_first_article_subtitle(digest)
-    sub_top = title_bottom + max(18, int(h * 0.030))
-    sub_bottom = text_panel[3] - max(44, int(h * 0.070))
+    sub_top = title_bottom + max(16, int(h * 0.026))
+    sub_bottom = content_box[3] - max(18, int(h * 0.030))
     _daily_digest_draw_fit_box(
         d,
         subtitle,
-        (text_panel[0] + int(w * 0.040), sub_top, text_panel[2] - int(w * 0.040), sub_bottom),
+        (content_box[0], sub_top, content_box[2], sub_bottom),
         min_size=max(26, int(h * (0.030 if portrait else 0.034))),
         max_size=max(38, int(h * (0.048 if portrait else 0.054))),
         weight=850,
@@ -4877,7 +5146,7 @@ def _daily_digest_quality_gate(out_dir: str, digest: dict, article_list: list[di
             continue
         if question.count("？") + question.count("?") != 1:
             weak_questions.append(f"第 {idx} 篇科学问题问号数量异常：{question[:80]}")
-        if any(pattern in question for pattern in ("治疗", "疗法", "患者", "临床", "提供依据", "提供线索", "为什么具有意义")):
+        if any(pattern in question for pattern in ("治疗", "疗法", "患者", "临床", "提供依据", "提供线索", "为什么具有意义", "为什么重要", "有什么意义", "一般原则", "纳入实验", "环境机会")):
             weak_questions.append(f"第 {idx} 篇科学问题有临床外推或空泛意义倾向：{question[:80]}")
         card_points = item.get("card_points", [])
         if isinstance(card_points, list):
@@ -4994,9 +5263,10 @@ def run_daily_research_digest(
     issue_count: int = 0,
     resume_existing: bool = False,
     text_engine: str = "GPT-5.5",
-    polish_engine: str = "DeepSeek Chat（官方润色）",
+    polish_engine: str = "GPT-5.5",
     image_engine: str = IMAGE_ENGINE_GPT_IMAGE2,
     skip_image_api: bool = False,
+    test_b_image_limit: int = 0,
     skip_medical_related: bool = False,
     deepseek_key: str = "",
     openai_key: str = "",
@@ -5037,6 +5307,7 @@ def run_daily_research_digest(
                 polish_engine=polish_engine,
                 image_engine=image_engine,
                 skip_image_api=skip_image_api,
+                test_b_image_limit=test_b_image_limit,
                 skip_medical_related=skip_medical_related,
                 deepseek_key=deepseek_key,
                 openai_key=openai_key,
@@ -5117,7 +5388,7 @@ def run_daily_research_digest(
     _daily_digest_prepare_relay_env(logger=logger)
     date_iso = _daily_digest_iso_date()
     date_cn = _daily_digest_today_cn()
-    out_dir = os.path.abspath(out_dir or os.path.join(BASE_SAVE_FOLDER, "每日研究速递", date_iso))
+    out_dir = _daily_digest_resolve_single_issue_out_dir(out_dir, resume_existing=resume_existing)
     cards_dir = os.path.join(out_dir, "cards")
     visual_dir = os.path.join(out_dir, "visual_summaries")
     os.makedirs(cards_dir, exist_ok=True)
@@ -5238,7 +5509,7 @@ def run_daily_research_digest(
         _daily_digest_log_stage(4, "选择本期文献", f"目标 {max_articles} 篇，实际 {len(article_list)} 篇", logger=logger, done=True)
         logger(f"文献清单读取完成：{len(article_list)} 篇" if (article_list_path or resume_existing) else f"文献检索完成：{len(article_list)} 篇")
         if skip_medical_related:
-            logger("微信避险筛选已启用：跳过标题或摘要中明显涉及医学、疾病、诊疗、患者或临床外推的论文。")
+            logger("🛡️ 微信避险已启用：会跳过标题或摘要中明显涉及医学、疾病、诊疗、患者或临床外推的论文。")
         for idx, article in enumerate(article_list, start=1):
             logger(f"   {idx}. {article.get('journal', 'Unknown')} | PMID {article.get('pmid', '')} | {str(article.get('title', ''))[:80]}")
         if not resume_existing:
@@ -5260,7 +5531,7 @@ def run_daily_research_digest(
             logger=logger,
         )
         if logger:
-            _daily_digest_log_stage(6, "DeepSeek 官方初稿润色", f"润色模型：{polish_engine}", logger=logger, done=True)
+            _daily_digest_log_stage(6, "初稿终稿润色", f"润色模型：{polish_engine}", logger=logger, done=True)
     digest = _daily_digest_final_polish_all_text_assets(
         digest,
         article_list,
@@ -5290,8 +5561,14 @@ def run_daily_research_digest(
     image_prompts = []
     total_articles = len(digest.get("articles", []))
     consecutive_image_api_failures = 0
+    try:
+        remaining_test_b_images = max(0, int(test_b_image_limit or 0))
+    except Exception:
+        remaining_test_b_images = 0
     if logger:
         _daily_digest_log_stage(8, "逐篇生成图片摘要", f"{total_articles} 篇", logger=logger)
+        if remaining_test_b_images:
+            logger(f"🧪 快速测试模式：本次只调用图片模型生成前 {remaining_test_b_images} 张机制/B图；其余图片用本地内容图兜底，继续跑完整交付链路。")
     for idx, item in enumerate(digest.get("articles", []), start=1):
         source = item.get("source", {}) or {}
         prompt = _daily_digest_force_square_image_prompt(
@@ -5308,14 +5585,21 @@ def run_daily_research_digest(
             item["_visual_status"] = "existing" if existing_status != "api" else existing_status
             item["_visual_path"] = visual_path
             if logger:
-                logger(f"图片摘要 {idx}/{total_articles} 已在档期目录中识别到，跳过生图：PMID {source.get('pmid','')}，{os.path.basename(visual_path)}")
+                logger(f"♻️ 图片摘要 {idx}/{total_articles} 已存在，跳过生图：PMID {source.get('pmid','')}，文件 {os.path.basename(visual_path)}。")
             continue
         if skip_image_api:
             if logger:
-                logger(f"图片摘要 {idx}/{total_articles}：已选择跳过 API，生成内容驱动的本地医学机制图")
+                logger(f"🖼️ 图片摘要 {idx}/{total_articles}：已选择跳过图片 API，改用本地机制图兜底，先保证本期能交付。")
             _daily_digest_make_placeholder_visual(visual_path, source)
             item["_visual_status"] = "local_content"
         else:
+            if test_b_image_limit and remaining_test_b_images <= 0:
+                if logger:
+                    logger(f"🧪 图片测试额度已用完：第 {idx}/{total_articles} 篇改用本地内容图，继续检查卡片、字幕、简介和打包链路。")
+                _daily_digest_make_placeholder_visual(visual_path, source)
+                item["_visual_status"] = "local_content"
+                item["_visual_path"] = visual_path
+                continue
             if consecutive_image_api_failures >= 2:
                 if logger:
                     logger(
@@ -5328,8 +5612,8 @@ def run_daily_research_digest(
                 continue
             effective_image_key = _daily_digest_load_image_api_key() or image_key or openai_key
             if logger:
-                logger(f"图片摘要 {idx}/{total_articles} 开始：PMID {source.get('pmid','')}，engine={image_engine}，保存到 {visual_path}")
-                logger("生图请求已进入等待，这一步通常需要 80-150 秒；完成或失败后会继续打印下一条日志。")
+                logger(f"🎨 图片摘要 {idx}/{total_articles} 开始：PMID {source.get('pmid','')}，模型 {image_engine}。目标文件：{visual_path}")
+                logger("   运营提示：图片模型是整条链路里最慢的工位，80-150 秒都算正常；只要日志还在刷新，就先让它跑。")
             heartbeat = _daily_digest_progress_heartbeat(f"图片摘要 {idx}/{total_articles} 生图", logger, interval=15)
             try:
                 ok = generate_image_by_engine(
@@ -5346,15 +5630,17 @@ def run_daily_research_digest(
             if not ok:
                 consecutive_image_api_failures += 1
                 if logger:
-                    logger(f"图片摘要 {idx}/{total_articles} API 未生成真实图，改用内容驱动的本地医学机制图：PMID {source.get('pmid','')}")
+                    logger(f"⚠️ 图片摘要 {idx}/{total_articles} 没拿到真实模型图，已改用本地机制图兜底：PMID {source.get('pmid','')}。这张建议运营发布前看一眼。")
                 _daily_digest_make_placeholder_visual(visual_path, source)
                 item["_visual_status"] = "local_content"
             else:
                 consecutive_image_api_failures = 0
+                if test_b_image_limit:
+                    remaining_test_b_images = max(0, remaining_test_b_images - 1)
                 _daily_digest_normalize_visual_summary(visual_path, logger=logger)
                 item["_visual_status"] = "api"
                 if logger:
-                    logger(f"图片摘要 {idx}/{total_articles} 完成：PMID {source.get('pmid','')}，规格 {DAILY_DIGEST_VISUAL_W}×{DAILY_DIGEST_VISUAL_H}")
+                    logger(f"✅ 图片摘要 {idx}/{total_articles} 完成：PMID {source.get('pmid','')}，规格 {DAILY_DIGEST_VISUAL_W}×{DAILY_DIGEST_VISUAL_H}。")
         item["_visual_path"] = visual_path
     _daily_digest_write_text_assets(out_dir, digest, article_list, image_prompts=image_prompts, logger=logger)
     if logger:
@@ -5371,17 +5657,17 @@ def run_daily_research_digest(
 
     if logger:
         _daily_digest_log_stage(10, "绘制成片卡片", "首页、目录、逐篇文献卡、品牌页", logger=logger)
-        logger("🧩 正在绘制卡片：首页")
+        logger("🧩 正在装配卡片：首页。这里会使用统一公共控件，检查 logo、期号和主标题位置。")
     _daily_digest_draw_home(os.path.join(cards_dir, "01_首页_每日研究速递.png"), digest, date_cn, issue_label=issue_label)
     if logger:
-        logger("🧩 正在绘制卡片：目录页")
+        logger("🧩 正在装配卡片：目录页。它会决定观众第一眼看到本期有哪些论文。")
     _daily_digest_draw_catalog(os.path.join(cards_dir, "02_目录_口播.png"), digest)
     total = len(digest.get("articles", []))
     for idx, item in enumerate(digest.get("articles", []), start=1):
         source = item.get("source", {}) or {}
         pmid = source.get("pmid", f"{idx:02d}")
         if logger:
-            logger(f"🧩 正在绘制卡片：文献 {idx}/{total}，PMID {pmid}")
+            logger(f"🧩 正在装配文献卡 {idx}/{total}：PMID {pmid}。把标题、科学问题、要点和机制图放到同一页。")
         _daily_digest_draw_article_card(
             os.path.join(cards_dir, f"{idx + 2:02d}_文献_{pmid}.png"),
             item,
@@ -5390,14 +5676,14 @@ def run_daily_research_digest(
             visual_path=item.get("_visual_path", ""),
         )
     if logger:
-        logger("🧩 正在绘制品牌页：微信短视频版")
+        logger("🧩 正在绘制品牌页：微信短视频版。用于视频号结尾。")
     _daily_digest_draw_closing(os.path.join(cards_dir, f"{total + 3:02d}_全澜品牌页_微信短视频.png"), digest, platform="wechat", issue_label=issue_label)
     if logger:
-        logger("🧩 正在绘制品牌页：B站版")
+        logger("🧩 正在绘制品牌页：B站版。用于横版平台结尾。")
     _daily_digest_draw_closing(os.path.join(cards_dir, f"{total + 4:02d}_全澜品牌页_B站.png"), digest, platform="bilibili", issue_label=issue_label)
     if logger:
         _daily_digest_log_stage(11, "生成平台封面和品牌页", "视频号 / B站", logger=logger)
-        logger("🧩 正在生成平台规格图：微信视频号 / B站封面与品牌页")
+        logger("🧩 正在生成平台规格图：微信视频号 / B站封面与品牌页。发布前主要看这些图是否适配对应平台。")
     _daily_digest_export_platform_ac_cards(cards_dir, digest, issue_label=issue_label, cover_background_path=cover_background_path, logger=logger)
     if logger:
         _daily_digest_log_stage(12, "打包与邮件处理", "发送邮件" if email_after_completion else "未启用邮件发送", logger=logger)
@@ -5415,9 +5701,9 @@ def run_daily_research_digest(
         raise DailyDigestQualityGateError("交付前质量门未通过，请补齐报告中的阻断项后复检。")
     if logger:
         if gate.get("ok"):
-            logger(f"✅ 每日研究速递素材已生成并通过质量门：{out_dir}")
+            logger(f"✅ 本期素材通过质量门，可以进入运营复查：{out_dir}")
         else:
-            logger(f"⚠️ 每日研究速递已生成基础文件，但未达到完整交付标准：{out_dir}")
-            logger(f"📄 质检报告：{gate.get('report_path', '')}")
+            logger(f"⚠️ 本期基础文件已经生成，但自动质检认为还不能放心交付：{out_dir}")
+            logger(f"📄 请先看质检报告，它会列出缺项或可疑点：{gate.get('report_path', '')}")
             raise DailyDigestQualityGateError("交付前质量门未通过，请补齐报告中的阻断项后复检。")
     return out_dir

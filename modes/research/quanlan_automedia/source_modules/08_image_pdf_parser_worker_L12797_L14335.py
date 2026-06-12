@@ -1148,7 +1148,7 @@ def worker_logic():
         doubao_endpoint = task.get("doubao_endpoint", "") or load_doubao_endpoint_id()
         content_style = normalize_content_style(task.get("content_style") or job_state.get("content_style") or get_active_content_style())
         runtime_context.content_style = content_style
-        prompt_templates = task.get("prompt_templates") or load_prompt_templates(content_style)
+        prompt_templates = task.get("prompt_templates") or load_prompt_templates(content_style, DEFAULT_PROMPT_SCOPE)
         # PDF 安全策略：只允许本地解析 Markdown，禁止上传 PDF 附件。
         direct_pdf_to_llm = False
         clear_existing_images = bool(task.get("clear_existing_images", False))
@@ -1218,19 +1218,19 @@ def worker_logic():
                 job_state["is_running"] = True
                 try:
                     ui_manager.log(
-                        f"🚀 每日研究速递开始：days={int(task.get('days', 14) or 14)}，"
-                        f"max_articles={int(task.get('max_articles', 5) or 5)}，"
-                        f"text={task.get('text_engine', 'GPT-5.5')}，"
-                        f"image={task.get('image_engine', IMAGE_ENGINE_GPT_IMAGE2)}，"
-                        f"微信避险={'开' if bool(task.get('skip_medical_related', False)) else '关'}"
+                        f"🚀 每日研究速递开工：近 {int(task.get('days', 14) or 14)} 天论文里挑 "
+                        f"{int(task.get('max_articles', 5) or 5)} 篇；文本={task.get('text_engine', 'GPT-5.5')}，"
+                        f"润色={task.get('polish_engine', 'GPT-5.5')}，图片={task.get('image_engine', IMAGE_ENGINE_GPT_IMAGE2)}；"
+                        f"微信避险={'已开启' if bool(task.get('skip_medical_related', False)) else '未开启'}。"
                     )
+                    ui_manager.log(f"📁 输出会进入本期期次文件夹：{task.get('out_dir', '')} 下自动新建子目录。")
                     out_path = run_daily_research_digest(
                         out_dir=task.get("out_dir", ""),
                         days=int(task.get("days", 14) or 14),
                         max_articles=int(task.get("max_articles", 5) or 5),
                         journals=task.get("journals", ""),
                         text_engine=task.get("text_engine", "GPT-5.5"),
-                        polish_engine=task.get("polish_engine", "DeepSeek Chat（官方润色）"),
+                        polish_engine=task.get("polish_engine", "GPT-5.5"),
                         image_engine=task.get("image_engine", IMAGE_ENGINE_GPT_IMAGE2),
                         skip_image_api=bool(task.get("skip_image_api", False)),
                         skip_medical_related=bool(task.get("skip_medical_related", False)),
@@ -1246,9 +1246,10 @@ def worker_logic():
                         email_recipient=task.get("email_recipient", email_recipient),
                         logger=ui_manager.log,
                     )
-                    ui_manager.log(f"✅ 每日研究速递完成：{out_path}")
+                    ui_manager.log(f"✅ 每日研究速递完成。本期素材都在这里，运营复查从 04_视频简介 和 cards 文件夹开始：{out_path}")
                 except Exception as e:
-                    ui_manager.log(f"❌ 每日研究速递生成失败：{str(e)[:180]}")
+                    ui_manager.log(f"❌ 每日研究速递停在异常处：{type(e).__name__}: {str(e)[:220]}")
+                    ui_manager.log("   处理建议：先看上面最后一个 ▶️ 进度停在哪一步；如果是模型/图片接口，多半可重跑；如果是文献清单路径，请改到某一期子文件夹或正确 JSON。")
                 finally:
                     job_state["is_running"] = False
                     ui_manager.toggle_buttons_for_job(job_state, enabled=True)

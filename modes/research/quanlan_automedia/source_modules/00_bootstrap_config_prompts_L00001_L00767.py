@@ -7,7 +7,7 @@
 纯净版 PDF 本地解析工具 + 全 API 自动流水线 (全澜脑科学优化版)
 支持：PDF 目录提取 -> 章节 PDF 切分 -> 本地 PyMuPDF4LLM 逐章解析 Markdown -> GPT / Gemini / 豆包 Ark 生成脚本/润色 -> GPT Image 2 / Gemini / ChatShare 生成分镜图片；支持 API 自动调用与网页手动输入双模式
 依赖安装:
-pip install requests openai google-genai customtkinter pypdf pillow pymupdf4llm pymupdf
+pip install requests openai google-genai pypdf pillow pymupdf4llm pymupdf
 安全策略：PDF 只允许本地解析成 Markdown 后发送给大模型；禁止把 PDF 文件作为附件上传给任何大模型。
 """
 
@@ -36,17 +36,6 @@ from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 import requests
-try:
-    import customtkinter as ctk
-except Exception:
-    ctk = None
-try:
-    import tkinter as tk
-    from tkinter import ttk, filedialog, messagebox
-except Exception:
-    tk = None
-    ttk = filedialog = messagebox = None
-
 BASE_SAVE_FOLDER = os.path.abspath("chapter_pdf_direct_output")
 WINDOWS_FILE_CLEANUP_RETRIES = int(os.environ.get("QUANLAN_WINDOWS_FILE_CLEANUP_RETRIES", "8"))
 WINDOWS_FILE_CLEANUP_SLEEP = float(os.environ.get("QUANLAN_WINDOWS_FILE_CLEANUP_SLEEP", "0.6"))
@@ -191,16 +180,28 @@ def should_suppress_log_message(message: str) -> bool:
 
 def _detect_font_family_from_candidates(candidates, fallback: str, root=None) -> str:
     preferred = [x for x in candidates if x]
-    try:
-        import tkinter.font as tkfont
-        families = set(tkfont.families(root=root))
-        lower_map = {f.lower(): f for f in families}
-        for name in preferred:
-            found = lower_map.get(str(name).lower())
-            if found:
-                return found
-    except Exception:
-        pass
+    font_dirs = []
+    if os.name == "nt":
+        windir = os.environ.get("WINDIR") or r"C:\Windows"
+        font_dirs.append(os.path.join(windir, "Fonts"))
+    else:
+        font_dirs.extend(["/System/Library/Fonts", "/Library/Fonts", "/usr/share/fonts", "/usr/local/share/fonts"])
+    available = set()
+    for font_dir in font_dirs:
+        if not os.path.isdir(font_dir):
+            continue
+        try:
+            for name in os.listdir(font_dir):
+                stem, ext = os.path.splitext(name)
+                if ext.lower() in {".ttf", ".ttc", ".otf"}:
+                    normalized = re.sub(r"[-_]+", " ", stem).lower()
+                    available.add(normalized)
+        except Exception:
+            continue
+    for name in preferred:
+        normalized = re.sub(r"[-_]+", " ", str(name)).lower()
+        if normalized in available or any(normalized in item for item in available):
+            return str(name)
     return fallback
 
 
@@ -265,7 +266,7 @@ DEEPSEEK_KEY_FILE = os.path.join(SCRIPT_DIR, "deepseek_api_key.txt")
 DOUBAO_KEY_FILE = os.path.join(SCRIPT_DIR, "doubao_api_key.txt")
 DOUBAO_ENDPOINT_FILE = os.path.join(SCRIPT_DIR, "doubao_endpoint_id.txt")
 DOUBAO_API_BASE_URL = os.environ.get("ARK_API_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3").rstrip("/")
-DEFAULT_FOREIGN_MODEL_BASE_URL = "https://www.fhl.mom/v1"
+DEFAULT_FOREIGN_MODEL_BASE_URL = "https://api.dstopology.com/v1"
 DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 MODEL_SCHEME_FILE = os.environ.get("QUANLAN_MODEL_SCHEME_FILE") or os.path.join(SCRIPT_DIR, "quanlan_model_scheme.json")
 TASK_PAGE_SETTINGS_FILE = os.environ.get("QUANLAN_TASK_PAGE_SETTINGS_FILE") or os.path.join(SCRIPT_DIR, "quanlan_task_page_settings.json")
@@ -275,6 +276,7 @@ EMAIL_PACKAGE_DIR_NAME = "99_章节压缩包"
 DEFAULT_PROMPT_TEMPLATE_FILE = _mode_config_path("quanlan_default_prompt_templates.json")
 PROMPT_TEMPLATE_FILE = _mode_config_path("quanlan_prompt_templates.json")
 PROMPT_FRAGMENT_DIR = os.environ.get("QUANLAN_PROMPT_FRAGMENT_DIR") or _mode_config_path("quanlan_prompt_fragments")
+PROMPT_LIBRARY_ROOT = os.environ.get("QUANLAN_PROMPT_LIBRARY_ROOT") or _mode_config_path("quanlan_prompt_libraries")
 CONTENT_STYLE_FILE = _mode_config_path("quanlan_content_styles.json")
 DEFAULT_CONTENT_STYLE = "科学经典解读"
 CONTENT_STYLE_OPTIONS = ["科学经典解读"]
@@ -285,6 +287,26 @@ CONTENT_STYLE_ALIASES = {
     "科学经典": "科学经典解读",
     "脑科学": "科学经典解读",
     "神经科学": "科学经典解读",
+}
+DEFAULT_PROMPT_SCOPE = "science_classic"
+PROMPT_SCOPE_OPTIONS = {
+    "science_classic": "科学经典",
+    "daily_research_digest": "每日研究速递",
+    "culture": "文史",
+    "clip": "剪辑",
+    "more": "更多工具",
+}
+PROMPT_SCOPE_ALIASES = {
+    "science": "science_classic",
+    "科学经典": "science_classic",
+    "digest": "daily_research_digest",
+    "research": "daily_research_digest",
+    "daily": "daily_research_digest",
+    "每日研究速递": "daily_research_digest",
+    "文史": "culture",
+    "culture": "culture",
+    "剪辑": "clip",
+    "clip": "clip",
 }
 
 # 内置脚本生成提示词已删除；请在外部 JSON 配置文件中维护。
@@ -527,6 +549,32 @@ PROMPT_FRAGMENT_KEY_FILES = {
 }
 
 
+def normalize_prompt_scope(value: str | None) -> str:
+    raw = str(value or "").strip()
+    if raw in PROMPT_SCOPE_OPTIONS:
+        return raw
+    lowered = raw.lower()
+    if lowered in PROMPT_SCOPE_ALIASES:
+        return PROMPT_SCOPE_ALIASES[lowered]
+    if raw in PROMPT_SCOPE_ALIASES:
+        return PROMPT_SCOPE_ALIASES[raw]
+    return DEFAULT_PROMPT_SCOPE
+
+
+def prompt_scope_label(scope: str | None = None) -> str:
+    key = normalize_prompt_scope(scope)
+    return PROMPT_SCOPE_OPTIONS.get(key, key)
+
+
+def _prompt_scope_dir(scope: str | None = None) -> str:
+    return os.path.join(PROMPT_LIBRARY_ROOT, normalize_prompt_scope(scope))
+
+
+def _prompt_scope_file(scope: str | None = None, filename: str = "") -> str:
+    safe = str(filename or "").strip().replace("\\", "/").split("/")[-1]
+    return os.path.join(_prompt_scope_dir(scope), safe)
+
+
 def load_prompt_fragment(name: str, fallback: str = "") -> str:
     """读取外置提示词片段；用于把所有可调提示词从 Python 逻辑中拆出来。"""
     safe = str(name or "").strip().replace("\\", "/").split("/")[-1]
@@ -540,6 +588,24 @@ def load_prompt_fragment(name: str, fallback: str = "") -> str:
                 return text
     except Exception:
         pass
+    return str(fallback or "")
+
+
+def load_scoped_prompt_fragment(scope: str | None, name: str, fallback: str = "") -> str:
+    """优先读取功能块独立提示词片段；旧全局片段只作为科学经典兼容兜底。"""
+    safe = str(name or "").strip().replace("\\", "/").split("/")[-1]
+    if not safe:
+        return str(fallback or "")
+    scoped_path = _prompt_scope_file(scope, safe)
+    try:
+        if os.path.exists(scoped_path):
+            text = open(scoped_path, "r", encoding="utf-8").read().strip()
+            if text:
+                return text
+    except Exception:
+        pass
+    if normalize_prompt_scope(scope) == DEFAULT_PROMPT_SCOPE:
+        return load_prompt_fragment(safe, fallback)
     return str(fallback or "")
 
 
@@ -567,7 +633,7 @@ def _upgrade_visual_prompt_template_if_needed(templates: dict) -> dict:
     return dict(templates or {})
 
 
-def _normalize_prompt_templates(data: dict | None, fallback: dict | None = None) -> dict:
+def _normalize_prompt_templates(data: dict | None, fallback: dict | None = None, prompt_scope: str | None = None) -> dict:
     """只保留程序支持的两个提示词槽位；空字段用 fallback 回补。"""
     base = dict(fallback or builtin_prompt_templates())
     if isinstance(data, dict):
@@ -575,9 +641,9 @@ def _normalize_prompt_templates(data: dict | None, fallback: dict | None = None)
             value = data.get(key, "")
             if isinstance(value, str) and value.strip():
                 base[key] = value.strip()
-    # 外置片段优先，方便单独优化提示词而不改 Python 或 JSON。
+    # 功能块独立片段优先；旧全局片段只作为科学经典兼容兜底。
     for key, filename in PROMPT_FRAGMENT_KEY_FILES.items():
-        fragment = load_prompt_fragment(filename, "")
+        fragment = load_scoped_prompt_fragment(prompt_scope or DEFAULT_PROMPT_SCOPE, filename, "")
         if fragment.strip():
             base[key] = fragment.strip()
     return base
@@ -594,11 +660,13 @@ def _read_prompt_template_json(path: str) -> dict | None:
     return None
 
 
-def _write_prompt_template_json(path: str, templates: dict, *, content_style: str | None = None) -> bool:
+def _write_prompt_template_json(path: str, templates: dict, *, content_style: str | None = None, prompt_scope: str | None = None) -> bool:
     try:
-        payload = _normalize_prompt_templates(templates)
+        payload = _normalize_prompt_templates(templates, prompt_scope=prompt_scope)
         if content_style:
             payload["_content_style"] = normalize_content_style(content_style)
+        if prompt_scope:
+            payload["_prompt_scope"] = normalize_prompt_scope(prompt_scope)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
         return True
@@ -661,18 +729,20 @@ B 系列从 Shot_05 开始，只做章节正文的科学机制、证据、实验
 
 SCIENCE_CLASSIC_POLISH_PROMPT = "请在不改变原意和科学边界的前提下润色台词；完整可调模板见 quanlan_prompt_fragments/voiceover_polish.md。\n\n{voiceover_text}"
 
-def _minimal_style_templates(style_key: str) -> dict:
+def _minimal_style_templates(style_key: str, prompt_scope: str | None = None) -> dict:
     """兜底模板：锁定科学经典解读，不再提供其它风格模板。"""
     base = builtin_prompt_templates()
-    base["script_generation"] = load_prompt_fragment("script_generation.md", (SCIENCE_CLASSIC_SCRIPT_PROMPT + "\n\n" + SCIENCE_ONLY_OUTPUT_STABILITY_SUPPLEMENT).strip())
-    base["voiceover_polish"] = load_prompt_fragment("voiceover_polish.md", SCIENCE_CLASSIC_POLISH_PROMPT)
-    return _normalize_prompt_templates(base, builtin_prompt_templates())
+    scope = normalize_prompt_scope(prompt_scope)
+    base["script_generation"] = load_scoped_prompt_fragment(scope, "script_generation.md", (SCIENCE_CLASSIC_SCRIPT_PROMPT + "\n\n" + SCIENCE_ONLY_OUTPUT_STABILITY_SUPPLEMENT).strip())
+    base["voiceover_polish"] = load_scoped_prompt_fragment(scope, "voiceover_polish.md", SCIENCE_CLASSIC_POLISH_PROMPT)
+    return _normalize_prompt_templates(base, builtin_prompt_templates(), scope)
 
 
-def _upgrade_builtin_style_templates(style_key: str, templates: dict) -> tuple[dict, bool]:
+def _upgrade_builtin_style_templates(style_key: str, templates: dict, prompt_scope: str | None = None) -> tuple[dict, bool]:
     """科学著作解读单风格：任何旧风格模板都归一到科学模板，不再迁移/保留其它内容分支。"""
     style_key = DEFAULT_CONTENT_STYLE
-    cleaned = _normalize_prompt_templates(templates or {}, _minimal_style_templates(style_key))
+    scope = normalize_prompt_scope(prompt_scope)
+    cleaned = _normalize_prompt_templates(templates or {}, _minimal_style_templates(style_key, scope), scope)
     # 只要模板里出现旧风格品牌或非科学风格痕迹，就直接回落到科学外置模板。
     probe = "\n".join(str(cleaned.get(k, "")) for k in ("script_generation", "voiceover_polish", "postprocess_requirements"))
     required_markers = (
@@ -681,28 +751,37 @@ def _upgrade_builtin_style_templates(style_key: str, templates: dict) -> tuple[d
         "每张 B 图必须有可见的机制对象",
     )
     if re.search(r"非科学著作解读|剧情流水账", probe) or any(marker not in probe for marker in required_markers):
-        return _minimal_style_templates(style_key), True
+        return _minimal_style_templates(style_key, scope), True
     return cleaned, False
 
 
-def _load_content_style_store() -> dict:
+def _load_content_style_store(prompt_scope: str | None = None) -> dict:
+    prompt_scope = normalize_prompt_scope(prompt_scope)
     data = _read_prompt_template_json(CONTENT_STYLE_FILE)
     if not isinstance(data, dict):
         data = {}
-    styles = data.get("styles") if isinstance(data.get("styles"), dict) else {}
+    libraries = data.get("libraries") if isinstance(data.get("libraries"), dict) else {}
+    legacy_styles = data.get("styles") if isinstance(data.get("styles"), dict) else {}
+    library = libraries.get(prompt_scope) if isinstance(libraries.get(prompt_scope), dict) else {}
+    styles = library.get("styles") if isinstance(library.get("styles"), dict) else {}
+    if prompt_scope == DEFAULT_PROMPT_SCOPE and not styles and legacy_styles:
+        styles = legacy_styles
     changed = False
     for style_key in CONTENT_STYLE_OPTIONS:
         if style_key not in styles or not isinstance(styles.get(style_key), dict):
-            styles[style_key] = {"label": style_key, "templates": _minimal_style_templates(style_key)}
+            styles[style_key] = {"label": style_key, "templates": _minimal_style_templates(style_key, prompt_scope)}
             changed = True
         else:
             templates = styles[style_key].get("templates") if isinstance(styles[style_key].get("templates"), dict) else styles[style_key]
-            templates, upgraded = _upgrade_builtin_style_templates(style_key, templates)
-            normalized = _normalize_prompt_templates(templates, _minimal_style_templates(style_key))
+            templates, upgraded = _upgrade_builtin_style_templates(style_key, templates, prompt_scope)
+            normalized = _normalize_prompt_templates(templates, _minimal_style_templates(style_key, prompt_scope), prompt_scope)
             if upgraded or styles[style_key].get("templates") != normalized:
                 styles[style_key]["templates"] = normalized
                 changed = True
-    store = {"version": data.get("version", 1), "styles": styles}
+    library["label"] = prompt_scope_label(prompt_scope)
+    library["styles"] = styles
+    libraries[prompt_scope] = library
+    store = {"version": data.get("version", 2), "libraries": libraries}
     if changed or not os.path.exists(CONTENT_STYLE_FILE):
         try:
             with open(CONTENT_STYLE_FILE, "w", encoding="utf-8") as f:
@@ -712,23 +791,28 @@ def _load_content_style_store() -> dict:
     return store
 
 
-def get_content_style_templates(style_key: str | None = None) -> dict:
+def get_content_style_templates(style_key: str | None = None, prompt_scope: str | None = None) -> dict:
     style_key = normalize_content_style(style_key or get_active_content_style())
+    prompt_scope = normalize_prompt_scope(prompt_scope)
     try:
-        store = _load_content_style_store()
-        style_data = (store.get("styles") or {}).get(style_key, {})
+        store = _load_content_style_store(prompt_scope)
+        library = (store.get("libraries") or {}).get(prompt_scope, {})
+        style_data = (library.get("styles") or {}).get(style_key, {})
         templates = style_data.get("templates") if isinstance(style_data.get("templates"), dict) else style_data
-        return _normalize_prompt_templates(templates, _minimal_style_templates(style_key))
+        return _normalize_prompt_templates(templates, _minimal_style_templates(style_key, prompt_scope), prompt_scope)
     except Exception:
-        return _minimal_style_templates(style_key)
+        return _minimal_style_templates(style_key, prompt_scope)
 
 
-def save_content_style_templates(style_key: str | None, templates: dict) -> bool:
+def save_content_style_templates(style_key: str | None, templates: dict, prompt_scope: str | None = None) -> bool:
     style_key = normalize_content_style(style_key or get_active_content_style())
-    cleaned = _normalize_prompt_templates(templates, get_content_style_templates(style_key))
+    prompt_scope = normalize_prompt_scope(prompt_scope)
+    cleaned = _normalize_prompt_templates(templates, get_content_style_templates(style_key, prompt_scope), prompt_scope)
     try:
-        store = _load_content_style_store()
-        styles = store.setdefault("styles", {})
+        store = _load_content_style_store(prompt_scope)
+        libraries = store.setdefault("libraries", {})
+        library = libraries.setdefault(prompt_scope, {"label": prompt_scope_label(prompt_scope), "styles": {}})
+        styles = library.setdefault("styles", {})
         current = styles.get(style_key, {}) if isinstance(styles.get(style_key), dict) else {}
         current["label"] = style_key
         current["templates"] = cleaned
@@ -740,59 +824,64 @@ def save_content_style_templates(style_key: str | None, templates: dict) -> bool
         return False
 
 
-def ensure_default_prompt_template_file(style_key: str | None = None) -> dict:
+def ensure_default_prompt_template_file(style_key: str | None = None, prompt_scope: str | None = None) -> dict:
     """
     确保默认提示词可用。新版优先使用 quanlan_content_styles.json 中的当前风格模板；
     旧版 quanlan_default_prompt_templates.json 继续作为兼容兜底。
     """
     style_key = normalize_content_style(style_key or get_active_content_style())
-    style_templates = get_content_style_templates(style_key)
+    prompt_scope = normalize_prompt_scope(prompt_scope)
+    style_templates = get_content_style_templates(style_key, prompt_scope)
     if style_templates:
         return style_templates
     builtin = builtin_prompt_templates()
     data = _read_prompt_template_json(DEFAULT_PROMPT_TEMPLATE_FILE)
     if data is None:
-        _write_prompt_template_json(DEFAULT_PROMPT_TEMPLATE_FILE, builtin)
+        _write_prompt_template_json(DEFAULT_PROMPT_TEMPLATE_FILE, builtin, prompt_scope=prompt_scope)
         return builtin
-    defaults = _upgrade_visual_prompt_template_if_needed(_normalize_prompt_templates(data, builtin))
+    defaults = _upgrade_visual_prompt_template_if_needed(_normalize_prompt_templates(data, builtin, prompt_scope))
     if defaults != data:
-        _write_prompt_template_json(DEFAULT_PROMPT_TEMPLATE_FILE, defaults)
+        _write_prompt_template_json(DEFAULT_PROMPT_TEMPLATE_FILE, defaults, prompt_scope=prompt_scope)
     return defaults
 
 
-def default_prompt_templates(style_key: str | None = None) -> dict:
+def default_prompt_templates(style_key: str | None = None, prompt_scope: str | None = None) -> dict:
     """读取指定内容风格的默认提示词配置。"""
-    return ensure_default_prompt_template_file(style_key)
+    return ensure_default_prompt_template_file(style_key, prompt_scope)
 
 
-def load_prompt_templates(style_key: str | None = None) -> dict:
+def load_prompt_templates(style_key: str | None = None, prompt_scope: str | None = None) -> dict:
     """读取当前风格提示词模板；缺失字段自动回补该风格默认模板。"""
     style_key = normalize_content_style(style_key or get_active_content_style())
-    templates = default_prompt_templates(style_key)
+    prompt_scope = normalize_prompt_scope(prompt_scope)
+    templates = default_prompt_templates(style_key, prompt_scope)
     data = _read_prompt_template_json(PROMPT_TEMPLATE_FILE)
     if data is not None:
         marker = normalize_content_style(data.get("_content_style")) if data.get("_content_style") else ""
+        scope_marker = normalize_prompt_scope(data.get("_prompt_scope")) if data.get("_prompt_scope") else ""
         # 当前程序只做科学著作解读；旧版无标记模板也只能并入科学模板，禁止恢复其它内容风格。
-        if marker == DEFAULT_CONTENT_STYLE or not marker:
-            templates = _normalize_prompt_templates(data, templates)
+        if (marker == DEFAULT_CONTENT_STYLE or not marker) and (scope_marker == prompt_scope or (not scope_marker and prompt_scope == DEFAULT_PROMPT_SCOPE)):
+            templates = _normalize_prompt_templates(data, templates, prompt_scope)
     templates = _upgrade_visual_prompt_template_if_needed(templates)
     return templates
 
 
-def save_prompt_templates(templates: dict, style_key: str | None = None) -> bool:
+def save_prompt_templates(templates: dict, style_key: str | None = None, prompt_scope: str | None = None) -> bool:
     """保存当前风格的运行提示词模板，同时写回风格配置。"""
     style_key = normalize_content_style(style_key or get_active_content_style())
-    cleaned = _normalize_prompt_templates(templates, default_prompt_templates(style_key))
-    ok_style = save_content_style_templates(style_key, cleaned)
-    ok_current = _write_prompt_template_json(PROMPT_TEMPLATE_FILE, cleaned, content_style=style_key)
+    prompt_scope = normalize_prompt_scope(prompt_scope)
+    cleaned = _normalize_prompt_templates(templates, default_prompt_templates(style_key, prompt_scope), prompt_scope)
+    ok_style = save_content_style_templates(style_key, cleaned, prompt_scope)
+    ok_current = _write_prompt_template_json(PROMPT_TEMPLATE_FILE, cleaned, content_style=style_key, prompt_scope=prompt_scope)
     return bool(ok_style and ok_current)
 
 
-def save_default_prompt_templates(templates: dict, style_key: str | None = None) -> bool:
+def save_default_prompt_templates(templates: dict, style_key: str | None = None, prompt_scope: str | None = None) -> bool:
     """把当前提示词写入当前内容风格的默认模板配置。"""
     style_key = normalize_content_style(style_key or get_active_content_style())
-    cleaned = _normalize_prompt_templates(templates, _minimal_style_templates(style_key))
-    return save_content_style_templates(style_key, cleaned)
+    prompt_scope = normalize_prompt_scope(prompt_scope)
+    cleaned = _normalize_prompt_templates(templates, _minimal_style_templates(style_key, prompt_scope), prompt_scope)
+    return save_content_style_templates(style_key, cleaned, prompt_scope)
 
 
 def render_prompt_template(template: str, values: dict) -> str:

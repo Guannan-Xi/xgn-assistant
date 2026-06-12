@@ -1,7 +1,6 @@
 requests>=2.31.0
 openai>=1.54.0
 google-genai>=1.0.0
-customtkinter
 pillow>=10.0.0
 pystray>=0.19.5
 pypdf>=4.0.0

@@ -1005,7 +1005,7 @@ def refresh_postprocess_runtime_config(logger=None) -> dict:
 
     override = {}
     try:
-        templates = load_prompt_templates()
+        templates = load_prompt_templates(prompt_scope=DEFAULT_PROMPT_SCOPE)
         override = parse_postprocess_requirements_text(templates.get("postprocess_requirements", ""))
     except Exception as e:
         if logger:

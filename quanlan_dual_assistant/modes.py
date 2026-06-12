@@ -15,7 +15,6 @@ class ModeSpec:
     subtitle: str
     path: Path
     package: str
-    gui_command: tuple[str, ...]
     cli_command: tuple[str, ...]
 
 
@@ -26,7 +25,6 @@ MODES: dict[str, ModeSpec] = {
         subtitle="科研进展、文献速递、视频号素材生产",
         path=MODES_ROOT / "research",
         package="quanlan_automedia",
-        gui_command=("AutoMediaProducer.py",),
         cli_command=("-m", "quanlan_automedia"),
     ),
     "culture": ModeSpec(
@@ -35,7 +33,6 @@ MODES: dict[str, ModeSpec] = {
         subtitle="书籍解读、文史短视频脚本与分集素材",
         path=MODES_ROOT / "culture",
         package="automedia_core",
-        gui_command=("AutoMediaProducer.py", "--gui"),
         cli_command=("-m", "automedia_core"),
     ),
 }
@@ -60,4 +57,3 @@ def get_mode(key: str) -> ModeSpec:
         valid = ", ".join(MODES)
         raise ValueError(f"Unknown mode: {key!r}. Valid modes: {valid}")
     return MODES[normalized]
-

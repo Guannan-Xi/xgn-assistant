@@ -1,6 +1,12 @@
 {
-  "channel": "dev",
+  "channel": "release",
   "busy": false,
   "active_tasks": [],
-  "updated_at": "2026-06-07 03:22:54"
+  "updated_at": "2026-06-13 01:34:48",
+  "upgrading": false,
+  "last_upgrade_at": "2026-06-13 01:34:48",
+  "last_upgrade_package": "xgn-assistant-release-update-20260613_013447.zip",
+  "dev_root": "D:\\Quanlan\\Codes\\Python\\xgn-assistant",
+  "release_root": "D:\\Quanlan\\Codes\\Python\\xgn-assistant-release",
+  "explicit_update_required": true
 }

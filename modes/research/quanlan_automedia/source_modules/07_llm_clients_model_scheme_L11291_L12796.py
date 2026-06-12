@@ -1719,7 +1719,7 @@ def load_model_scheme() -> dict:
         scheme["text_engine"] = DEFAULT_MODEL_SCHEME["text_engine"]
     if scheme.get("review_engine") not in REVIEW_ENGINE_OPTIONS:
         scheme["review_engine"] = DEFAULT_MODEL_SCHEME["review_engine"]
-    # 业务要求：最终台词润色默认使用 DeepSeek 官方；旧配置里的“跟随脚本模型”自动迁移。
+    # 业务要求：最终台词润色默认跟随总控台同步方案；旧配置里的“跟随脚本模型”自动迁移到当前默认。
     if scheme.get("review_engine") == "跟随脚本模型":
         scheme["review_engine"] = DEFAULT_MODEL_SCHEME["review_engine"]
     scheme["image_engine"] = normalize_image_engine_choice(scheme.get("image_engine"), DEFAULT_MODEL_SCHEME["image_engine"])
@@ -1767,6 +1767,32 @@ def parse_email_recipients(value: str | None) -> list[str]:
     return [x for x in candidates if email_re.match(x)]
 
 
+EMAIL_PROFILE_KEYS = ("science_classic", "daily_research_digest", "culture", "clip", "more")
+
+
+def normalize_email_profiles(value) -> dict:
+    profiles: dict[str, dict] = {}
+    source = value if isinstance(value, dict) else {}
+    for key in EMAIL_PROFILE_KEYS:
+        raw = source.get(key) if isinstance(source.get(key), dict) else {}
+        profiles[key] = {
+            "email_after_completion": bool(raw.get("email_after_completion", raw.get("enabled", False))),
+            "email_recipient": normalize_email_recipient(raw.get("email_recipient", raw.get("recipient", ""))),
+        }
+    return profiles
+
+
+def email_profile_for_module(settings: dict, module_key: str, fallback: dict | None = None) -> dict:
+    module_key = str(module_key or "science_classic").strip() or "science_classic"
+    profiles = normalize_email_profiles((settings or {}).get("email_profiles") if isinstance(settings, dict) else {})
+    profile = profiles.get(module_key) or profiles["science_classic"]
+    fallback = fallback or {}
+    return {
+        "email_after_completion": bool(profile.get("email_after_completion", fallback.get("email_after_completion", False))),
+        "email_recipient": normalize_email_recipient(profile.get("email_recipient", fallback.get("email_recipient", ""))),
+    }
+
+
 def load_task_page_settings() -> dict:
     """读取每个任务页的独立输入状态。只保存轻量配置，不保存目录全文和运行日志。"""
     try:
@@ -1775,11 +1801,16 @@ def load_task_page_settings() -> dict:
                 data = json.load(f)
             if isinstance(data, dict):
                 slots = data.get("slots")
+                email_profiles = normalize_email_profiles(data.get("email_profiles"))
                 if isinstance(slots, list):
-                    return {"slots": [_persistent_task_page_slot(slot) for slot in slots[:MAX_PARALLEL_BOOK_TASKS]]}
+                    return {
+                        "slots": [_persistent_task_page_slot(slot) for slot in slots[:MAX_PARALLEL_BOOK_TASKS]],
+                        "email_profiles": email_profiles,
+                    }
+                return {"slots": [], "email_profiles": email_profiles}
     except Exception:
         pass
-    return {"slots": []}
+    return {"slots": [], "email_profiles": normalize_email_profiles({})}
 
 
 def normalize_text_engine_choice(engine: str, default_engine: str) -> str:
@@ -1838,10 +1869,12 @@ def _persistent_task_page_slot(slot: dict) -> dict:
 def save_task_page_settings(data: dict) -> bool:
     try:
         slots = data.get("slots", []) if isinstance(data, dict) else []
+        email_profiles = normalize_email_profiles(data.get("email_profiles") if isinstance(data, dict) else {})
         payload = {
-            "version": 1,
+            "version": 2,
             "updated_at": datetime.now().isoformat(timespec="seconds"),
             "slots": [_persistent_task_page_slot(slot) for slot in slots[:MAX_PARALLEL_BOOK_TASKS]],
+            "email_profiles": email_profiles,
         }
         with open(TASK_PAGE_SETTINGS_FILE, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
