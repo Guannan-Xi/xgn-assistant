@@ -14,6 +14,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
+import concurrent.futures
+import hashlib
+import shlex
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -31,6 +34,10 @@ MODEL_PROFILE_SECRET_DIR = PROJECT_ROOT / ".model_profiles"
 MODEL_CONNECTION_SECRET_DIR = PROJECT_ROOT / ".model_connection_library"
 MODEL_DOC_SOURCE_URL = "https://quanland.feishu.cn/wiki/JhfUw6lChio8JpkursGc6yBrnac"
 MODEL_DOC_SOURCE_TOKEN = "JhfUw6lChio8JpkursGc6yBrnac"
+MODEL_DOC_SOURCE_URLS = (
+    MODEL_DOC_SOURCE_URL,
+    "https://quanland.feishu.cn/wiki/UZXZwH5dJiPo6DkqqNMcmOEGnJ5",
+)
 FEISHU_DOCS_WORKDIR = Path(os.environ.get("FEISHU_DOCS_WORKDIR", r"C:\Users\XGN\Documents\Codex\2026-06-04\new-chat-3\work\feishu-direct"))
 DEFAULT_PROFILE_ID = "dst"
 DEFAULT_FOREIGN_BASE_URL = "https://api.dstopology.com/v1"
@@ -38,6 +45,7 @@ DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEFAULT_GPT_PRO_BASE_URL = "https://www.fhl.mom/v1"
 DEFAULT_MINIMAX_BASE_URL = "https://api.53hk.cn"
 BGM_LIBRARY_DIR = PROJECT_ROOT / "bgm_library"
+JOB_MODEL_SNAPSHOT_DIR = PROJECT_ROOT / ".workbench_runtime" / "job_model_snapshots"
 AUDIO_LIBRARY_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".flac"}
 LEGACY_FOREIGN_BASE_URLS: set[str] = set()
 PER_MODEL_BASE_URL_FIELDS = {
@@ -104,13 +112,12 @@ MODEL_STEP_ROUTES = {
     "research_text": {"label": "科研速递文本", "role": "text", "roles": ("text",)},
     "polish_text": {"label": "最终文案润色", "role": "polish", "roles": ("polish", "text")},
     "image_generation": {"label": "图片生成", "role": "image", "roles": ("image",)},
-    "gpt_pro_backup": {"label": "GPT-Pro 备用文本", "role": "gpt_pro", "roles": ("gpt_pro",)},
     "voice_bgm": {"label": "配音/BGM", "role": "minimax", "roles": ("minimax",)},
 }
-MODEL_STEP_ORDER = ("script_text", "research_text", "polish_text", "image_generation", "gpt_pro_backup", "voice_bgm")
+MODEL_STEP_ORDER = ("script_text", "research_text", "polish_text", "image_generation", "voice_bgm")
 ROLE_DEFAULT_STEP = {
     "text": "script_text",
-    "gpt_pro": "gpt_pro_backup",
+    "gpt_pro": "",
     "polish": "polish_text",
     "image": "image_generation",
     "minimax": "voice_bgm",
@@ -125,17 +132,43 @@ def _new_job_id() -> str:
 XIAOZHULI_ROOT = Path(os.environ.get("XIAOZHULI_ROOT", r"D:\Quanlan\Codes\Python\quanlan-feishu-assistant"))
 XIAOZHULI_PORT = int(os.environ.get("XIAOZHULI_DASHBOARD_PORT", "8787"))
 XIAOZHULI_TARGET = f"http://127.0.0.1:{XIAOZHULI_PORT}"
+XIAOZHULI_NODE_EXE = os.environ.get("XIAOZHULI_NODE_EXE", r"C:\Program Files\nodejs\node.exe")
+XIAOZHULI_WORKER_SCRIPTS = (
+    "feishu-codex-dispatcher.mjs",
+    "feishu-group-listener.mjs",
+    "feishu-permission-sync.mjs",
+    "feishu-realtime-optimizer.mjs",
+    "feishu-watchdog.mjs",
+)
+XIAOZHULI_STOP_SCRIPT_ORDER = (
+    "feishu-watchdog.mjs",
+    "feishu-group-listener.mjs",
+    "feishu-realtime-optimizer.mjs",
+    "feishu-codex-dispatcher.mjs",
+    "feishu-permission-sync.mjs",
+    "wecom-callback.mjs",
+    "xiaozhuli-dashboard.mjs",
+)
+PRODUCTION_PUBLIC_BASE_URL = os.environ.get("QUANLAN_PRODUCTION_PUBLIC_BASE_URL", os.environ.get("QUANLAN_ALIYUN_PUBLIC_BASE_URL", "http://39.97.248.225")).rstrip("/")
+ASSISTANT_RELEASE_ROOT = Path(os.environ.get("ASSISTANT_RELEASE_ROOT", str(PROJECT_ROOT.parent / "xgn-assistant-release")))
+ASSISTANT_DEV_ROOT = Path(os.environ.get("ASSISTANT_DEV_ROOT", str(PROJECT_ROOT.parent / "xgn-assistant")))
+ASSISTANT_RELEASE_PORT = int(os.environ.get("ASSISTANT_RELEASE_PORT", "8766"))
+ASSISTANT_PRODUCTION_URL = os.environ.get("ASSISTANT_PRODUCTION_URL", f"http://127.0.0.1:{ASSISTANT_RELEASE_PORT}/assistant/").rstrip("/") + "/"
+ASSISTANT_RELEASE_PROCESS: subprocess.Popen[str] | None = None
+XIAOZHULI_PRODUCTION_URL = os.environ.get("XIAOZHULI_PRODUCTION_URL", f"{PRODUCTION_PUBLIC_BASE_URL}/xiaozhuli/").rstrip("/") + "/"
 XIAOZHULI_PROCESS: subprocess.Popen[str] | None = None
 XIAOZHULI_CONFIG_DIRTY = False
 SHARED_CONFIG_UPDATED_AT = ""
 SHARED_MODEL_CONFIG_GUARD_MESSAGE = "Model config is centralized in xgn-assistant total console."
 EEG_ANALYSER_ROOT = Path(os.environ.get("EEG_ANALYSER_ROOT", r"D:\Quanlan\Codes\Python\quanlan-analyser"))
-EEG_ANALYSER_PORT = int(os.environ.get("EEG_ANALYSER_PORT", "4173"))
-EEG_ANALYSER_TARGET = f"http://127.0.0.1:{EEG_ANALYSER_PORT}"
+EEG_ANALYSER_PORT = int(os.environ.get("EEG_ANALYSER_PORT", "4174"))
+EEG_ANALYSER_TARGET = os.environ.get("EEG_ANALYSER_TARGET", "http://39.97.248.225").rstrip("/")
+EEG_ANALYSER_DEVELOPMENT_URL = os.environ.get("EEG_ANALYSER_DEVELOPMENT_URL", f"http://127.0.0.1:{EEG_ANALYSER_PORT}/?v=neuron-eeg-image2-new-file-2")
 EEG_ANALYSER_PROCESS: subprocess.Popen[str] | None = None
+PRODUCTION_CONTROL_TIMEOUT = float(os.environ.get("QUANLAN_PRODUCTION_CONTROL_TIMEOUT", "45") or 45)
 DAILY_RESEARCH_DEFAULT_ROOT = Path(os.environ.get("DAILY_RESEARCH_DEFAULT_ROOT", r"D:\Quanlan\全澜脑科学视频号\科研速递"))
 SCIENCE_TASK_SETTINGS_FILE = PROJECT_ROOT / "modes" / "research" / "quanlan_task_page_settings.json"
-SCIENCE_DEFAULT_ROOT = Path(os.environ.get("SCIENCE_CLASSIC_DEFAULT_ROOT", r"D:\Quanlan\全澜脑科学视频号\神经科学经典"))
+SCIENCE_DEFAULT_ROOT = Path(os.environ.get("SCIENCE_CLASSIC_DEFAULT_ROOT", r"D:\Quanlan\鍏ㄦ緶鑴戠瀛﹁棰戝彿\绁炵粡绉戝缁忓吀"))
 SCIENCE_DEFAULT_PDF_GLOB = "Principles of Neural Science*.pdf"
 
 
@@ -148,6 +181,87 @@ def _read_json(path: Path, fallback: Any) -> Any:
 
 def _write_json(path: Path, data: Any) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _safe_job_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    blocked = re.compile(r"(?:api_key|password|secret|token)$", re.I)
+    return {str(k): v for k, v in payload.items() if not blocked.search(str(k))}
+
+
+def _public_job(job: dict[str, Any] | None, *, include_lines: bool = True) -> dict[str, Any]:
+    if not isinstance(job, dict):
+        return {"status": "missing", "lines": []}
+    hidden = {"process", "model_snapshot"}
+    data = {k: v for k, v in job.items() if k not in hidden}
+    if "job_id" in data and "id" not in data:
+        data["id"] = data["job_id"]
+    if "payload" in data:
+        data["payload"] = _safe_job_payload(data.get("payload") if isinstance(data.get("payload"), dict) else {})
+    if not include_lines:
+        data.pop("lines", None)
+    return data
+
+
+def _public_jobs() -> list[dict[str, Any]]:
+    items = [_public_job(job, include_lines=False) for job in JOBS.values()]
+    return sorted(items, key=lambda item: str(item.get("started_at") or item.get("created_at") or ""), reverse=True)
+
+
+def _terminate_job_process(job: dict[str, Any]) -> bool:
+    proc = job.get("process") if isinstance(job, dict) else None
+    if proc and getattr(proc, "poll", lambda: None)() is None:
+        try:
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True, text=True, timeout=8)
+            else:
+                proc.terminate()
+            job["status"] = "stopping"
+            job["updated_at"] = int(time.time() * 1000)
+            return True
+        except Exception:
+            try:
+                proc.kill()
+                job["status"] = "stopped"
+                job["exit_code"] = job.get("exit_code", -9)
+                job["updated_at"] = int(time.time() * 1000)
+                return True
+            except Exception:
+                return False
+    return False
+
+
+def _stop_job_record(job_id: str) -> dict[str, Any]:
+    job_id = str(job_id or "").strip()
+    if not job_id or job_id not in JOBS:
+        return {"ok": False, "message": "没有找到要停止的任务"}
+    job = JOBS[job_id]
+    terminated = _terminate_job_process(job)
+    if not terminated and job.get("status") in {"starting", "running", "stopping"}:
+        job["status"] = "stopped"
+        job["exit_code"] = job.get("exit_code", -15)
+    job["updated_at"] = int(time.time() * 1000)
+    try:
+        job.setdefault("lines", []).append(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 已收到停止请求，正在收住当前任务。\n")
+    except Exception:
+        pass
+    return {"ok": True, "job_id": job_id, "terminated": terminated, "status": job.get("status", "stopped")}
+
+
+def _delete_job_record(job_id: str) -> dict[str, Any]:
+    job_id = str(job_id or "").strip()
+    if not job_id or job_id not in JOBS:
+        return {"ok": True, "deleted": False, "message": "任务记录不存在或已删除"}
+    job = JOBS[job_id]
+    terminated = _terminate_job_process(job)
+    if job.get("lines") is not None:
+        try:
+            job["lines"].append(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 任务记录已从总控台删除。\n")
+        except Exception:
+            pass
+    JOBS.pop(job_id, None)
+    return {"ok": True, "deleted": True, "terminated": terminated, "job_id": job_id}
 
 
 def _strip_windows_long_prefix(value: str) -> str:
@@ -166,7 +280,7 @@ def _science_path_is_corrupt(value: str) -> bool:
 
 def _find_default_science_pdf() -> str:
     candidates: list[Path] = []
-    preferred = SCIENCE_DEFAULT_ROOT / "神经科学原理" / "原文"
+    preferred = SCIENCE_DEFAULT_ROOT / "绁炵粡绉戝鍘熺悊" / "鍘熸枃"
     roots = [preferred, SCIENCE_DEFAULT_ROOT]
     for root in roots:
         try:
@@ -187,7 +301,7 @@ def _default_science_out_dir_for_pdf(pdf_path: str) -> str:
     stem = path.stem
     if " -- " in stem:
         stem = stem.split(" -- ", 1)[0]
-    return str(path.with_name(f"{stem}_章节PDF直传结果"))
+    return str(path.with_name(f"{stem}_绔犺妭PDF鐩翠紶缁撴灉"))
 
 
 def _repair_science_slot_paths(slot: dict[str, Any]) -> bool:
@@ -261,7 +375,7 @@ def _scriptable_science_chapter(title: str) -> bool:
 def _parse_science_pdf_toc(pdf_path: str) -> list[dict[str, Any]]:
     clean_path = _strip_windows_long_prefix(pdf_path)
     if not clean_path or not Path(clean_path).exists():
-        raise FileNotFoundError(f"PDF 不存在：{clean_path or pdf_path}")
+        raise FileNotFoundError(f"PDF 涓嶅瓨鍦細{clean_path or pdf_path}")
     try:
         from pypdf import PdfReader
     except Exception as exc:
@@ -321,7 +435,7 @@ def _science_state_payload(*, extract: bool = False) -> dict[str, Any]:
         "ok": True,
         "pdf_path": pdf_path,
         "out_dir": out_dir,
-        "content_style": slot.get("content_style") or "科学经典解读",
+        "content_style": slot.get("content_style") or "绉戝缁忓吀瑙ｈ",
         "test_b_image_limit": int(slot.get("test_b_image_limit", 0) or 0),
         "toc": toc,
         "total": len(toc),
@@ -332,7 +446,7 @@ def _science_state_payload(*, extract: bool = False) -> dict[str, Any]:
 
 
 def _science_model_fields_from_console() -> dict[str, Any]:
-    models = _models_with_url_defaults(_model_settings())
+    models = _models_with_url_defaults(_apply_business_steps_to_models(_model_settings()))
     text_model = str(models.get("research_text_model") or models.get("culture_text_model") or models.get("text_engine") or "gpt-5.5")
     polish_model = str(models.get("research_polish_model") or models.get("culture_polish_model") or models.get("polish_engine") or text_model)
     image_model = str(models.get("research_image_model") or models.get("culture_image_model") or models.get("image_engine") or "gpt-image-2")
@@ -340,7 +454,7 @@ def _science_model_fields_from_console() -> dict[str, Any]:
         "text_engine": _daily_text_engine_arg(text_model),
         "review_engine": _daily_text_engine_arg(polish_model),
         "image_engine": _daily_image_engine_arg(image_model),
-        "call_mode": "API 自动调用",
+        "call_mode": "API 鑷姩璋冪敤",
     }
 
 
@@ -358,7 +472,7 @@ def _save_science_state_payload(payload: dict[str, Any]) -> dict[str, Any]:
     slot["current_pdf_path"] = pdf_path
     slot["out_dir"] = out_dir
     _repair_science_slot_paths(slot)
-    slot["content_style"] = "科学经典解读"
+    slot["content_style"] = "绉戝缁忓吀瑙ｈ"
     slot["flow_parse"] = bool(payload.get("flow_parse", slot.get("flow_parse", True)))
     slot["flow_script"] = bool(payload.get("flow_script", slot.get("flow_script", True)))
     slot["flow_image"] = bool(payload.get("flow_image", slot.get("flow_image", True)))
@@ -519,6 +633,47 @@ def _connection_id(value: str) -> str:
     return _profile_id(value)
 
 
+def _connection_public_id_value(connection: dict[str, Any]) -> str:
+    role = _model_connection_role(str(connection.get("role") or ""))
+    return _connection_id(str(connection.get("id") or connection.get("name") or f"{role}-connection"))
+
+
+def _same_connection_id(connection: dict[str, Any], connection_id: str) -> bool:
+    cid = _connection_id(connection_id)
+    raw_id = _connection_id(str(connection.get("id") or ""))
+    public_id = _connection_public_id_value(connection)
+    variants = {raw_id, public_id, raw_id.rstrip("-"), public_id.rstrip("-")}
+    return bool(cid and (cid in variants or cid.rstrip("-") in variants))
+
+
+def _preserve_connection_test_state(target: dict[str, Any], source: dict[str, Any]) -> None:
+    for key in ("last_test_ok", "last_tested_at", "last_test_message", "latency_ms"):
+        if source.get(key) not in ("", None) and target.get(key) in ("", None):
+            target[key] = source.get(key)
+
+
+def _connection_test_status_for(data: dict[str, Any], connection: dict[str, Any]) -> dict[str, Any]:
+    statuses = data.get("connection_test_status") if isinstance(data.get("connection_test_status"), dict) else {}
+    for key in (_connection_public_id_value(connection), _connection_id(str(connection.get("id") or ""))):
+        status = statuses.get(key)
+        if isinstance(status, dict):
+            return status
+    for key, status in statuses.items():
+        if isinstance(status, dict) and _same_connection_id(connection, str(key or "")):
+            return status
+    return {}
+
+
+def _apply_connection_test_status(data: dict[str, Any]) -> dict[str, Any]:
+    connections = data.get("connections") if isinstance(data.get("connections"), list) else []
+    for item in connections:
+        if isinstance(item, dict):
+            status = _connection_test_status_for(data, item)
+            if status:
+                item.update({key: status.get(key) for key in ("last_test_ok", "last_tested_at", "last_test_message", "latency_ms") if key in status})
+    return data
+
+
 def _connection_secret_path(connection_id: str, key_name: str) -> Path:
     return MODEL_CONNECTION_SECRET_DIR / _connection_id(connection_id) / f"{key_name}.txt"
 
@@ -551,27 +706,75 @@ def _connection_has_key(connection: dict[str, Any]) -> bool:
     return bool(_read_secret(_connection_secret_path(cid, key_name)))
 
 
+def _connection_key_value(connection: dict[str, Any]) -> str:
+    cid = _connection_id(str(connection.get("id") or ""))
+    key_name = str(connection.get("key_name") or _key_for_connection_role(str(connection.get("role") or "")))
+    return _read_secret(_connection_secret_path(cid, key_name))
+
+
+def _normalized_connection_base_key(value: Any) -> str:
+    text_value = str(value or "").strip().rstrip("/")
+    if text_value.lower().endswith("/v1"):
+        text_value = text_value[:-3].rstrip("/")
+    return text_value.lower()
+
+
+def _connection_url_key_fingerprint(connection: dict[str, Any], secret_value: str | None = None) -> str:
+    base_key = _normalized_connection_base_key(connection.get("base_url"))
+    secret = str(secret_value if secret_value is not None else _connection_key_value(connection) or "").strip()
+    if not base_key or not secret:
+        return ""
+    digest = hashlib.sha256(secret.encode("utf-8")).hexdigest()
+    return f"{base_key}::{digest}"
+
+
+def _deleted_connection_fingerprints(data: dict[str, Any]) -> set[str]:
+    raw = data.get("deleted_connection_fingerprints")
+    if not isinstance(raw, list):
+        return set()
+    return {str(item or "").strip() for item in raw if str(item or "").strip()}
+
+
+def _clean_public_text(value: Any) -> str:
+    text = str(value or "")
+    replacements = {
+        "鏂囨湰": "文本",
+        "澶囩敤鏂囨湰": "备用文本",
+        "娑﹁壊": "润色",
+        "鐢熷浘": "生图",
+        "閰嶉煶": "配音",
+        "褰撳墠榛樿": "当前默认",
+        "鏂规": "方案",
+        "?顒€????": "本地文件",
+        "?顖氼暔???": "环境变量",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    return text
+
+
 def _connection_public_item(connection: dict[str, Any]) -> dict[str, Any]:
     role = _model_connection_role(str(connection.get("role") or ""))
-    cid = _connection_id(str(connection.get("id") or connection.get("name") or f"{role}-connection"))
+    cid = _connection_public_id_value(connection)
     key_name = str(connection.get("key_name") or _key_for_connection_role(role))
     item = {
         "id": cid,
         "role": role,
         "role_label": str(MODEL_CONNECTION_ROLES[role]["label"]),
-        "name": str(connection.get("name") or cid),
-        "provider": str(connection.get("provider") or _provider_for_connection_role(role)),
-        "base_url": str(connection.get("base_url") or ""),
-        "model": str(connection.get("model") or ""),
+        "name": _clean_public_text(connection.get("name") or cid),
+        "provider": _clean_public_text(connection.get("provider") or _provider_for_connection_role(role)),
+        "base_url": _clean_public_text(connection.get("base_url") or ""),
+        "model": _clean_public_text(connection.get("model") or ""),
         "key_name": key_name,
         "enabled": bool(connection.get("enabled", True)),
         "priority": int(connection.get("priority") or 100),
-        "last_test_ok": bool(connection.get("last_test_ok", False)),
         "last_tested_at": str(connection.get("last_tested_at") or ""),
-        "last_test_message": str(connection.get("last_test_message") or ""),
+        "last_test_message": _clean_public_text(connection.get("last_test_message") or ""),
         "latency_ms": int(float(connection.get("latency_ms") or 0)),
         "key_configured": bool(_read_secret(_connection_secret_path(cid, key_name))),
     }
+    if "last_test_ok" in connection:
+        item["last_test_ok"] = bool(connection.get("last_test_ok"))
     if connection.get("locked"):
         item["locked"] = True
     return item
@@ -636,18 +839,31 @@ def _seed_connection_library_from_profiles(data: dict[str, Any]) -> dict[str, An
         _connection_id(str(item or ""))
         for item in (data.get("deleted_connections") if isinstance(data.get("deleted_connections"), list) else [])
     }
+    deleted_fingerprints = _deleted_connection_fingerprints(data)
     by_id = {
         _connection_id(str(item.get("id") or "")): item
         for item in existing
-        if isinstance(item, dict) and _connection_id(str(item.get("id") or "")) not in deleted
+        if (
+            isinstance(item, dict)
+            and _connection_id(str(item.get("id") or "")) not in deleted
+            and _connection_url_key_fingerprint(item) not in deleted_fingerprints
+        )
     }
     priority = 10
     models = _read_json(MODEL_DEFAULTS_FILE, {})
     if isinstance(models, dict):
         for role in MODEL_CONNECTION_ROLE_ORDER:
-            conn = _connection_from_models(role, "当前默认", models, priority=priority, locked=True)
-            if conn["id"] not in deleted:
-                by_id.setdefault(conn["id"], conn)
+            conn = _connection_from_models(role, "褰撳墠榛樿", models, priority=priority, locked=True)
+            secret = _read_secret(_connection_secret_path(str(conn.get("id") or ""), str(conn.get("key_name") or "")))
+            if not secret:
+                secret, _ = _read_model_secret(str(conn.get("key_name") or ""))
+            if conn["id"] not in deleted and _connection_url_key_fingerprint(conn, secret) not in deleted_fingerprints:
+                existing_item = by_id.get(conn["id"])
+                if existing_item is not None:
+                    _preserve_connection_test_state(conn, existing_item)
+                    by_id[conn["id"]] = {**existing_item, **conn}
+                else:
+                    by_id[conn["id"]] = conn
             priority += 10
     profiles = _read_json(MODEL_PROFILES_FILE, {})
     profile_items = profiles.get("profiles") if isinstance(profiles, dict) else []
@@ -656,7 +872,7 @@ def _seed_connection_library_from_profiles(data: dict[str, Any]) -> dict[str, An
             if not isinstance(profile, dict):
                 continue
             profile_models = profile.get("models") if isinstance(profile.get("models"), dict) else {}
-            name = str(profile.get("name") or profile.get("id") or "方案")
+            name = str(profile.get("name") or profile.get("id") or "鏂规")
             for role in MODEL_CONNECTION_ROLE_ORDER:
                 conn = _connection_from_models(role, name, profile_models, priority=priority, locked=bool(profile.get("locked")))
                 if conn["id"] in deleted:
@@ -665,6 +881,22 @@ def _seed_connection_library_from_profiles(data: dict[str, Any]) -> dict[str, An
                 by_id.setdefault(conn["id"], conn)
                 source_key = _profile_secret_path(str(profile.get("id") or ""), str(conn.get("key_name") or ""))
                 target_key = _connection_secret_path(str(conn.get("id") or ""), str(conn.get("key_name") or ""))
+                source_secret = _read_secret(source_key)
+                if not source_secret:
+                    source_secret = _read_secret(target_key)
+                if not source_secret:
+                    source_secret, _ = _read_model_secret(str(conn.get("key_name") or ""))
+                conn_id = _connection_id(str(conn.get("id") or ""))
+                if _connection_url_key_fingerprint(conn, source_secret) in deleted_fingerprints:
+                    by_id.pop(conn_id, None)
+                    priority += 10
+                    continue
+                if conn_id in by_id:
+                    existing_item = by_id[conn_id]
+                    _preserve_connection_test_state(conn, existing_item)
+                    for key, value in conn.items():
+                        if key not in existing_item or existing_item.get(key) in ("", None):
+                            existing_item[key] = value
                 if source_key.exists() and _read_secret(source_key) and not _read_secret(target_key):
                     _write_secret(target_key, _read_secret(source_key))
                 priority += 10
@@ -686,6 +918,66 @@ def _seed_connection_library_from_profiles(data: dict[str, Any]) -> dict[str, An
         base_url = str(item.get("base_url") or "").strip().rstrip("/")
         if role == "polish" and base_url == f"{DEFAULT_DEEPSEEK_BASE_URL}/v1":
             item["base_url"] = DEFAULT_DEEPSEEK_BASE_URL
+        if role == "polish" and "api.deepseek.com" in _normalized_connection_base_key(item.get("base_url")) and str(item.get("model") or "").strip().lower().startswith("gpt"):
+            item["model"] = "deepseek-chat"
+    collapsed: list[dict[str, Any]] = []
+    seen_url_secret: dict[tuple[str, str], dict[str, Any]] = {}
+    replaced_url_secret_ids: set[str] = set()
+
+    def seed_score(item: dict[str, Any]) -> tuple[int, int, int]:
+        clean_name = _clean_public_text(item.get("name") or "").strip()
+        return (
+            1 if item.get("source") or clean_name.startswith("飞书文档") else 0,
+            1 if clean_name and clean_name != "当前默认" else 0,
+            -int(item.get("priority") or 100),
+        )
+
+    for item in data["connections"]:
+        if not isinstance(item, dict):
+            continue
+        secret = _connection_key_value(item)
+        key = (_normalized_connection_base_key(item.get("base_url")), secret) if secret else ("", "")
+        fingerprint = _connection_url_key_fingerprint(item, secret)
+        if fingerprint and fingerprint in deleted_fingerprints:
+            item_id = _connection_id(str(item.get("id") or ""))
+            if item_id:
+                replaced_url_secret_ids.add(item_id)
+            continue
+        if secret and key[1]:
+            current = seen_url_secret.get(key)
+            if current is not None:
+                if seed_score(item) > seed_score(current):
+                    _preserve_connection_test_state(item, current)
+                    current_id = _connection_id(str(current.get("id") or ""))
+                    if current_id:
+                        replaced_url_secret_ids.add(current_id)
+                    seen_url_secret[key] = item
+                    collapsed = [
+                        existing for existing in collapsed
+                        if _connection_id(str(existing.get("id") or "")) != current_id
+                    ]
+                else:
+                    _preserve_connection_test_state(current, item)
+                    item_id = _connection_id(str(item.get("id") or ""))
+                    if item_id:
+                        replaced_url_secret_ids.add(item_id)
+                    continue
+            else:
+                seen_url_secret[key] = item
+        collapsed.append(item)
+    if replaced_url_secret_ids:
+        deleted = data.get("deleted_connections") if isinstance(data.get("deleted_connections"), list) else []
+        data["deleted_connections"] = sorted(set([*map(str, deleted), *replaced_url_secret_ids]))
+        for route_key in ("step_routes", "active_connections"):
+            block = data.get(route_key)
+            if not isinstance(block, dict):
+                continue
+            for key, value in list(block.items()):
+                if isinstance(value, list):
+                    block[key] = [x for x in value if _connection_id(str(x or "")) not in replaced_url_secret_ids]
+                elif _connection_id(str(value or "")) in replaced_url_secret_ids:
+                    block.pop(key, None)
+    data["connections"] = collapsed
     return data
 
 
@@ -694,10 +986,27 @@ def _read_model_connection_library() -> dict[str, Any]:
     if not isinstance(data, dict):
         data = {}
     data = _seed_connection_library_from_profiles(data)
+    for item in data.get("connections", []):
+        if not isinstance(item, dict):
+            continue
+        role = _model_connection_role(str(item.get("role") or ""))
+        base_url = _normalized_connection_base_key(item.get("base_url"))
+        model = str(item.get("model") or "").strip().lower()
+        if role == "polish" and "api.deepseek.com" in base_url and model.startswith("gpt"):
+            item["model"] = "deepseek-chat"
     data["active_connections"] = data.get("active_connections") if isinstance(data.get("active_connections"), dict) else {}
     data["step_routes"] = data.get("step_routes") if isinstance(data.get("step_routes"), dict) else {}
+    for obsolete_step in ("gpt_pro_backup",):
+        data["step_routes"].pop(obsolete_step, None)
+        data["active_connections"].pop(obsolete_step, None)
+    user_step_routes = data.get("user_step_routes")
+    if not isinstance(user_step_routes, dict):
+        user_step_routes = {}
+    for obsolete_step in ("gpt_pro_backup",):
+        user_step_routes.pop(obsolete_step, None)
     for step, meta in MODEL_STEP_ROUTES.items():
         current = data["step_routes"].get(step)
+        user_managed = bool(user_step_routes.get(step))
         if not isinstance(current, list):
             role = str(meta.get("role") or "text")
             current = [
@@ -710,26 +1019,99 @@ def _read_model_connection_library() -> dict[str, Any]:
         for raw in current:
             cid = _connection_id(str(raw or ""))
             item = _connection_by_id(data, cid)
-            if item and bool(item.get("enabled", True)) and _model_connection_role(str(item.get("role") or "")) in allowed_roles and cid not in cleaned:
-                cleaned.append(cid)
-        for item in data.get("connections", []):
-            if not isinstance(item, dict):
-                continue
-            cid = _connection_id(str(item.get("id") or ""))
-            if bool(item.get("enabled", True)) and _model_connection_role(str(item.get("role") or "")) in allowed_roles and cid and cid not in cleaned:
-                cleaned.append(cid)
+            if item and bool(item.get("enabled", True)) and _model_connection_role(str(item.get("role") or "")) in allowed_roles:
+                real_cid = _connection_id(str(item.get("id") or cid))
+                if real_cid not in cleaned:
+                    cleaned.append(real_cid)
+        if not user_managed and not cleaned:
+            for item in data.get("connections", []):
+                if not isinstance(item, dict):
+                    continue
+                cid = _connection_id(str(item.get("id") or ""))
+                if bool(item.get("enabled", True)) and _model_connection_role(str(item.get("role") or "")) in allowed_roles and cid and cid not in cleaned:
+                    cleaned.append(cid)
         data["step_routes"][step] = cleaned
     _repair_active_model_connections(data)
+    _force_current_model_routes(data)
     _write_json(MODEL_CONNECTION_LIBRARY_FILE, data)
     return data
 
 
+def _dedupe_model_connection_library() -> dict[str, Any]:
+    data = _read_model_connection_library()
+    connections = data.get("connections") if isinstance(data.get("connections"), list) else []
+    by_key: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
+    by_url_secret: dict[tuple[str, str], dict[str, Any]] = {}
+    removed_ids: set[str] = set()
+
+    def score(item: dict[str, Any]) -> tuple[int, int, int, int, int, int]:
+        clean_name = _clean_public_text(item.get("name") or "").strip()
+        source = str(item.get("source") or "")
+        return (
+            1 if source or clean_name.startswith("飞书文档") else 0,
+            1 if clean_name and clean_name != "当前默认" else 0,
+            1 if item.get("last_test_ok") else 0,
+            1 if _connection_has_key(item) else 0,
+            1 if item.get("last_tested_at") else 0,
+            -int(item.get("priority") or 100),
+        )
+
+    for item in connections:
+        if not isinstance(item, dict):
+            continue
+        secret_value = _connection_key_value(item)
+        url_secret_key = (_normalized_connection_base_key(item.get("base_url")), secret_value) if secret_value else ("", "")
+        if secret_value and url_secret_key[0]:
+            current_by_secret = by_url_secret.get(url_secret_key)
+            if current_by_secret is None or score(item) > score(current_by_secret):
+                if current_by_secret is not None:
+                    removed_ids.add(_connection_id(str(current_by_secret.get("id") or "")))
+                by_url_secret[url_secret_key] = item
+            else:
+                removed_ids.add(_connection_id(str(item.get("id") or "")))
+                continue
+        key = (
+            _model_connection_role(str(item.get("role") or "")),
+            str(item.get("provider") or _provider_for_connection_role(_model_connection_role(str(item.get("role") or "")))).strip(),
+            str(item.get("base_url") or "").strip().rstrip("/"),
+            str(item.get("model") or "").strip(),
+            _clean_public_text(item.get("name") or "").strip(),
+        )
+        current = by_key.get(key)
+        if current is None or score(item) > score(current):
+            if current is not None:
+                removed_ids.add(_connection_id(str(current.get("id") or "")))
+            by_key[key] = item
+        else:
+            removed_ids.add(_connection_id(str(item.get("id") or "")))
+    if not removed_ids:
+        return _public_model_connection_library(data)
+    data["connections"] = [item for item in connections if isinstance(item, dict) and _connection_id(str(item.get("id") or "")) not in removed_ids]
+    for route_key in ("step_routes", "active_connections"):
+        block = data.get(route_key)
+        if not isinstance(block, dict):
+            continue
+        for key, value in list(block.items()):
+            if isinstance(value, list):
+                block[key] = [x for x in value if _connection_id(str(x or "")) not in removed_ids]
+            elif _connection_id(str(value or "")) in removed_ids:
+                block.pop(key, None)
+    deleted = data.get("deleted_connections") if isinstance(data.get("deleted_connections"), list) else []
+    data["deleted_connections"] = sorted(set([*map(str, deleted), *removed_ids]))
+    _repair_active_model_connections(data)
+    _force_current_model_routes(data)
+    _write_json(MODEL_CONNECTION_LIBRARY_FILE, data)
+    return _public_model_connection_library(data)
+
+
 def _public_model_connection_library(data: dict[str, Any] | None = None) -> dict[str, Any]:
     data = data or _read_model_connection_library()
+    data = _apply_connection_test_status(data)
     connections = data.get("connections") if isinstance(data.get("connections"), list) else []
     public = [_connection_public_item(item) for item in connections if isinstance(item, dict)]
     grouped: dict[str, list[dict[str, Any]]] = {role: [] for role in MODEL_CONNECTION_ROLE_ORDER}
     by_provider_model: dict[str, dict[str, Any]] = {}
+    by_model: dict[str, dict[str, Any]] = {}
     for item in public:
         grouped.setdefault(str(item.get("role") or "text"), []).append(item)
         provider = str(item.get("provider") or "unknown")
@@ -737,6 +1119,10 @@ def _public_model_connection_library(data: dict[str, Any] | None = None) -> dict
         key = f"{provider}::{model}"
         group = by_provider_model.setdefault(key, {"provider": provider, "model": model, "connections": []})
         group["connections"].append(item)
+        model_group = by_model.setdefault(model, {"model": model, "connections": [], "providers": []})
+        model_group["connections"].append(item)
+        if provider not in model_group["providers"]:
+            model_group["providers"].append(provider)
     routes = data.get("step_routes") if isinstance(data.get("step_routes"), dict) else {}
     return {
         "roles": {role: dict(MODEL_CONNECTION_ROLES[role]) for role in MODEL_CONNECTION_ROLE_ORDER},
@@ -746,6 +1132,7 @@ def _public_model_connection_library(data: dict[str, Any] | None = None) -> dict
         "connections": public,
         "grouped": grouped,
         "by_provider_model": list(by_provider_model.values()),
+        "by_model": list(by_model.values()),
     }
 
 
@@ -757,11 +1144,25 @@ def _connection_sort_key(item: dict[str, Any], *, active_id: str = "") -> tuple[
     return (tested, key_ready, active_bias, latency, int(item.get("priority") or 100), str(item.get("name") or ""))
 
 
+def _route_rank_for_item(item: dict[str, Any], route_rank: dict[str, int]) -> int:
+    for key, rank in route_rank.items():
+        if _same_connection_id(item, key):
+            return rank
+    return 9999
+
+
 def _connection_by_id(data: dict[str, Any], connection_id: str) -> dict[str, Any] | None:
     cid = _connection_id(connection_id)
     for item in data.get("connections", []):
-        if isinstance(item, dict) and _connection_id(str(item.get("id") or "")) == cid:
+        if isinstance(item, dict) and _same_connection_id(item, cid):
             return item
+    if len(cid) >= 40:
+        matches = [
+            item for item in data.get("connections", [])
+            if isinstance(item, dict) and (_connection_id(str(item.get("id") or "")).startswith(cid) or _connection_public_id_value(item).startswith(cid))
+        ]
+        if len(matches) == 1:
+            return matches[0]
     return None
 
 
@@ -777,6 +1178,62 @@ def _repair_active_model_connections(data: dict[str, Any]) -> bool:
             active[role] = _connection_id(str(best.get("id") or ""))
             changed = True
     data["active_connections"] = active
+    return changed
+
+
+def _force_current_model_routes(data: dict[str, Any]) -> bool:
+    changed = False
+    connections = data.get("connections") if isinstance(data.get("connections"), list) else []
+
+    def find(role: str, base_url: str, model: str) -> str:
+        for item in connections:
+            if not isinstance(item, dict):
+                continue
+            if _model_connection_role(str(item.get("role") or "")) != role:
+                continue
+            if str(item.get("base_url") or "").strip().rstrip("/") != base_url.rstrip("/"):
+                continue
+            if str(item.get("model") or "").strip() != model:
+                continue
+            return _connection_id(str(item.get("id") or ""))
+        return ""
+
+    text_id = find("text", DEFAULT_FOREIGN_BASE_URL, "gpt-5.5")
+    image_id = find("image", DEFAULT_FOREIGN_BASE_URL, "gpt-image-2")
+    minimax_id = find("minimax", DEFAULT_MINIMAX_BASE_URL, "speech-2.8-hd")
+    gpt_pro_id = find("gpt_pro", DEFAULT_GPT_PRO_BASE_URL, "gpt-5.5")
+    active = data.get("active_connections") if isinstance(data.get("active_connections"), dict) else {}
+    for key, cid in {
+        "text": text_id,
+        "script_text": text_id,
+        "research_text": text_id,
+        "polish": text_id,
+        "polish_text": text_id,
+        "image": image_id,
+        "image_generation": image_id,
+        "minimax": minimax_id,
+        "voice_bgm": minimax_id,
+        "gpt_pro": gpt_pro_id,
+    }.items():
+        if cid and active.get(key) != cid:
+            active[key] = cid
+            changed = True
+    data["active_connections"] = active
+    routes = data.get("step_routes") if isinstance(data.get("step_routes"), dict) else {}
+    user_step_routes = data.get("user_step_routes") if isinstance(data.get("user_step_routes"), dict) else {}
+    for step, ids in {
+        "script_text": [text_id, gpt_pro_id],
+        "research_text": [text_id, gpt_pro_id],
+        "polish_text": [text_id, gpt_pro_id],
+        "image_generation": [image_id],
+        "voice_bgm": [minimax_id],
+    }.items():
+        cleaned = [cid for cid in ids if cid]
+        current = routes.get(step) if isinstance(routes.get(step), list) else []
+        if cleaned and not current and not user_step_routes.get(step):
+            routes[step] = cleaned
+            changed = True
+    data["step_routes"] = routes
     return changed
 
 
@@ -797,6 +1254,20 @@ def _best_connection_for_step(step: str, data: dict[str, Any] | None = None) -> 
         active = data.get("active_connections") if isinstance(data.get("active_connections"), dict) else {}
         active_ids = {_connection_id(str(active.get(step) or "")), _connection_id(str(active.get(str(MODEL_STEP_ROUTES[step].get("role") or "")) or ""))}
         active_id = next((cid for cid in candidate_ids if _connection_id(cid) in active_ids), "")
+        if step == "image_generation":
+            route_rank = {_connection_id(cid): index for index, cid in enumerate(candidate_ids)}
+            return sorted(
+                candidates,
+                key=lambda item: (
+                    0 if _connection_has_key(item) else 1,
+                    _route_rank_for_item(item, route_rank),
+                    0 if active_id and _connection_id(str(item.get("id") or "")) == active_id else 1,
+                    0 if item.get("last_test_ok") else 1,
+                    int(float(item.get("latency_ms") or 999999)),
+                    int(item.get("priority") or 100),
+                    str(item.get("name") or ""),
+                ),
+            )[0]
         return sorted(candidates, key=lambda item: _connection_sort_key(item, active_id=active_id))[0]
     for role in allowed_roles:
         conn = _best_connection_for_role(role, data)
@@ -889,6 +1360,7 @@ def _models_from_connection_library(models: dict[str, Any] | None = None) -> dic
 
 def _apply_connection_library_to_defaults(*, mark_changed: bool = False) -> dict[str, Any]:
     models = _models_from_connection_library(_model_settings())
+    models = _models_with_url_defaults(_apply_business_steps_to_models(models))
     _write_json(MODEL_DEFAULTS_FILE, _strip_private_model_fields(models))
     if mark_changed:
         _mark_shared_config_changed()
@@ -896,12 +1368,19 @@ def _apply_connection_library_to_defaults(*, mark_changed: bool = False) -> dict
     return models
 
 
+def _write_job_model_snapshot(job_id: str, models: dict[str, Any]) -> Path:
+    JOB_MODEL_SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    path = JOB_MODEL_SNAPSHOT_DIR / f"{re.sub(r'[^A-Za-z0-9_.-]+', '_', job_id)}.json"
+    _write_json(path, _strip_private_model_fields(models))
+    return path
+
+
 def _activate_profile_connections(profile: dict[str, Any]) -> None:
     models = profile.get("models") if isinstance(profile.get("models"), dict) else {}
     if not models:
         return
     data = _read_model_connection_library()
-    profile_name = str(profile.get("name") or profile.get("id") or "当前方案")
+    profile_name = str(profile.get("name") or profile.get("id") or "褰撳墠鏂规")
     existing = [item for item in data.get("connections", []) if isinstance(item, dict)]
     by_id = {_connection_id(str(item.get("id") or "")): item for item in existing}
     active = data.get("active_connections") if isinstance(data.get("active_connections"), dict) else {}
@@ -924,7 +1403,6 @@ def _activate_profile_connections(profile: dict[str, Any]) -> None:
         "research_text": [active.get("text", "")],
         "polish_text": [active.get("polish", ""), active.get("text", "")],
         "image_generation": [active.get("image", "")],
-        "gpt_pro_backup": [active.get("gpt_pro", ""), active.get("text", "")],
         "voice_bgm": [active.get("minimax", "")],
     }
     for step, ids in active_routes.items():
@@ -975,10 +1453,14 @@ def _save_model_connection(payload: dict[str, Any]) -> dict[str, Any]:
     data["connections"] = connections
     deleted = data.get("deleted_connections") if isinstance(data.get("deleted_connections"), list) else []
     data["deleted_connections"] = [item for item in deleted if _connection_id(str(item or "")) != cid]
+    key_value = str(payload.get("api_key") or payload.get(key_name) or "").strip()
+    fingerprint = _connection_url_key_fingerprint({"base_url": base_url}, key_value) if key_value else ""
+    if fingerprint:
+        deleted_fps = data.get("deleted_connection_fingerprints") if isinstance(data.get("deleted_connection_fingerprints"), list) else []
+        data["deleted_connection_fingerprints"] = [item for item in deleted_fps if str(item or "") != fingerprint]
     active = data.get("active_connections") if isinstance(data.get("active_connections"), dict) else {}
     active[role] = cid
     data["active_connections"] = active
-    key_value = str(payload.get("api_key") or payload.get(key_name) or "").strip()
     if key_value:
         _write_secret(_connection_secret_path(cid, key_name), key_value)
         if key_name in MODEL_KEY_FILES:
@@ -1016,10 +1498,15 @@ def _save_step_route(payload: dict[str, Any]) -> dict[str, Any]:
         cid = _connection_id(str(raw or ""))
         item = _connection_by_id(data, cid)
         if item and _model_connection_role(str(item.get("role") or "")) in allowed_roles and cid not in ids:
-            ids.append(cid)
+            real_cid = _connection_public_id_value(item)
+            if real_cid not in ids:
+                ids.append(real_cid)
     routes = data.get("step_routes") if isinstance(data.get("step_routes"), dict) else {}
     routes[step] = ids
     data["step_routes"] = routes
+    user_routes = data.get("user_step_routes") if isinstance(data.get("user_step_routes"), dict) else {}
+    user_routes[step] = True
+    data["user_step_routes"] = user_routes
     _write_json(MODEL_CONNECTION_LIBRARY_FILE, data)
     _apply_connection_library_to_defaults(mark_changed=True)
     return _public_model_connection_library(data)
@@ -1045,6 +1532,12 @@ def _delete_model_connection(payload: dict[str, Any]) -> dict[str, Any]:
     if cid not in deleted:
         deleted.append(cid)
     data["deleted_connections"] = deleted
+    fingerprint = _connection_url_key_fingerprint(removed)
+    if fingerprint:
+        deleted_fps = data.get("deleted_connection_fingerprints") if isinstance(data.get("deleted_connection_fingerprints"), list) else []
+        if fingerprint not in deleted_fps:
+            deleted_fps.append(fingerprint)
+        data["deleted_connection_fingerprints"] = deleted_fps
     active = data.get("active_connections") if isinstance(data.get("active_connections"), dict) else {}
     role = _model_connection_role(str(removed.get("role") or ""))
     if _connection_id(str(active.get(role) or "")) == cid:
@@ -1066,7 +1559,7 @@ def _read_model_profiles() -> dict[str, Any]:
         profiles = []
     default_profile = {
         "id": DEFAULT_PROFILE_ID,
-        "name": "DST 系列",
+        "name": "DST 绯诲垪",
         "locked": True,
         "models": _default_profile_models(),
     }
@@ -1074,7 +1567,7 @@ def _read_model_profiles() -> dict[str, Any]:
     by_id.pop("foreign-default", None)
     by_id[DEFAULT_PROFILE_ID] = {**default_profile, **by_id.get(DEFAULT_PROFILE_ID, {})}
     by_id[DEFAULT_PROFILE_ID]["id"] = DEFAULT_PROFILE_ID
-    by_id[DEFAULT_PROFILE_ID]["name"] = by_id[DEFAULT_PROFILE_ID].get("name") or "DST 系列"
+    by_id[DEFAULT_PROFILE_ID]["name"] = by_id[DEFAULT_PROFILE_ID].get("name") or "DST 绯诲垪"
     by_id[DEFAULT_PROFILE_ID]["locked"] = True
     by_id[DEFAULT_PROFILE_ID]["models"] = {**_default_profile_models(), **(by_id[DEFAULT_PROFILE_ID].get("models") or {})}
     data["profiles"] = list(by_id.values())
@@ -1133,7 +1626,7 @@ def _save_current_as_profile(payload: dict[str, Any]) -> dict[str, Any]:
     name = str(payload.get("profile_name") or payload.get("name") or "").strip()
     profile_id = _profile_id(str(payload.get("profile_id") or name or data.get("active_profile") or "profile"))
     if profile_id == DEFAULT_PROFILE_ID:
-        name = name or "DST 系列"
+        name = name or "DST 绯诲垪"
     name = name or profile_id
     profiles = [item for item in data.get("profiles", []) if isinstance(item, dict) and _profile_id(str(item.get("id") or "")) != profile_id]
     locked = profile_id == DEFAULT_PROFILE_ID
@@ -1224,11 +1717,11 @@ def _read_smtp_password() -> tuple[str, str, str]:
     for path in SMTP_PASSWORD_FILES:
         value = _read_secret(path)
         if value:
-            return value, str(path), "鏈湴鏂囦欢"
+            return value, str(path), "本地文件"
     for name in SMTP_PASSWORD_ENV_NAMES:
         value = os.environ.get(name, "").strip()
         if value:
-            return value, str(SMTP_PASSWORD_FILES[0]), f"鐜鍙橀噺 {name}"
+            return value, str(SMTP_PASSWORD_FILES[0]), f"环境变量 {name}"
     return "", str(SMTP_PASSWORD_FILES[0]), "未配置"
 
 
@@ -1285,7 +1778,7 @@ def _secret_statuses(*, include_values: bool = False, only: str | None = None) -
         value = file_value or env_value
         result[f"{key}_configured"] = bool(value)
         result[f"{key}_path"] = str(file_path)
-        result[f"{key}_source"] = "?????" if file_value else (f"???? {env_name}" if env_value else "???")
+        result[f"{key}_source"] = "本地文件" if file_value else (f"环境变量 {env_name}" if env_value else "未配置")
         if include_values:
             result[key] = value
     return result
@@ -1303,13 +1796,31 @@ def _safe_error(exc: BaseException) -> str:
     return text[:300]
 
 
+def _human_feishu_reader_error(text: str) -> str:
+    raw = str(text or "")
+    if not raw:
+        return "飞书文档读取失败，未返回具体原因。"
+    lower = raw.lower()
+    if "99991400" in raw or "frequency limit" in lower or "rate limit" in lower:
+        return "飞书接口触发频率限制，已跳过飞书补 Key；稍后再点会自动重试。"
+    if "not in current feishu authorization whitelist" in lower or "白名单" in raw:
+        return "飞书文档不在当前授权白名单内，已跳过飞书补 Key；请把该文档加入小猪理飞书白名单。"
+    if "tenant needs read permission" in raw or '"code":131006' in raw:
+        return "飞书文档已在本地白名单内，但云端还没给小猪理企业应用读取权限。"
+    if "timeout" in lower or "timed out" in lower:
+        return "飞书文档读取超时，已跳过飞书补 Key；现有模型库测试会继续执行。"
+    if "feishu api failed 400" in lower:
+        return "飞书接口返回 400，已跳过飞书补 Key；现有模型库测试会继续执行。"
+    return re.sub(r"\s+", " ", raw).strip()[:160]
+
+
 def _http_error_hint(provider: str, exc: urllib.error.HTTPError) -> str:
     if exc.code == 401:
         if provider == "openai":
             return "已连接到 GPT 文本接口，但当前 GPT Key 被服务端拒绝；请检查所选方案的 openai_api_key 是否对该中转站和模型有权限。"
         return "已连接到接口，但当前 Key 被服务端拒绝；请检查 Key 是否属于该服务或是否有模型权限。"
     if exc.code == 403:
-        return "已连接到接口，但当前 Key 没有访问该模型/接口的权限。"
+        return "已连接到接口，但当前 Key 没有访问该模型或接口的权限。"
     return _safe_error(exc)
 
 
@@ -1355,7 +1866,7 @@ def _models_with_url_defaults(models: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _http_json(url: str, *, headers: dict[str, str], payload: dict[str, Any], timeout: int = 30) -> dict[str, Any]:
+def _http_json(url: str, *, headers: dict[str, str], payload: dict[str, Any], timeout: int = 8) -> dict[str, Any]:
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
     with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -1366,7 +1877,7 @@ def _http_json(url: str, *, headers: dict[str, str], payload: dict[str, Any], ti
         return {"raw": body[:500]}
 
 
-def _http_get_json(url: str, *, headers: dict[str, str], timeout: int = 30) -> dict[str, Any]:
+def _http_get_json(url: str, *, headers: dict[str, str], timeout: int = 8) -> dict[str, Any]:
     req = urllib.request.Request(url, headers=headers, method="GET")
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         body = resp.read().decode("utf-8", errors="replace")
@@ -1394,15 +1905,15 @@ def _run_feishu_doc_reader(label: str, command: list[str], cwd: Path, *, env_ext
     except Exception as exc:
         return "", f"{label} 异常：{_safe_error(exc)}"
     if proc.returncode != 0:
-        detail = (proc.stderr or proc.stdout or "读取失败")[-800:]
-        return "", f"{label} 失败：{detail}"
+        detail = proc.stderr or proc.stdout or "读取失败"
+        return "", _human_feishu_reader_error(f"{label} 失败：{detail}")
     return proc.stdout or "", ""
 
 
 def _feishu_model_doc_env() -> dict[str, str]:
     refs = [
-        MODEL_DOC_SOURCE_URL,
-        MODEL_DOC_SOURCE_TOKEN,
+        *MODEL_DOC_SOURCE_URLS,
+        *[ref.rsplit("/", 1)[-1] for ref in MODEL_DOC_SOURCE_URLS],
         *[x.strip() for x in str(os.environ.get("FEISHU_ALLOWED_DOCUMENT_REFS") or "").split(",") if x.strip()],
     ]
     return {
@@ -1413,6 +1924,22 @@ def _feishu_model_doc_env() -> dict[str, str]:
 
 
 def _read_feishu_model_doc_text() -> tuple[str, str]:
+    texts: list[str] = []
+    errors: list[str] = []
+    for source_url in MODEL_DOC_SOURCE_URLS:
+        text, error = _read_single_feishu_model_doc_text(source_url)
+        if text:
+            texts.append(f"\n\n# source: {source_url}\n{text}")
+        elif error:
+            errors.append(f"{source_url}: {error}")
+    if texts:
+        return "\n".join(texts), ""
+    if not errors:
+        errors.append("未找到 Feishu 文档读取脚本。")
+    return "", "\n".join(errors[-3:])
+
+
+def _read_single_feishu_model_doc_text(source_url: str) -> tuple[str, str]:
     errors: list[str] = []
     xiaozhuli_script = XIAOZHULI_ROOT / "feishu-docs.mjs"
     if XIAOZHULI_ROOT.exists():
@@ -1427,13 +1954,13 @@ if (wikiMatch) {
   const body = await authed(`/wiki/v2/spaces/get_node?${query}`, { method: 'GET' }, 'tenant');
   documentId = body.data?.node?.obj_token || '';
 }
-if (!documentId) throw new Error('未解析到飞书文档 token');
+if (!documentId) throw new Error('鏈В鏋愬埌椋炰功鏂囨。 token');
 const raw = await authed(`/docx/v1/documents/${documentId}/raw_content`, { method: 'GET' }, 'tenant');
 process.stdout.write(raw.data?.content || raw.data?.raw_content || '');
 """
         text, error = _run_feishu_doc_reader(
-            "全澜小猪理白名单读取",
-            ["node", "-e", direct_reader, MODEL_DOC_SOURCE_URL],
+            "鍏ㄦ緶灏忕尓鐞嗙櫧鍚嶅崟璇诲彇",
+            ["node", "-e", direct_reader, source_url],
             XIAOZHULI_ROOT,
             env_extra=_feishu_model_doc_env(),
         )
@@ -1444,7 +1971,7 @@ process.stdout.write(raw.data?.content || raw.data?.raw_content || '');
         if xiaozhuli_script.exists():
             text, error = _run_feishu_doc_reader(
                 "全澜小猪理脚本读取",
-                ["node", str(xiaozhuli_script), "--tenant", "raw", MODEL_DOC_SOURCE_URL],
+                ["node", str(xiaozhuli_script), "--tenant", "raw", source_url],
                 XIAOZHULI_ROOT,
                 env_extra=_feishu_model_doc_env(),
             )
@@ -1457,8 +1984,8 @@ process.stdout.write(raw.data?.content || raw.data?.raw_content || '');
         script = Path(r"C:\Users\XGN\.codex\skills\feishu-docs-ops\scripts\feishu-docs.mjs")
     if script.exists():
         text, error = _run_feishu_doc_reader(
-            "备用 Feishu 脚本读取",
-            ["node", str(script), "raw", MODEL_DOC_SOURCE_URL],
+            "澶囩敤 Feishu 鑴氭湰璇诲彇",
+            ["node", str(script), "raw", source_url],
             FEISHU_DOCS_WORKDIR if FEISHU_DOCS_WORKDIR.exists() else PROJECT_ROOT,
             env_extra=_feishu_model_doc_env(),
         )
@@ -1473,11 +2000,11 @@ process.stdout.write(raw.data?.content || raw.data?.raw_content || '');
 
 def _role_from_model_doc_text(text: str) -> str:
     lower = text.lower()
-    if any(x in lower for x in ("image", "gpt-image", "生图", "绘图", "图片")):
+    if any(x in lower for x in ("image", "gpt-image", "鐢熷浘", "缁樺浘", "鍥剧墖")):
         return "image"
-    if any(x in lower for x in ("minimax", "tts", "speech", "配音", "bgm", "音乐")):
+    if any(x in lower for x in ("minimax", "tts", "speech", "閰嶉煶", "bgm", "闊充箰")):
         return "minimax"
-    if any(x in lower for x in ("deepseek", "润色", "polish")):
+    if any(x in lower for x in ("deepseek", "娑﹁壊", "polish")):
         return "polish"
     if any(x in lower for x in ("gpt-pro", "gpt_pro")):
         return "gpt_pro"
@@ -1538,7 +2065,7 @@ def _append_model_doc_candidate(
         role = "image"
     if provider == "minimax":
         role = "minimax"
-    if "gpt-pro" in text.lower() or "gpt_pro" in text.lower():
+    if "gpt-pro" in label.lower() or "gpt_pro" in label.lower():
         role = "gpt_pro"
         provider = "gpt_pro"
     key = (role, base_url, model)
@@ -1561,7 +2088,7 @@ def _extract_model_doc_connections(text: str) -> list[dict[str, str]]:
     found: list[dict[str, str]] = []
     seen: set[tuple[str, str, str]] = set()
     url_re = re.compile(r"https?://[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]+")
-    key_re = re.compile(r"(?:\"key\"\s*:\s*\"([^\"]+)\"|key\s*[：:]\s*([^\s,，]+))", re.I)
+    key_re = re.compile(r"(?:\"key\"\s*:\s*\"([^\"]+)\"|key\s*[:：]\s*([^\s,，；;]+))", re.I)
     lines = [raw.strip() for raw in text.splitlines()]
     context = ""
     pending_label = ""
@@ -1572,10 +2099,15 @@ def _extract_model_doc_connections(text: str) -> list[dict[str, str]]:
         if not line:
             continue
         lower = line.lower()
-        model_line_match = re.search(r"^model\s*[：:]\s*(.+)$", line, re.I)
+        model_line_match = re.search(r"^model\s*[:：]\s*(.+)$", line, re.I)
         if model_line_match and pending_label:
             pending_model_line = model_line_match.group(1).strip()
             pending_label = f"{pending_label} {pending_model_line}"
+            continue
+        if any(token in lower for token in ("gpt", "deepseek", "minimax")) and "key" not in lower and "url" not in lower:
+            pending_label = line
+            pending_base_url = ""
+            pending_model_line = ""
             continue
         if line.startswith("{"):
             try:
@@ -1588,10 +2120,10 @@ def _extract_model_doc_connections(text: str) -> list[dict[str, str]]:
                 _append_model_doc_candidate(found, seen, label=pending_label, context=context, base_url=base_url, api_key=api_key)
                 pending_label = ""
             continue
-        if "系列" in line or "link" in lower or "dstopology" in lower or line in {"FHL系列", "DST系列"}:
+        if "绯诲垪" in line or "link" in lower or "dstopology" in lower or line in {"FHL绯诲垪", "DST绯诲垪"}:
             context = line
             continue
-        base_match = re.search(r"base\s*url\s*[：:]\s*(https?://\S+)", line, re.I)
+        base_match = re.search(r"base\s*url\s*[:：]\s*(https?://\S+)", line, re.I)
         if base_match:
             pending_base_url = base_match.group(1).strip()
             continue
@@ -1600,11 +2132,6 @@ def _extract_model_doc_connections(text: str) -> list[dict[str, str]]:
             api_key = str(key_match.group(1) or key_match.group(2) or "").strip()
             _append_model_doc_candidate(found, seen, label=pending_label, context=context, base_url=pending_base_url, api_key=api_key)
             pending_label = ""
-            pending_base_url = ""
-            pending_model_line = ""
-            continue
-        if any(token in lower for token in ("gpt", "deepseek", "minimax")) and "key" not in lower and "url" not in lower:
-            pending_label = line
             pending_base_url = ""
             pending_model_line = ""
             continue
@@ -1619,21 +2146,72 @@ def _extract_model_doc_connections(text: str) -> list[dict[str, str]]:
 def _merge_model_doc_connections() -> dict[str, Any]:
     text, error = _read_feishu_model_doc_text()
     if error:
-        if "tenant needs read permission" in error or '"code":131006' in error:
-            error = "飞书文档已加入本地白名单，但飞书云端尚未把该 wiki/docx 授权给全澜小猪理企业应用；请在文档权限中给小猪理/应用开放读取。"
+        error = _human_feishu_reader_error(error)
         return {"ok": False, "error": error, "added": [], "candidates": [], "count": 0}
     candidates = _extract_model_doc_connections(text)
+    raw_data = _read_json(MODEL_CONNECTION_LIBRARY_FILE, {})
+    if isinstance(raw_data, dict):
+        candidate_ids = {
+            _connection_id(f"{item['role']}-{item['provider']}-{item['base_url']}-{item['model']}")
+            for item in candidates
+            if isinstance(item, dict)
+        }
+        deleted_ids = raw_data.get("deleted_connections") if isinstance(raw_data.get("deleted_connections"), list) else []
+        cleaned_deleted_ids = [item for item in deleted_ids if _connection_id(str(item or "")) not in candidate_ids]
+        if cleaned_deleted_ids != deleted_ids:
+            raw_data["deleted_connections"] = cleaned_deleted_ids
+            _write_json(MODEL_CONNECTION_LIBRARY_FILE, raw_data)
     data = _read_model_connection_library()
     existing = {
         (_model_connection_role(str(item.get("role") or "")), str(item.get("base_url") or "").rstrip("/"), str(item.get("model") or ""))
         for item in data.get("connections", [])
         if isinstance(item, dict)
     }
+    existing_url_keys = {
+        (_normalized_connection_base_key(item.get("base_url")), _connection_key_value(item))
+        for item in data.get("connections", [])
+        if isinstance(item, dict) and _connection_key_value(item)
+    }
+    deleted_fingerprints = _deleted_connection_fingerprints(data)
     added: list[dict[str, str]] = []
     connections = data.get("connections") if isinstance(data.get("connections"), list) else []
     priority = max([int(item.get("priority") or 0) for item in connections if isinstance(item, dict)] or [0]) + 10
+    deleted_ids = data.get("deleted_connections") if isinstance(data.get("deleted_connections"), list) else []
+    changed = False
     for candidate in candidates:
         key = (_model_connection_role(candidate["role"]), candidate["base_url"].rstrip("/"), candidate["model"])
+        candidate_secret = str(candidate.get("api_key") or "").strip()
+        if candidate_secret and _connection_url_key_fingerprint({"base_url": candidate.get("base_url")}, candidate_secret) in deleted_fingerprints:
+            continue
+        matching_url_key = [
+            item for item in connections
+            if (
+                isinstance(item, dict)
+                and candidate_secret
+                and _normalized_connection_base_key(item.get("base_url")) == _normalized_connection_base_key(candidate.get("base_url"))
+                and _connection_key_value(item) == candidate_secret
+            )
+        ]
+        if matching_url_key:
+            for item in matching_url_key:
+                old_key_name = str(item.get("key_name") or _key_for_connection_role(str(item.get("role") or "")))
+                cid = _connection_id(str(item.get("id") or ""))
+                item["role"] = candidate["role"]
+                item["name"] = candidate["name"]
+                item["provider"] = candidate["provider"]
+                item["base_url"] = candidate["base_url"]
+                item["model"] = candidate["model"]
+                item["key_name"] = _key_for_connection_role(candidate["role"])
+                item["source"] = str(candidate.get("source") or MODEL_DOC_SOURCE_URL)
+                changed = True
+                new_key_name = str(item.get("key_name") or old_key_name)
+                if cid and old_key_name != new_key_name and not _read_secret(_connection_secret_path(cid, new_key_name)):
+                    _write_secret(_connection_secret_path(cid, new_key_name), candidate_secret)
+            existing_url_keys.add((_normalized_connection_base_key(candidate.get("base_url")), candidate_secret))
+            existing.add(key)
+            continue
+        if candidate_secret and (_normalized_connection_base_key(candidate.get("base_url")), candidate_secret) in existing_url_keys:
+            continue
         if key in existing:
             for item in connections:
                 if not isinstance(item, dict):
@@ -1647,6 +2225,10 @@ def _merge_model_doc_connections() -> dict[str, Any]:
                     break
             continue
         cid = _connection_id(f"{candidate['role']}-{candidate['provider']}-{candidate['base_url']}-{candidate['model']}")
+        if cid in deleted_ids:
+            deleted_ids = [item for item in deleted_ids if _connection_id(str(item or "")) != cid]
+            data["deleted_connections"] = deleted_ids
+            changed = True
         connections.append({
             "id": cid,
             "role": candidate["role"],
@@ -1657,17 +2239,241 @@ def _merge_model_doc_connections() -> dict[str, Any]:
             "key_name": _key_for_connection_role(candidate["role"]),
             "enabled": True,
             "priority": priority,
-            "source": MODEL_DOC_SOURCE_URL,
+            "source": str(candidate.get("source") or MODEL_DOC_SOURCE_URL),
         })
         if candidate.get("api_key"):
             _write_secret(_connection_secret_path(cid, _key_for_connection_role(candidate["role"])), str(candidate.get("api_key") or ""))
+            existing_url_keys.add((_normalized_connection_base_key(candidate.get("base_url")), str(candidate.get("api_key") or "")))
         priority += 10
         added.append({k: v for k, v in candidate.items() if k != "api_key"})
         existing.add(key)
+        changed = True
     data["connections"] = connections
-    _write_json(MODEL_CONNECTION_LIBRARY_FILE, data)
+    if changed:
+        _write_json(MODEL_CONNECTION_LIBRARY_FILE, data)
+    _dedupe_model_connection_library()
     public_candidates = [{k: v for k, v in item.items() if k != "api_key"} for item in candidates]
     return {"ok": True, "added": added, "candidates": public_candidates, "count": len(added)}
+
+
+def _clear_deleted_markers_for_feishu_candidates(candidates: list[dict[str, str]]) -> None:
+    data = _read_json(MODEL_CONNECTION_LIBRARY_FILE, {})
+    if not isinstance(data, dict):
+        return
+    candidate_ids = {
+        _connection_id(f"{item['role']}-{item['provider']}-{item['base_url']}-{item['model']}")
+        for item in candidates
+        if isinstance(item, dict)
+    }
+    candidate_fps = {
+        _connection_url_key_fingerprint({"base_url": item.get("base_url")}, str(item.get("api_key") or ""))
+        for item in candidates
+        if isinstance(item, dict) and item.get("api_key")
+    }
+    candidate_fps.discard("")
+    changed = False
+    deleted_ids = data.get("deleted_connections") if isinstance(data.get("deleted_connections"), list) else []
+    cleaned_ids = [item for item in deleted_ids if _connection_id(str(item or "")) not in candidate_ids]
+    if cleaned_ids != deleted_ids:
+        data["deleted_connections"] = cleaned_ids
+        changed = True
+    deleted_fps = data.get("deleted_connection_fingerprints") if isinstance(data.get("deleted_connection_fingerprints"), list) else []
+    cleaned_fps = [item for item in deleted_fps if str(item or "") not in candidate_fps]
+    if cleaned_fps != deleted_fps:
+        data["deleted_connection_fingerprints"] = cleaned_fps
+        changed = True
+    if changed:
+        _write_json(MODEL_CONNECTION_LIBRARY_FILE, data)
+
+
+def _prune_connection_library_to_feishu_candidates(candidates: list[dict[str, str]]) -> dict[str, Any]:
+    allowed = {
+        _connection_url_key_fingerprint({"base_url": item.get("base_url")}, str(item.get("api_key") or ""))
+        for item in candidates
+        if isinstance(item, dict) and item.get("api_key")
+    }
+    allowed.discard("")
+    if not allowed:
+        return {"removed_count": 0, "removed": []}
+    data = _read_model_connection_library()
+    connections = data.get("connections") if isinstance(data.get("connections"), list) else []
+    kept: list[dict[str, Any]] = []
+    removed: list[dict[str, Any]] = []
+    for item in connections:
+        if not isinstance(item, dict):
+            continue
+        fingerprint = _connection_url_key_fingerprint(item)
+        if fingerprint and fingerprint not in allowed:
+            removed.append(item)
+        else:
+            kept.append(item)
+    if not removed:
+        return {"removed_count": 0, "removed": []}
+    removed_ids = {_connection_id(str(item.get("id") or "")) for item in removed}
+    data["connections"] = kept
+    for route_key in ("step_routes", "active_connections"):
+        block = data.get(route_key)
+        if not isinstance(block, dict):
+            continue
+        for key, value in list(block.items()):
+            if isinstance(value, list):
+                block[key] = [x for x in value if _connection_id(str(x or "")) not in removed_ids]
+            elif _connection_id(str(value or "")) in removed_ids:
+                block.pop(key, None)
+    deleted = data.get("deleted_connections") if isinstance(data.get("deleted_connections"), list) else []
+    data["deleted_connections"] = sorted(set([*map(str, deleted), *removed_ids]))
+    deleted_fps = data.get("deleted_connection_fingerprints") if isinstance(data.get("deleted_connection_fingerprints"), list) else []
+    removed_fps = [_connection_url_key_fingerprint(item) for item in removed]
+    data["deleted_connection_fingerprints"] = sorted(set([*map(str, deleted_fps), *[fp for fp in removed_fps if fp]]))
+    _repair_active_model_connections(data)
+    _write_json(MODEL_CONNECTION_LIBRARY_FILE, data)
+    return {
+        "removed_count": len(removed),
+        "removed": [_connection_public_item(item) for item in removed],
+    }
+
+
+def _align_connection_library_to_feishu_candidates(candidates: list[dict[str, str]]) -> dict[str, Any]:
+    candidate_by_fp = {
+        _connection_url_key_fingerprint({"base_url": item.get("base_url")}, str(item.get("api_key") or "")): item
+        for item in candidates
+        if isinstance(item, dict) and item.get("api_key")
+    }
+    candidate_by_fp.pop("", None)
+    if not candidate_by_fp:
+        return {"aligned_count": 0}
+    data = _read_model_connection_library()
+    changed = False
+    aligned = 0
+    for item in data.get("connections", []):
+        if not isinstance(item, dict):
+            continue
+        candidate = candidate_by_fp.get(_connection_url_key_fingerprint(item))
+        if not candidate:
+            continue
+        desired = {
+            "role": candidate["role"],
+            "name": candidate["name"],
+            "provider": candidate["provider"],
+            "base_url": candidate["base_url"],
+            "model": candidate["model"],
+            "key_name": _key_for_connection_role(candidate["role"]),
+            "source": str(candidate.get("source") or MODEL_DOC_SOURCE_URL),
+        }
+        for key, value in desired.items():
+            if item.get(key) != value:
+                item[key] = value
+                changed = True
+        cid = _connection_id(str(item.get("id") or ""))
+        candidate_secret = str(candidate.get("api_key") or "")
+        new_key_name = str(item.get("key_name") or _key_for_connection_role(str(item.get("role") or "")))
+        if cid and candidate_secret and not _read_secret(_connection_secret_path(cid, new_key_name)):
+            _write_secret(_connection_secret_path(cid, new_key_name), candidate_secret)
+        aligned += 1
+    if changed:
+        _write_json(MODEL_CONNECTION_LIBRARY_FILE, data)
+    return {"aligned_count": aligned}
+
+
+def _repair_missing_connection_keys_from_feishu() -> dict[str, Any]:
+    text, error = _read_feishu_model_doc_text()
+    if error:
+        text = ""
+    keyed_candidates = [item for item in _extract_model_doc_connections(text or "") if item.get("api_key")]
+    if keyed_candidates:
+        _clear_deleted_markers_for_feishu_candidates(keyed_candidates)
+    before = _read_model_connection_library()
+    before_count = len([item for item in before.get("connections", []) if isinstance(item, dict)])
+    _dedupe_model_connection_library()
+    after_dedupe = _read_model_connection_library()
+    dedupe_count = len([item for item in after_dedupe.get("connections", []) if isinstance(item, dict)])
+
+    before_missing = {
+        _connection_id(str(item.get("id") or ""))
+        for item in after_dedupe.get("connections", [])
+        if isinstance(item, dict) and not _connection_has_key(item)
+    }
+    merge = _merge_model_doc_connections()
+    if not merge.get("ok"):
+        return {
+            "ok": False,
+            "error": str(merge.get("error") or "飞书模型文档读取失败"),
+            "duplicates_removed": max(0, before_count - dedupe_count),
+            "filled": [],
+            "still_missing": [
+                _connection_public_item(item)
+                for item in after_dedupe.get("connections", [])
+                if isinstance(item, dict) and _connection_id(str(item.get("id") or "")) in before_missing
+            ],
+        }
+
+    data = _read_model_connection_library()
+    changed = False
+    verified: list[dict[str, Any]] = []
+    updated: list[dict[str, Any]] = []
+    for item in data.get("connections", []):
+        if not isinstance(item, dict):
+            continue
+        role = _model_connection_role(str(item.get("role") or ""))
+        model = str(item.get("model") or "").strip().lower()
+        base_url = _normalized_connection_base_key(item.get("base_url"))
+        key_name = str(item.get("key_name") or _key_for_connection_role(role))
+        current_key = _connection_key_value(item)
+        match = None
+        for candidate in keyed_candidates:
+            candidate_role = _model_connection_role(str(candidate.get("role") or ""))
+            candidate_model = str(candidate.get("model") or "").strip().lower()
+            if candidate_model != model or _normalized_connection_base_key(candidate.get("base_url")) != base_url:
+                continue
+            if candidate_role == role:
+                match = candidate
+                break
+            if role in {"text", "gpt_pro", "polish"} and candidate_role in {"text", "gpt_pro"} and model.startswith("gpt"):
+                match = candidate
+                break
+        if match:
+            cid = _connection_id(str(item.get("id") or ""))
+            candidate_key = str(match.get("api_key") or "")
+            if current_key != candidate_key:
+                _write_secret(_connection_secret_path(cid, key_name), candidate_key)
+                updated.append(_connection_public_item(item))
+                changed = True
+            else:
+                verified.append(_connection_public_item(item))
+    if changed:
+        _write_json(MODEL_CONNECTION_LIBRARY_FILE, data)
+    pruned = _prune_connection_library_to_feishu_candidates(keyed_candidates)
+    aligned = _align_connection_library_to_feishu_candidates(keyed_candidates)
+    _dedupe_model_connection_library()
+    data = _read_model_connection_library()
+
+    filled: list[dict[str, Any]] = []
+    still_missing: list[dict[str, Any]] = []
+    for item in data.get("connections", []):
+        if not isinstance(item, dict):
+            continue
+        cid = _connection_id(str(item.get("id") or ""))
+        public = _connection_public_item(item)
+        if cid in before_missing and public.get("key_configured"):
+            filled.append(public)
+        elif not public.get("key_configured"):
+            still_missing.append(public)
+    if filled:
+        _apply_connection_library_to_defaults(mark_changed=True)
+    return {
+        "ok": True,
+        "duplicates_removed": max(0, before_count - dedupe_count),
+        "filled": filled,
+        "updated": updated,
+        "verified": verified,
+        "still_missing": still_missing,
+        "added_count": int(merge.get("count") or 0),
+        "candidate_count": len(merge.get("candidates") or []),
+        "pruned_count": int(pruned.get("removed_count") or 0),
+        "pruned": pruned.get("removed") or [],
+        "aligned_count": int(aligned.get("aligned_count") or 0),
+        "model_connection_library": _public_model_connection_library(data),
+    }
 
 
 def _failed_step_keys(report: dict[str, Any]) -> list[str]:
@@ -1716,6 +2522,41 @@ def _attach_doc_connections_to_failed_steps(failed_steps: list[str], candidates:
     return {"changed_steps": changed_steps, "route_count": added_route_count}
 
 
+def _attach_passed_connections_to_failed_steps(failed_steps: list[str]) -> dict[str, Any]:
+    data = _read_model_connection_library()
+    routes = data.get("step_routes") if isinstance(data.get("step_routes"), dict) else {}
+    changed_steps: list[str] = []
+    added_route_count = 0
+    for step in failed_steps:
+        meta = MODEL_STEP_ROUTES.get(step)
+        if not meta:
+            continue
+        allowed_roles = {str(x) for x in (meta.get("roles") or (meta.get("role") or "text",))}
+        current = [_connection_id(str(x or "")) for x in routes.get(step, []) if str(x or "")]
+        passed = []
+        for item in data.get("connections", []):
+            if not isinstance(item, dict) or not bool(item.get("enabled", True)):
+                continue
+            status = _connection_test_status_for(data, item)
+            if (item.get("last_test_ok") is True or status.get("last_test_ok") is True) and _model_connection_role(str(item.get("role") or "")) in allowed_roles:
+                item = {**item, **status}
+                passed.append(item)
+        before_count = len(current)
+        for item in sorted(passed, key=lambda item: _connection_sort_key(item)):
+            cid = _connection_public_id_value(item)
+            if cid and cid not in current:
+                current.insert(0, cid)
+        if len(current) != before_count:
+            routes[step] = current
+            changed_steps.append(step)
+            added_route_count += len(current) - before_count
+    data["step_routes"] = routes
+    if changed_steps:
+        data["user_step_routes"] = {**(data.get("user_step_routes") if isinstance(data.get("user_step_routes"), dict) else {}), **{step: True for step in changed_steps}}
+        _write_json(MODEL_CONNECTION_LIBRARY_FILE, data)
+    return {"changed_steps": changed_steps, "route_count": added_route_count}
+
+
 def _test_step_routes_with_repair() -> dict[str, Any]:
     initial = _test_step_routes()
     failed_steps = _failed_step_keys(initial)
@@ -1731,6 +2572,17 @@ def _test_step_routes_with_repair() -> dict[str, Any]:
     }
     if not failed_steps:
         return {**initial, "repair": repair}
+    attached_passed = _attach_passed_connections_to_failed_steps(failed_steps)
+    if int(attached_passed.get("route_count") or 0) > 0:
+        repair["changed_steps"] = attached_passed.get("changed_steps", [])
+        repair["route_count"] = int(attached_passed.get("route_count") or 0)
+        repaired = _test_step_routes()
+        repair["retested"] = True
+        repair["remaining_failed_steps"] = _failed_step_keys(repaired)
+        if not repair["remaining_failed_steps"]:
+            repair["ok"] = True
+            return {**repaired, "initial_summary": initial.get("summary", []), "repair": repair}
+        failed_steps = list(repair["remaining_failed_steps"])
     merge = _merge_model_doc_connections()
     repair["ok"] = bool(merge.get("ok"))
     repair["added_count"] = int(merge.get("count") or 0)
@@ -1752,7 +2604,7 @@ def _test_step_routes_with_repair() -> dict[str, Any]:
 def _test_model(provider: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     started = time.perf_counter()
     provider = provider.strip().lower()
-    models = _model_settings()
+    models = _apply_business_steps_to_models(_model_settings())
     payload = payload if isinstance(payload, dict) else {}
     connection_id = _connection_id(str(payload.get("connection_id") or ""))
     if connection_id:
@@ -1770,15 +2622,19 @@ def _test_model(provider: str, payload: dict[str, Any] | None = None) -> dict[st
             base_url = str(item.get("base_url") or "")
             model_name = str(item.get("model") or "")
             if role == "text":
+                base_url = _normalized_defaultable_base_url(base_url, DEFAULT_FOREIGN_BASE_URL)
                 payload.update({"foreign_base_url": base_url, "culture_text_base_url": base_url, "culture_text_model": model_name, "text_engine": model_name})
                 provider = "openai"
             elif role == "gpt_pro":
+                base_url = _normalized_defaultable_base_url(base_url, DEFAULT_FOREIGN_BASE_URL)
                 payload.update({"gpt_pro_base_url": base_url, "culture_text_model": model_name, "text_engine": model_name})
                 provider = "gpt_pro"
             elif role == "polish":
+                base_url = (base_url or DEFAULT_DEEPSEEK_BASE_URL).strip().rstrip("/")
                 payload.update({"deepseek_base_url": base_url, "culture_polish_base_url": base_url, "culture_polish_model": model_name, "polish_engine": model_name})
                 provider = "deepseek"
             elif role == "image":
+                base_url = _normalized_defaultable_base_url(base_url, DEFAULT_FOREIGN_BASE_URL)
                 payload.update({"culture_image_base_url": base_url, "gpt_image_base_url": base_url, "culture_image_model": model_name, "image_engine": model_name})
                 provider = "image"
             elif role == "minimax":
@@ -1793,7 +2649,6 @@ def _test_model(provider: str, payload: dict[str, Any] | None = None) -> dict[st
     foreign_base = _normalized_base_url(foreign_base_value, DEFAULT_FOREIGN_BASE_URL)
     deepseek_base = (deepseek_base_value or DEFAULT_DEEPSEEK_BASE_URL).strip().rstrip("/")
     culture_text_base = _model_base_url(models, "culture_text_base_url", foreign_base)
-    research_text_base = _model_base_url(models, "research_text_base_url", foreign_base)
     culture_image_base = _model_base_url(models, "culture_image_base_url", foreign_base)
     gpt_pro_base = _model_base_url(models, "gpt_pro_base_url", foreign_base)
     attempt_model = ""
@@ -1829,12 +2684,12 @@ def _test_model(provider: str, payload: dict[str, Any] | None = None) -> dict[st
             )
             ok = bool(data.get("choices"))
             return {"ok": ok, "message": f"GPT-Pro 测试{'通过' if ok else '未拿到回复'}。", "model": model, "endpoint": gpt_pro_base}
-        if provider in {"deepseek", "gpt_pro"}:
+        if provider == "deepseek":
             key, _, from_profile = _read_test_secret("deepseek_api_key", payload)
             if not key:
                 message = "所选方案 DeepSeek Key 未配置。" if from_profile else "DeepSeek Key 未配置。"
                 return {"ok": False, "message": message, "suggestion": "先粘贴并保存 DeepSeek Key。"}
-            model = "deepseek-chat" if provider == "deepseek" else str(models.get("culture_polish_model") or "gpt-5.5")
+            model = "deepseek-chat"
             attempt_model, attempt_endpoint = model, deepseek_base
             data = _http_json(
                 f"{deepseek_base}/chat/completions",
@@ -1853,12 +2708,12 @@ def _test_model(provider: str, payload: dict[str, Any] | None = None) -> dict[st
             data = _http_get_json(
                 f"{culture_image_base}/models",
                 headers={"Authorization": f"Bearer {key}"},
-                timeout=30,
+                timeout=8,
             )
             model_ids = {str(item.get("id") or "") for item in data.get("data", []) if isinstance(item, dict)}
             ok = model in model_ids if model_ids else False
-            message = f"绘图模型 {model} {'已在模型列表中' if ok else '未在模型列表中'}。未实际生图，避免消耗额度。"
-            return {"ok": ok, "message": message, "model": model, "endpoint": culture_image_base, "available_models": sorted(model_ids)[:20]}
+            message = f"绘图模型 {model} {'已在模型列表中' if ok else '未在模型列表中'}。这是模型列表检查，未实际生图；真实生图仍以任务运行结果为准。"
+            return {"ok": ok, "message": message, "model": model, "endpoint": culture_image_base, "available_models": sorted(model_ids)[:20], "list_only": True}
         if provider == "minimax":
             key = str(payload.get("minimax_api_key") or "").strip()
             if not key:
@@ -1875,38 +2730,55 @@ def _test_model(provider: str, payload: dict[str, Any] | None = None) -> dict[st
     except Exception as exc:
         return {"ok": False, "message": f"{provider} 测试失败：{type(exc).__name__}", "suggestion": _safe_error(exc), "model": attempt_model, "endpoint": attempt_endpoint}
     finally:
-        pass
-
-
+        _ = started
 def _record_connection_test_result(connection_id: str, result: dict[str, Any]) -> dict[str, Any]:
     cid = _connection_id(connection_id)
     if not cid:
         return _public_model_connection_library()
-    data = _read_model_connection_library()
+    tested_public = _connection_by_id(_read_model_connection_library(), cid) or {}
+    tested_role = _model_connection_role(str(tested_public.get("role") or ""))
+    tested_base = _normalized_connection_base_key(tested_public.get("base_url"))
+    tested_model = str(tested_public.get("model") or "").strip().lower()
+    data = _read_json(MODEL_CONNECTION_LIBRARY_FILE, {})
+    if not isinstance(data, dict):
+        data = {}
+    connections = data.get("connections") if isinstance(data.get("connections"), list) else []
+    statuses = data.get("connection_test_status") if isinstance(data.get("connection_test_status"), dict) else {}
+    status_payload = {
+        "last_test_ok": bool(result.get("ok")),
+        "last_tested_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "last_test_message": str(result.get("message") or "")[:240],
+    }
+    elapsed = result.get("elapsed_seconds")
+    try:
+        status_payload["latency_ms"] = int(float(elapsed) * 1000)
+    except Exception:
+        pass
+    statuses[cid] = status_payload
+    data["connection_test_status"] = statuses
     changed = False
-    for item in data.get("connections", []):
-        if isinstance(item, dict) and _connection_id(str(item.get("id") or "")) == cid:
-            item["last_test_ok"] = bool(result.get("ok"))
-            item["last_tested_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-            item["last_test_message"] = str(result.get("message") or "")[:240]
-            elapsed = result.get("elapsed_seconds")
-            try:
-                item["latency_ms"] = int(float(elapsed) * 1000)
-            except Exception:
-                pass
+    for item in connections:
+        if not isinstance(item, dict):
+            continue
+        item_role = _model_connection_role(str(item.get("role") or ""))
+        item_base = _normalized_connection_base_key(item.get("base_url"))
+        item_model = str(item.get("model") or "").strip().lower()
+        same_public = _same_connection_id(item, cid)
+        same_route = bool(tested_role and item_role == tested_role and item_base == tested_base and item_model == tested_model)
+        if same_public or same_route:
+            item.update(status_payload)
             changed = True
-            break
-    if changed:
-        _write_json(MODEL_CONNECTION_LIBRARY_FILE, data)
-    return _public_model_connection_library(data)
+    data["connections"] = connections
+    _write_json(MODEL_CONNECTION_LIBRARY_FILE, data)
+    return _public_model_connection_library(_read_model_connection_library())
 
 
 MODEL_TEST_PROVIDERS = [
-    ("openai", "GPT 文本"),
+    ("openai", "GPT 鏂囨湰"),
     ("gpt_pro", "GPT-Pro"),
-    ("deepseek", "DeepSeek 润色"),
-    ("image", "gpt-image-2 生图"),
-    ("minimax", "MiniMax 配音/BGM"),
+    ("deepseek", "DeepSeek 娑﹁壊"),
+    ("image", "gpt-image-2 鐢熷浘"),
+    ("minimax", "MiniMax 閰嶉煶/BGM"),
 ]
 
 
@@ -1935,13 +2807,15 @@ def _test_step_routes() -> dict[str, Any]:
     data = _read_model_connection_library()
     results: list[dict[str, Any]] = []
     summary: list[dict[str, Any]] = []
+    passed_by_step: dict[str, str] = {}
     for step in MODEL_STEP_ORDER:
         meta = MODEL_STEP_ROUTES[step]
         routes = data.get("step_routes") if isinstance(data.get("step_routes"), dict) else {}
         ids = [str(x or "") for x in routes.get(step, []) if str(x or "")]
+        ids_to_test = ids
         step_results: list[dict[str, Any]] = []
         passed: dict[str, Any] | None = None
-        for cid in ids:
+        for cid in ids_to_test:
             item = _connection_by_id(data, cid)
             if not item:
                 continue
@@ -1952,6 +2826,7 @@ def _test_step_routes() -> dict[str, Any]:
             results.append(row)
             if result.get("ok"):
                 passed = row
+                passed_by_step[step] = cid
                 break
         summary.append({
             "step": step,
@@ -1965,7 +2840,97 @@ def _test_step_routes() -> dict[str, Any]:
             "passed_connection_id": str(passed.get("connection_id") or "") if passed else "",
             "latency_ms": int(float(passed.get("elapsed_seconds") or 0) * 1000) if passed else 0,
         })
+    if passed_by_step:
+        _promote_passed_step_connections(passed_by_step)
     return {"results": results, "summary": summary}
+
+
+def _test_model_library_connections() -> dict[str, Any]:
+    data = _read_model_connection_library()
+    connections = data.get("connections") if isinstance(data.get("connections"), list) else []
+    test_items: list[dict[str, Any]] = []
+    for item in connections:
+        if not isinstance(item, dict) or not bool(item.get("enabled", True)):
+            continue
+        cid = _connection_id(str(item.get("id") or ""))
+        if not cid:
+            continue
+        test_items.append(item)
+
+    def run_one(item: dict[str, Any]) -> dict[str, Any]:
+        cid = _connection_id(str(item.get("id") or ""))
+        result = _test_model_detailed(str(item.get("provider") or ""), {"connection_id": cid})
+        _record_connection_test_result(cid, result)
+        return {"connection_id": cid, "name": _clean_public_text(item.get("name") or cid), **result}
+
+    results: list[dict[str, Any]] = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        future_map = {executor.submit(run_one, item): item for item in test_items}
+        for future in concurrent.futures.as_completed(future_map):
+            item = future_map[future]
+            cid = _connection_id(str(item.get("id") or ""))
+            try:
+                row = future.result()
+            except Exception as exc:
+                row = {
+                    "connection_id": cid,
+                    "name": _clean_public_text(item.get("name") or cid),
+                    "provider": str(item.get("provider") or ""),
+                    "model": str(item.get("model") or ""),
+                    "ok": False,
+                    "message": _safe_error(exc),
+                    "elapsed_seconds": 0,
+                }
+                _record_connection_test_result(cid, row)
+            results.append(row)
+
+    summary_by_model: dict[str, dict[str, Any]] = {}
+    for row in results:
+        item = _connection_by_id(data, str(row.get("connection_id") or "")) or {}
+        model = str(row.get("model") or item.get("model") or "未设置")
+        group = summary_by_model.setdefault(model, {"model": model, "tested_count": 0, "passed_count": 0, "failed_count": 0, "failures": []})
+        group["tested_count"] += 1
+        if row.get("ok"):
+            group["passed_count"] += 1
+        else:
+            group["failed_count"] += 1
+            if len(group["failures"]) < 6:
+                group["failures"].append({
+                    "name": row["name"],
+                    "provider": str(row.get("provider") or item.get("provider") or ""),
+                    "message": str(row.get("message") or ""),
+                    "model": model,
+                })
+    summary = sorted(summary_by_model.values(), key=lambda x: str(x.get("model") or ""))
+    return {"results": results, "summary": summary, "model_connection_library": _public_model_connection_library()}
+
+
+def _promote_passed_step_connections(passed_by_step: dict[str, str]) -> None:
+    data = _read_model_connection_library()
+    routes = data.get("step_routes") if isinstance(data.get("step_routes"), dict) else {}
+    active = data.get("active_connections") if isinstance(data.get("active_connections"), dict) else {}
+    changed = False
+    for step, raw_cid in passed_by_step.items():
+        cid = _connection_id(str(raw_cid or ""))
+        item = _connection_by_id(data, cid)
+        if not cid or not item:
+            continue
+        current = [_connection_id(str(x or "")) for x in routes.get(step, []) if str(x or "")]
+        promoted = [cid, *[x for x in current if x != cid]]
+        if promoted != current:
+            routes[step] = promoted
+            changed = True
+        role = _model_connection_role(str(item.get("role") or MODEL_STEP_ROUTES.get(step, {}).get("role") or "text"))
+        if active.get(role) != cid:
+            active[role] = cid
+            changed = True
+        if active.get(step) != cid:
+            active[step] = cid
+            changed = True
+    if changed:
+        data["step_routes"] = routes
+        data["active_connections"] = active
+        _write_json(MODEL_CONNECTION_LIBRARY_FILE, data)
 
 
 def _test_email(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1999,6 +2964,32 @@ def _test_email(payload: dict[str, Any]) -> dict[str, Any]:
         return {"ok": False, "message": f"SMTP 测试失败：{type(exc).__name__}", "suggestion": _safe_error(exc), "path": path, "source": source}
 
 
+EMAIL_PROFILE_KEYS = ("culture", "daily_research_digest", "science", "local")
+
+
+def _normalize_email_profiles(value: Any) -> dict[str, dict[str, Any]]:
+    source = value if isinstance(value, dict) else {}
+    profiles: dict[str, dict[str, Any]] = {}
+    for key in EMAIL_PROFILE_KEYS:
+        raw = source.get(key) if isinstance(source.get(key), dict) else {}
+        profiles[key] = {
+            "email_enabled": bool(raw.get("email_enabled", raw.get("enabled", False))),
+            "email_recipient": str(raw.get("email_recipient", raw.get("recipient", "")) or "").strip(),
+        }
+    return profiles
+
+
+def _email_profile_for_payload(payload: dict[str, Any], module_key: str) -> dict[str, Any]:
+    profiles = _normalize_email_profiles(payload.get("email_profiles"))
+    profile = profiles.get(module_key) or profiles["culture"]
+    fallback_enabled = bool(payload.get("email_enabled"))
+    fallback_recipient = str(payload.get("email_recipient") or "").strip()
+    return {
+        "email_enabled": bool(profile.get("email_enabled", fallback_enabled)),
+        "email_recipient": str(profile.get("email_recipient") or fallback_recipient).strip(),
+    }
+
+
 def _public_settings() -> dict[str, Any]:
     settings = _read_json(SETTINGS_FILE, {})
     models = _apply_connection_library_to_defaults()
@@ -2006,6 +2997,8 @@ def _public_settings() -> dict[str, Any]:
         models = _models_with_url_defaults(_strip_private_model_fields(models))
     if isinstance(settings, dict) and not str(settings.get("auto_clip_bgm_library_dir") or "").strip():
         settings = {**settings, "auto_clip_bgm_library_dir": str(BGM_LIBRARY_DIR)}
+    if isinstance(settings, dict):
+        settings = {**settings, "email_profiles": _normalize_email_profiles(settings.get("email_profiles"))}
     profiles = _profile_public_status()
     return {
         "settings": _strip_private_model_fields(settings) if isinstance(settings, dict) else {},
@@ -2053,10 +3046,17 @@ def _save_public_settings(payload: dict[str, Any]) -> dict[str, Any]:
         "auto_clip_output_dir", "auto_clip_bgm", "auto_clip_bgm_library_dir", "email_enabled", "email_recipient", "smtp_host",
         "smtp_port", "smtp_user", "smtp_sender", "minimax_voice_id",
         "minimax_provider", "minimax_tts_model", "minimax_bgm_model", "minimax_bgm_prompt",
+        "culture_clip_image_dir", "culture_clip_lrc_dir", "culture_clip_output_dir", "culture_clip_bgm",
+        "research_clip_image_dir", "research_clip_lrc_dir", "research_clip_output_dir", "research_clip_bgm",
+        "science_clip_image_dir", "science_clip_lrc_dir", "science_clip_output_dir", "science_clip_bgm",
+        "local_clip_image_dir", "local_clip_lrc_dir", "local_clip_output_dir", "local_clip_bgm",
+        "science_pdf_path", "science_out_dir",
     }
     for key in allowed:
         if key in payload:
             current[key] = str(payload.get(key) or "")
+    if "email_profiles" in payload:
+        current["email_profiles"] = _normalize_email_profiles(payload.get("email_profiles"))
     _write_json(SETTINGS_FILE, current)
     for key, path in MODEL_KEY_FILES.items():
         value = str(payload.get(key) or "").strip()
@@ -2108,11 +3108,11 @@ def _active_profile_name() -> str:
     for item in profiles.get("profiles", []):
         if isinstance(item, dict) and str(item.get("id") or "") == active_id:
             return str(item.get("name") or active_id)
-    return active_id or "未选择"
+    return active_id or "鏈€夋嫨"
 
 
 def _model_usage_summary(models: dict[str, Any] | None = None) -> dict[str, str]:
-    models = _models_with_url_defaults(models or _model_settings())
+    models = _models_with_url_defaults(_apply_business_steps_to_models(models or _model_settings()))
     polish_provider = str(models.get("culture_polish_provider") or "").strip().lower()
     polish_model = str(models.get("culture_polish_model") or models.get("polish_engine") or "")
     polish_url = str(
@@ -2140,6 +3140,96 @@ def _model_usage_summary(models: dict[str, Any] | None = None) -> dict[str, str]
         "deepseek_url": str(models.get("deepseek_base_url") or DEFAULT_DEEPSEEK_BASE_URL),
         "minimax_url": str(models.get("minimax_base_url") or DEFAULT_MINIMAX_BASE_URL),
     }
+
+
+def _connection_public_config(connection: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(connection, dict):
+        return {}
+    public = _connection_public_item(connection)
+    cfg = {
+        "id": public.get("id", ""),
+        "name": public.get("name", ""),
+        "role": public.get("role", ""),
+        "role_label": public.get("role_label", ""),
+        "provider": public.get("provider", ""),
+        "base_url": public.get("base_url", ""),
+        "model": public.get("model", ""),
+        "key_name": public.get("key_name", ""),
+        "key_configured": bool(public.get("key_configured")),
+        "last_tested_at": public.get("last_tested_at", ""),
+        "latency_ms": int(public.get("latency_ms") or 0),
+    }
+    if "last_test_ok" in public:
+        cfg["last_test_ok"] = bool(public.get("last_test_ok"))
+    return cfg
+
+
+def _business_step_model_snapshot(data: dict[str, Any] | None = None) -> dict[str, Any]:
+    data = _apply_connection_test_status(data or _read_model_connection_library())
+    routes = data.get("step_routes") if isinstance(data.get("step_routes"), dict) else {}
+    snapshot: dict[str, Any] = {}
+    for step in MODEL_STEP_ORDER:
+        meta = MODEL_STEP_ROUTES.get(step, {})
+        route_ids = [_connection_id(str(x or "")) for x in routes.get(step, []) if str(x or "")]
+        candidates: list[dict[str, Any]] = []
+        for cid in route_ids:
+            item = _connection_by_id(data, cid)
+            if item:
+                cfg = _connection_public_config(item)
+                if cfg:
+                    candidates.append(cfg)
+        selected = _best_connection_for_step(step, data)
+        snapshot[step] = {
+            "step": step,
+            "label": str(meta.get("label") or step),
+            "allowed_roles": list(meta.get("roles") or (meta.get("role") or "" ,)),
+            "selected": _connection_public_config(selected),
+            "candidates": candidates,
+        }
+    return snapshot
+
+
+def _apply_business_steps_to_models(models: dict[str, Any] | None = None) -> dict[str, Any]:
+    result = dict(models or _model_settings())
+    steps = _business_step_model_snapshot()
+
+    def selected(step: str) -> dict[str, Any]:
+        item = (steps.get(step) or {}).get("selected")
+        return item if isinstance(item, dict) else {}
+
+    text = selected("script_text")
+    research = selected("research_text") or text
+    polish = selected("polish_text")
+    image = selected("image_generation")
+    voice = selected("voice_bgm")
+    if text:
+        base = str(text.get("base_url") or "")
+        model = str(text.get("model") or "")
+        provider = str(text.get("provider") or "openai")
+        result.update({"foreign_base_url": base, "gpt_base_url": base, "culture_text_base_url": base, "culture_text_provider": provider, "culture_text_model": model, "text_engine": model})
+    if research:
+        result["research_text_base_url"] = str(research.get("base_url") or result.get("culture_text_base_url") or "")
+        if research.get("model"):
+            result["text_engine"] = str(research.get("model") or result.get("text_engine") or "")
+    if polish:
+        provider = str(polish.get("provider") or "deepseek")
+        base = str(polish.get("base_url") or "")
+        model = str(polish.get("model") or "")
+        result.update({"culture_polish_base_url": base, "research_polish_base_url": base, "culture_polish_provider": provider, "culture_polish_model": model, "polish_engine": model})
+        if provider == "deepseek" or "deepseek" in model.lower():
+            result["deepseek_base_url"] = base
+        else:
+            result["gpt_pro_base_url"] = base
+    if image:
+        base = str(image.get("base_url") or "")
+        model = str(image.get("model") or "")
+        provider = str(image.get("provider") or "openai")
+        result.update({"gpt_image_base_url": base, "culture_image_base_url": base, "research_image_base_url": base, "culture_image_provider": "openai" if provider == "image" else provider, "culture_image_model": model, "image_engine": model})
+    if voice:
+        result["minimax_base_url"] = _minimax_base_url(str(voice.get("base_url") or ""))
+        result["minimax_tts_model"] = str(voice.get("model") or result.get("minimax_tts_model") or "speech-2.8-hd")
+    result["business_steps"] = steps
+    return result
 
 
 def _shared_model_env_lines(summary: dict[str, str]) -> list[str]:
@@ -2275,18 +3365,20 @@ def _verify_project_model_config(project_id: str, name: str, root: Path, summary
 
 
 def _sync_shared_model_config_to_projects(models: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-    models = _models_with_url_defaults(models or _apply_connection_library_to_defaults(mark_changed=False))
+    models = _models_with_url_defaults(_apply_business_steps_to_models(models or _apply_connection_library_to_defaults(mark_changed=False)))
     summary = _model_usage_summary(models)
     snapshot = {
         "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "profile": summary["profile"],
         "models": summary,
+        "business_steps": models.get("business_steps") or _business_step_model_snapshot(),
         "key_status": _secret_statuses(),
         "key_files": {key: str(path) for key, path in MODEL_KEY_FILES.items()},
         "note": "No plaintext keys are stored in this file.",
     }
     projects = [
         ("assistant", "自媒体小猪理", PROJECT_ROOT),
+        ("assistant_dev", "自媒体小猪理开发版", ASSISTANT_DEV_ROOT),
         ("xiaozhuli", "全澜小猪理", XIAOZHULI_ROOT),
         ("eeg", "脑电分析平台", EEG_ANALYSER_ROOT),
     ]
@@ -2307,20 +3399,170 @@ def _sync_shared_model_config_to_projects(models: dict[str, Any] | None = None) 
     return report
 
 
+def _smoke_test_project_model_config(project_id: str, name: str, root: Path, summary: dict[str, Any]) -> dict[str, Any]:
+    env_path = root / ".env.quanlan-model.local"
+    json_path = root / ".env.quanlan-model.local.json"
+    script = r'''
+import json, os, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+expected = json.loads(sys.argv[2])
+env_path = root / ".env.quanlan-model.local"
+json_path = root / ".env.quanlan-model.local.json"
+if not env_path.exists():
+    raise SystemExit("missing .env.quanlan-model.local")
+if not json_path.exists():
+    raise SystemExit("missing .env.quanlan-model.local.json")
+env = {}
+for line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
+    if "=" in line and not line.lstrip().startswith("#"):
+        k, v = line.split("=", 1)
+        env[k.strip()] = v.strip().strip('"').strip("'")
+data = json.loads(json_path.read_text(encoding="utf-8", errors="replace"))
+models = data.get("models") or {}
+business_steps = data.get("business_steps") or {}
+required_steps = ["script_text", "research_text", "polish_text", "image_generation", "voice_bgm"]
+missing_steps = [step for step in required_steps if not ((business_steps.get(step) or {}).get("selected") or {}).get("model")]
+if missing_steps:
+    raise SystemExit("business_steps missing: " + ", ".join(missing_steps))
+required = {
+    "OPENAI_BASE_URL": expected.get("text_base_url"),
+    "GPT_IMAGE_BASE_URL": expected.get("image_base_url"),
+    "CULTURE_IMAGE_BASE_URL": expected.get("image_base_url"),
+    "MINIMAX_BASE_URL": expected.get("minimax_base_url"),
+}
+missing = [k for k, v in required.items() if v and env.get(k) != v]
+if missing:
+    raise SystemExit("env mismatch: " + ", ".join(missing))
+model_checks = {
+    "text_model": expected.get("text_model"),
+    "image_model": expected.get("image_model"),
+    "polish_model": expected.get("polish_model"),
+    "minimax_model": expected.get("minimax_model"),
+}
+bad_models = [k for k, v in model_checks.items() if v and models.get(k) != v]
+if bad_models:
+    raise SystemExit("json model mismatch: " + ", ".join(bad_models))
+key_status = data.get("key_status") or {}
+if not any(bool(v) for k, v in key_status.items() if k.endswith("_configured")):
+    raise SystemExit("no configured model key visible to project")
+print("项目可读取总控台模型方案；文本=%s；图片=%s；润色=%s；MiniMax=%s" % (
+    expected.get("text_model") or "",
+    expected.get("image_model") or "",
+    expected.get("polish_model") or "",
+    expected.get("minimax_model") or "",
+))
+'''
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", script, str(root), json.dumps(summary, ensure_ascii=False)],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+        )
+        raw_message = (proc.stdout or proc.stderr or "").strip()
+        success_message = (
+            f"项目可读取总控台模型方案；文本={summary.get('text_model') or ''}；"
+            f"图片={summary.get('image_model') or ''}；润色={summary.get('polish_model') or ''}；"
+            f"MiniMax={summary.get('minimax_model') or ''}"
+        )
+        return {
+            "id": project_id,
+            "name": name,
+            "ok": proc.returncode == 0,
+            "env_path": str(env_path),
+            "json_path": str(json_path),
+            "message": success_message if proc.returncode == 0 else (raw_message or "项目模型方案 smoke test 未返回信息。"),
+            "exit_code": proc.returncode,
+        }
+    except Exception as exc:
+        return {"id": project_id, "name": name, "ok": False, "env_path": str(env_path), "json_path": str(json_path), "message": _safe_error(exc)}
+
+
+def _smoke_test_all_project_model_configs(models: dict[str, Any]) -> list[dict[str, Any]]:
+    summary = _model_usage_summary(_models_with_url_defaults(models))
+    projects = [
+        ("assistant", "自媒体小猪理", PROJECT_ROOT),
+        ("assistant_dev", "自媒体小猪理开发版", ASSISTANT_DEV_ROOT),
+        ("xiaozhuli", "全澜小猪理", XIAOZHULI_ROOT),
+        ("eeg", "脑电分析平台", EEG_ANALYSER_ROOT),
+    ]
+    return [_smoke_test_project_model_config(project_id, name, root, summary) for project_id, name, root in projects]
+
+
 def _apply_model_config_to_all_projects() -> dict[str, Any]:
-    models = _models_with_url_defaults(_apply_connection_library_to_defaults(mark_changed=False))
+    key_repair_report = _repair_missing_connection_keys_from_feishu()
+    route_report = _test_step_routes_with_repair()
+    failed_steps = [
+        item for item in route_report.get("summary", [])
+        if isinstance(item, dict) and not item.get("ok")
+    ]
+    if failed_steps:
+        result = _public_settings()
+        result["route_report"] = route_report
+        result["key_repair_report"] = key_repair_report
+        result["sync_report"] = []
+        result["connectivity_report"] = _connectivity_report_from_route_report(route_report)
+        result["project_test_report"] = []
+        result["apply_log"] = [
+            "应用已中止：步骤流程中仍有业务步骤没有测通的候选模型。",
+            *[
+                f"{item.get('step_label') or item.get('step')}：候选 {item.get('candidate_count') or 0} 个，测通 0 个。请从右侧模型库拖入至少一个已测通连接。"
+                for item in failed_steps
+            ],
+        ]
+        result["apply_ok"] = False
+        return result
+    models = _models_with_url_defaults(_apply_business_steps_to_models(_apply_connection_library_to_defaults(mark_changed=False)))
     _write_json(MODEL_DEFAULTS_FILE, _strip_private_model_fields(models))
     _mark_shared_config_changed()
     sync_report = _sync_shared_model_config_to_projects(models)
     _restart_xiaozhuli_dashboard(takeover=True)
     sync_report = _sync_shared_model_config_to_projects(models)
-    test_report = _test_all_model_links()
+    test_report = _connectivity_report_from_route_report(route_report)
+    project_test_report = _smoke_test_all_project_model_configs(models)
     result = _public_settings()
+    result["route_report"] = route_report
+    result["key_repair_report"] = key_repair_report
     result["sync_report"] = sync_report
     result["connectivity_report"] = test_report
-    result["apply_log"] = _build_model_apply_log(result, sync_report, test_report)
-    result["apply_ok"] = all(bool(item.get("ok")) for item in sync_report)
+    result["project_test_report"] = project_test_report
+    result["apply_log"] = _build_model_apply_log(result, sync_report, test_report, project_test_report)
+    result["apply_ok"] = all(bool(item.get("ok")) for item in sync_report) and all(bool(item.get("ok")) for item in project_test_report)
     return result
+
+
+def _connectivity_report_from_route_report(route_report: dict[str, Any]) -> list[dict[str, Any]]:
+    results = route_report.get("results") if isinstance(route_report.get("results"), list) else []
+    passed_by_step: dict[str, dict[str, Any]] = {}
+    for item in results:
+        if isinstance(item, dict) and item.get("ok") and str(item.get("step") or "") not in passed_by_step:
+            passed_by_step[str(item.get("step") or "")] = item
+    report: list[dict[str, Any]] = []
+    for step in MODEL_STEP_ORDER:
+        meta = MODEL_STEP_ROUTES.get(step, {})
+        item = passed_by_step.get(step)
+        if item:
+            report.append({
+                "provider": str(item.get("provider") or ""),
+                "label": str(meta.get("label") or item.get("label") or step),
+                "ok": True,
+                "model": str(item.get("model") or ""),
+                "endpoint": str(item.get("endpoint") or ""),
+                "message": str(item.get("message") or "步骤路线测试通过。"),
+            })
+        else:
+            report.append({
+                "provider": str(meta.get("role") or step),
+                "label": str(meta.get("label") or step),
+                "ok": False,
+                "model": "",
+                "endpoint": "",
+                "message": "该步骤没有测通的候选连接。",
+            })
+    return report
 
 
 def _test_all_model_links() -> list[dict[str, Any]]:
@@ -2331,7 +3573,12 @@ def _test_all_model_links() -> list[dict[str, Any]]:
     return results
 
 
-def _build_model_apply_log(data: dict[str, Any], sync_report: list[dict[str, Any]], test_report: list[dict[str, Any]]) -> list[str]:
+def _build_model_apply_log(
+    data: dict[str, Any],
+    sync_report: list[dict[str, Any]],
+    test_report: list[dict[str, Any]],
+    project_test_report: list[dict[str, Any]] | None = None,
+) -> list[str]:
     models = data.get("models") if isinstance(data.get("models"), dict) else {}
     summary = _model_usage_summary(models)
     lines = [
@@ -2340,27 +3587,34 @@ def _build_model_apply_log(data: dict[str, Any], sync_report: list[dict[str, Any
     ]
     for item in sync_report:
         if item.get("ok"):
-            lines.append(f"{item.get('name')}已切换{summary['profile']}模型方案；文案生成用{summary['text_model']}；图片生成用{summary['image_model']}；润色用{summary['polish_model']}；本地配置已写入。")
+            lines.append(
+                f"{item.get('name')}已切换{summary['profile']}模型方案；文案生成用{summary['text_model']}；图片生成用{summary['image_model']}；润色用{summary['polish_model']}；本地配置已写入。"
+            )
         else:
             lines.append(f"{item.get('name')}同步失败：{item.get('error') or 'unknown'}")
     if test_report:
         lines.append("连通性测试报告：")
         for item in test_report:
-            status = "通过" if item.get("ok") else "失败"
-            lines.append(f"{item.get('label')}：{status} ｜ 模型：{item.get('model') or '未设置'} ｜ URL：{item.get('endpoint') or '未设置'} ｜ {item.get('message') or ''}")
+            status = "列表检查通过" if item.get("list_only") and item.get("ok") else ("通过" if item.get("ok") else "失败")
+            lines.append(
+                f"{item.get('label')}：{status} ｜ 模型：{item.get('model') or '未设置'} ｜ URL：{item.get('endpoint') or '未设置'} ｜ {item.get('message') or ''}"
+            )
     else:
         lines.append("本次只检测公共配置写入、运行注入和子项目只读防线；未自动发起模型接口请求。")
+    if project_test_report:
+        lines.append("项目内应用实测：")
+        for item in project_test_report:
+            status = "成功" if item.get("ok") else "失败"
+            lines.append(f"{item.get('name') or item.get('id')} 应用大模型方案{status} ｜ {item.get('message') or ''}")
     lines.append("Key 明文未写入网页日志；子项目本地配置只保存 Key 状态和本机密钥文件引用。")
     return lines
-
-
 def _entry_html() -> bytes:
     return """<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>鍏ㄦ緶搴旂敤鎬绘帶鍙?/title>
+  <title>閸忋劍绶舵惔鏃傛暏閹粯甯堕崣?/title>
   <style>
     :root{font-family:Arial,"Microsoft YaHei",sans-serif;color:#17202a;background:#f3f6f8;--brand:#0f766e;--line:#d8e0e7;--muted:#64748b;--soft:#f7faf9;--card:#fff;--shadow:0 10px 26px rgba(15,23,42,.07)}
     *{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#f8fafc 0%,#eef4f3 100%)}.wrap{max-width:1040px;margin:0 auto;padding:30px 18px}
@@ -2376,25 +3630,25 @@ def _entry_html() -> bytes:
   </style>
 </head>
 <body>
-  <a class="boss-home" href="/assistant/#model">缁熶竴閰嶇疆</a>
+  <a class="boss-home" href="/assistant/#model">缂佺喍绔撮柊宥囩枂</a>
   <div class="wrap">
-    <h1>鍏ㄦ緶搴旂敤鎬绘帶鍙?/h1>
-    <p class="hint">涓€涓叆鍙ｇ鐞嗚嚜濯掍綋灏忕尓鐞嗐€佸叏婢滃皬鐚悊鍜岃剳鐢靛垎鏋愬钩鍙帮紱澶фā鍨?URL銆並ey銆丼MTP 鍜岄€氱敤鍙傛暟鍙湪杩欓噷閰嶇疆锛屽啀鍚屾鍒伴渶瑕佺殑椤圭洰銆?/p>
+    <h1>閸忋劍绶舵惔鏃傛暏閹粯甯堕崣?/h1>
+    <p class="hint">娑撯偓娑擃亜鍙嗛崣锝囶吀閻炲棜鍤滄刊鎺嶇秼鐏忓繒灏撻悶鍡愨偓浣稿弿濠㈡粌鐨悮顏嗘倞閸滃矁鍓抽悽闈涘瀻閺嬫劕閽╅崣甯幢婢堆勀侀崹?URL閵嗕甫ey閵嗕讣MTP 閸滃矂鈧氨鏁ら崣鍌涙殶閸欘亜婀潻娆撳櫡闁板秶鐤嗛敍灞藉晙閸氬本顒為崚浼存付鐟曚胶娈戞い鍦窗閵?/p>
     <section class="brief">
-      <div><span>缁熶竴閰嶇疆</span><strong>妯″瀷銆並ey銆丼MTP 闆嗕腑绠＄悊銆?/strong><p>瀛愰」鐩彧淇濈暀涓氬姟娴佺▼锛屼笉鍐嶉噸澶嶅睍绀洪€氱敤閰嶇疆銆?/p></div>
-      <div><span>搴旂敤鎬绘帶</span><strong>鍚姩銆佹墦寮€銆佸悓姝ュ涓」鐩€?/strong><p>鎵€鏈夊簲鐢ㄥ叆鍙ｆ斁鍦ㄥ悓涓€涓帶鍒跺彴锛屼笉闇€瑕佽绔彛銆?/p></div>
-      <div><span>鐘舵€佸彲淇?/span><strong>鍙樉绀烘憳瑕侊紝涓嶆硠闇插瘑閽ャ€?/strong><p>鐘舵€佹帴鍙ｇ敤浜庤瘖鏂紝椤甸潰渚ч粯璁や繚鎶ゆ晱鎰熶俊鎭€?/p></div>
+      <div><span>缂佺喍绔撮柊宥囩枂</span><strong>濡€崇€烽妴涓y閵嗕讣MTP 闂嗗棔鑵戠粻锛勬倞閵?/strong><p>鐎涙劙銆嶉惄顔煎涧娣囨繄鏆€娑撴艾濮熷ù浣衡柤閿涘奔绗夐崘宥夊櫢婢跺秴鐫嶇粈娲偓姘辨暏闁板秶鐤嗛妴?/p></div>
+      <div><span>鎼存梻鏁ら幀缁樺付</span><strong>閸氼垰濮╅妴浣瑰ⅵ瀵偓閵嗕礁鎮撳銉ヮ樋娑擃亪銆嶉惄顔衡偓?/strong><p>閹碘偓閺堝绨查悽銊ュ弳閸欙絾鏂侀崷銊ユ倱娑撯偓娑擃亝甯堕崚璺哄酱閿涘奔绗夐棁鈧憰浣筋唶缁旑垰褰涢妴?/p></div>
+      <div><span>閻樿埖鈧礁褰叉穱?/span><strong>閸欘亝妯夌粈鐑樻喅鐟曚緤绱濇稉宥嗙闂囨彃鐦戦柦銉ｂ偓?/strong><p>閻樿埖鈧焦甯撮崣锝囨暏娴滃氦鐦栭弬顓ㄧ礉妞ょ敻娼版笟褔绮拋銈勭箽閹躲倖鏅遍幇鐔朵繆閹垬鈧?/p></div>
     </section>
-    <div class="section-head"><h2>搴旂敤鎬绘帶</h2><span id="home_app_summary">姝ｅ湪璇诲彇搴旂敤鐘舵€?/span></div>
+    <div class="section-head"><h2>鎼存梻鏁ら幀缁樺付</h2><span id="home_app_summary">濮濓絽婀拠璇插絿鎼存梻鏁ら悩鑸碘偓?/span></div>
     <section class="grid" id="home_app_grid">
-      <a class="card" href="/assistant/"><div class="title">鑷獟浣撳皬鐚悊</div><div class="desc">鍐呭鐢熶骇銆佹ā鍨嬩笌 Key銆侀偖浠躲€佸彂甯冨拰鑷紭鍖栫殑鎬绘帶宸ヤ綔鍙般€?/div></a>
-      <a class="card" href="/xiaozhuli/"><div class="title">鍏ㄦ緶灏忕尓鐞?/div><div class="desc">閿€鍞煡璇嗗簱銆佸鎴峰缓璁€丷ole-play 璁板綍鍜屾湇鍔＄姸鎬併€?/div></a>
-      <a class="card" href="/eeg/"><div class="title">鑴戠數鍒嗘瀽骞冲彴</div><div class="desc">NeuroCloud EEG 鍒嗘瀽娴佺▼鍏ュ彛锛涘唴閮ㄤ笉灞曠ず閫氱敤妯″瀷閰嶇疆銆?/div></a>
+      <a class="card" href="/assistant/"><div class="title">閼奉亜鐛熸担鎾崇毈閻氼亞鎮?/div><div class="desc">閸愬懎顔愰悽鐔堕獓閵嗕焦膩閸ㄥ绗?Key閵嗕線鍋栨禒韬测偓浣稿絺鐢啫鎷伴懛顏冪喘閸栨牜娈戦幀缁樺付瀹搞儰缍旈崣鑸偓?/div></a>
+      <a class="card" href="/xiaozhuli/"><div class="title">閸忋劍绶剁亸蹇曞皳閻?/div><div class="desc">闁库偓閸烆喚鐓＄拠鍡楃氨閵嗕礁顓归幋宄扮紦鐠侇喓鈧阜ole-play 鐠佹澘缍嶉崪灞炬箛閸旓紕濮搁幀浣碘偓?/div></a>
+      <a class="card" href="/eeg/"><div class="title">閼存垹鏁搁崚鍡樼€介獮鍐插酱</div><div class="desc">NeuroCloud EEG 閸掑棙鐎藉ù浣衡柤閸忋儱褰涢敍娑樺敶闁劋绗夌仦鏇犮仛闁氨鏁ゅΟ鈥崇€烽柊宥囩枂閵?/div></a>
     </section>
-    <div class="section-head"><h2>閫氱敤閰嶇疆涓庤瘖鏂?/h2><span>閰嶇疆鍙湪鎬绘帶鍙扮淮鎶?/span></div>
+    <div class="section-head"><h2>闁氨鏁ら柊宥囩枂娑撳氦鐦栭弬?/h2><span>闁板秶鐤嗛崣顏勬躬閹粯甯堕崣鎵樊閹?/span></div>
     <div class="grid">
-      <a class="card" href="/assistant/#model"><div class="title">缁熶竴妯″瀷閰嶇疆</div><div class="desc">閰嶇疆榛樿鍥藉鏂规銆丏ST 鏂规锛屼互鍙婃瘡涓ā鍨嬬殑 URL/Key 涓嬫媺棰勮锛涙墍鏈夊瓙椤圭洰鍏辩敤杩欓噷鐨勫綋鍓嶆柟妗堛€?/div></a>
-      <a class="card" href="/assistant/#more"><div class="title">搴旂敤鎬绘帶涓庡伐鍏?/div><div class="desc">鐩磋揪搴旂敤鐘舵€併€侀偖浠躲€佽嚜浼樺寲銆佸彂甯冨拰璇婃柇宸ュ叿銆?/div></a>
+      <a class="card" href="/assistant/#model"><div class="title">缂佺喍绔村Ο鈥崇€烽柊宥囩枂</div><div class="desc">闁板秶鐤嗘妯款吇閸ヨ棄顦婚弬瑙勵攳閵嗕笍ST 閺傝顢嶉敍灞间簰閸欏﹥鐦℃稉顏吥侀崹瀣畱 URL/Key 娑撳濯烘０鍕啎閿涙稒澧嶉張澶婄摍妞ゅ湱娲伴崗杈╂暏鏉╂瑩鍣烽惃鍕秼閸撳秵鏌熷鍫涒偓?/div></a>
+      <a class="card" href="/assistant/#more"><div class="title">鎼存梻鏁ら幀缁樺付娑撳骸浼愰崗?/div><div class="desc">閻╃鎻惔鏃傛暏閻樿埖鈧降鈧線鍋栨禒韬测偓浣藉殰娴兼ê瀵查妴浣稿絺鐢啫鎷扮拠濠冩焽瀹搞儱鍙块妴?/div></a>
     </div>
   </div>
   <script>
@@ -2409,25 +3663,25 @@ let modelProfiles={active_profile:"",profiles:[]};
 function byId(id){return document.getElementById(id)}
 function cap(s){return s[0].toUpperCase()+s.slice(1)}
 function showPanel(name){for(const n of ["culture","research","clip","model","more"]){const p=byId("panel"+cap(n)),t=byId("tab"+cap(n));if(p)p.classList.toggle("active",n===name);if(t)t.classList.toggle("active",n===name)}}
-function keyText(ok){return ok?'<span class="ok">已配置</span>':'<span class="missing">未配置</span>'}
-function applyKeyStatus(sec){sec=sec||{};const map={openai_key_status:"openai_api_key_configured",image_key_status:"image_api_key_configured",gemini_key_status:"gemini_api_key_configured",deepseek_key_status:"deepseek_api_key_configured",minimax_key_status:"minimax_api_key_configured"};for(const [id,k] of Object.entries(map)){if(byId(id))byId(id).innerHTML=keyText(!!sec[k])}for(const [key,prefix] of Object.entries(keyNameMap)){if(key==="smtp_password")continue;const path=sec[key+"_path"]||"";const source=sec[key+"_source"]||"";if(byId(prefix+"_key_path"))byId(prefix+"_key_path").textContent=path?("保存位置："+path+" ｜ 来源："+source):"保存位置：未找到"}}
-function applyEmailStatus(email){email=email||{};if(byId("smtp_key_status"))byId("smtp_key_status").innerHTML=keyText(!!email.smtp_password_configured);if(byId("smtp_key_path"))byId("smtp_key_path").textContent=email.smtp_password_path?("保存位置："+email.smtp_password_path+" ｜ 来源："+(email.smtp_password_source||"")):"保存位置：未找到"}
-function renderModelProfileStatus(profile){const el=byId("model_profile_status");if(!el)return;const keys=profile&&profile.keys?profile.keys:{};const names={openai_api_key:"OpenAI",image_api_key:"Image",gemini_api_key:"Gemini",deepseek_api_key:"DeepSeek",minimax_api_key:"MiniMax"};const text=Object.entries(names).map(([k,n])=>n+":"+(keys[k]?"已存":"未存")).join(" ｜ ");el.textContent="方案状态："+((profile&&profile.id)||"未选择")+" ｜ "+text}
+function keyText(ok){return ok?'<span class="ok">宸查厤缃?/span>':'<span class="missing">鏈厤缃?/span>'}
+function applyKeyStatus(sec){sec=sec||{};const map={openai_key_status:"openai_api_key_configured",image_key_status:"image_api_key_configured",gemini_key_status:"gemini_api_key_configured",deepseek_key_status:"deepseek_api_key_configured",minimax_key_status:"minimax_api_key_configured"};for(const [id,k] of Object.entries(map)){if(byId(id))byId(id).innerHTML=keyText(!!sec[k])}for(const [key,prefix] of Object.entries(keyNameMap)){if(key==="smtp_password")continue;const path=sec[key+"_path"]||"";const source=sec[key+"_source"]||"";if(byId(prefix+"_key_path"))byId(prefix+"_key_path").textContent=path?("淇濆瓨浣嶇疆锛?+path+" 锝?鏉ユ簮锛?+source):"淇濆瓨浣嶇疆锛氭湭鎵惧埌"}}
+function applyEmailStatus(email){email=email||{};if(byId("smtp_key_status"))byId("smtp_key_status").innerHTML=keyText(!!email.smtp_password_configured);if(byId("smtp_key_path"))byId("smtp_key_path").textContent=email.smtp_password_path?("淇濆瓨浣嶇疆锛?+email.smtp_password_path+" 锝?鏉ユ簮锛?+(email.smtp_password_source||"")):"淇濆瓨浣嶇疆锛氭湭鎵惧埌"}
+function renderModelProfileStatus(profile){const el=byId("model_profile_status");if(!el)return;const keys=profile&&profile.keys?profile.keys:{};const names={openai_api_key:"OpenAI",image_api_key:"Image",gemini_api_key:"Gemini",deepseek_api_key:"DeepSeek",minimax_api_key:"MiniMax"};const text=Object.entries(names).map(([k,n])=>n+":"+(keys[k]?"宸插瓨":"鏈瓨")).join(" 锝?");el.textContent="鏂规鐘舵€侊細"+((profile&&profile.id)||"鏈€夋嫨")+" 锝?"+text}
 function fieldValue(id){const el=byId(id);return el?String(el.value||""):""}
-function profileKeyText(profile,key){return profile&&profile.keys&&profile.keys[key]?"已存":"未存"}
+function profileKeyText(profile,key){return profile&&profile.keys&&profile.keys[key]?"宸插瓨":"鏈瓨"}
 function renderRouteSummary(profile){
   const box=byId("model_route_summary");
   if(!box)return;
-  if(byId("route_profile_name"))byId("route_profile_name").textContent=profileLabel(profile||{})||"未选择方案";
+  if(byId("route_profile_name"))byId("route_profile_name").textContent=profileLabel(profile||{})||"鏈€夋嫨鏂规";
   const rows=[
-    ["文史文本",fieldValue("culture_text_provider"),fieldValue("culture_text_model"),fieldValue("culture_text_base_url"),"OpenAI "+profileKeyText(profile,"openai_api_key")+" / Gemini "+profileKeyText(profile,"gemini_api_key")],
-    ["文史润色",fieldValue("culture_polish_provider"),fieldValue("culture_polish_model"),fieldValue("culture_polish_base_url"),"DeepSeek "+profileKeyText(profile,"deepseek_api_key")],
-    ["文史生图",fieldValue("culture_image_provider"),fieldValue("culture_image_model"),fieldValue("culture_image_base_url"),"Image "+profileKeyText(profile,"image_api_key")],
-    ["科研文本","engine",fieldValue("text_engine"),fieldValue("research_text_base_url"),"OpenAI "+profileKeyText(profile,"openai_api_key")+" / Gemini "+profileKeyText(profile,"gemini_api_key")],
-    ["科研润色","engine",fieldValue("polish_engine"),fieldValue("research_polish_base_url"),"DeepSeek "+profileKeyText(profile,"deepseek_api_key")],
-    ["科研图片","engine",fieldValue("image_engine"),fieldValue("research_image_base_url"),"Image "+profileKeyText(profile,"image_api_key")]
+    ["鏂囧彶鏂囨湰",fieldValue("culture_text_provider"),fieldValue("culture_text_model"),fieldValue("culture_text_base_url"),"OpenAI "+profileKeyText(profile,"openai_api_key")+" / Gemini "+profileKeyText(profile,"gemini_api_key")],
+    ["鏂囧彶娑﹁壊",fieldValue("culture_polish_provider"),fieldValue("culture_polish_model"),fieldValue("culture_polish_base_url"),"DeepSeek "+profileKeyText(profile,"deepseek_api_key")],
+    ["鏂囧彶鐢熷浘",fieldValue("culture_image_provider"),fieldValue("culture_image_model"),fieldValue("culture_image_base_url"),"Image "+profileKeyText(profile,"image_api_key")],
+    ["绉戠爺鏂囨湰","engine",fieldValue("text_engine"),fieldValue("research_text_base_url"),"OpenAI "+profileKeyText(profile,"openai_api_key")+" / Gemini "+profileKeyText(profile,"gemini_api_key")],
+    ["绉戠爺娑﹁壊","engine",fieldValue("polish_engine"),fieldValue("research_polish_base_url"),"DeepSeek "+profileKeyText(profile,"deepseek_api_key")],
+    ["绉戠爺鍥剧墖","engine",fieldValue("image_engine"),fieldValue("research_image_base_url"),"Image "+profileKeyText(profile,"image_api_key")]
   ];
-  box.innerHTML=rows.map(([role,provider,model,url,key])=>'<div class="route-item"><b>'+escapeHtml(role)+'</b><span>'+escapeHtml(provider||"未设置")+' ｜ '+escapeHtml(model||"未设置")+'</span><span>'+escapeHtml(url||"未设置")+'</span><span>'+escapeHtml(key)+'</span></div>').join("");
+  box.innerHTML=rows.map(([role,provider,model,url,key])=>'<div class="route-item"><b>'+escapeHtml(role)+'</b><span>'+escapeHtml(provider||"鏈缃?)+' 锝?'+escapeHtml(model||"鏈缃?)+'</span><span>'+escapeHtml(url||"鏈缃?)+'</span><span>'+escapeHtml(key)+'</span></div>').join("");
 }
 function renderModelProfiles(profiles){
   modelProfiles=profiles||{active_profile:"",profiles:[]};
@@ -2437,7 +3691,7 @@ function renderModelProfiles(profiles){
     for(const item of modelProfiles.profiles||[]){
       const opt=document.createElement("option");
       opt.value=item.id;
-      opt.textContent=(item.name||item.id)+(item.locked?" ｜ 默认":"");
+      opt.textContent=(item.name||item.id)+(item.locked?" 锝?榛樿":"");
       sel.appendChild(opt);
     }
     if(modelProfiles.active_profile)sel.value=modelProfiles.active_profile;
@@ -2450,7 +3704,7 @@ function renderModelProfiles(profiles){
   renderUrlPresetSelectors();
   renderKeyPresetSelectors();
 }
-function profileLabel(profile){return (profile&&profile.name)||((profile&&profile.id)||"方案")}
+function profileLabel(profile){return (profile&&profile.name)||((profile&&profile.id)||"鏂规")}
 function renderUrlPresetSelectors(){
   for(const field of modelUrlIds){
     const input=byId(field);
@@ -2470,9 +3724,9 @@ function renderUrlPresetSelectors(){
       const url=profile&&profile.models?profile.models[field]:"";
       if(!url||seen.has(url))continue;
       seen.add(url);
-      options.push({url,label:profileLabel(profile)+" ｜ "+url});
+      options.push({url,label:profileLabel(profile)+" 锝?"+url});
     }
-    sel.innerHTML='<option value="">选择已保存 URL</option>'+options.map(o=>'<option value="'+escapeAttr(o.url)+'">'+escapeHtml(o.label)+'</option>').join("");
+    sel.innerHTML='<option value="">閫夋嫨宸蹭繚瀛?URL</option>'+options.map(o=>'<option value="'+escapeAttr(o.url)+'">'+escapeHtml(o.label)+'</option>').join("");
     sel.onchange=()=>{if(sel.value)input.value=sel.value};
   }
 }
@@ -2491,7 +3745,7 @@ function renderKeyPresetSelectors(){
       const button=document.createElement("button");
       button.className="secondary";
       button.type="button";
-      button.textContent="应用此 Key";
+      button.textContent="搴旂敤姝?Key";
       button.onclick=()=>applyProfileKey(key);
       box.appendChild(select);
       box.appendChild(button);
@@ -2499,27 +3753,27 @@ function renderKeyPresetSelectors(){
     }
     const sel=byId(prefix+"_key_profile_select");
     const opts=(modelProfiles.profiles||[]).filter(p=>p.keys&&p.keys[key]);
-    sel.innerHTML='<option value="">选择已保存 Key</option>'+opts.map(p=>'<option value="'+escapeAttr(p.id)+'">'+escapeHtml(profileLabel(p))+'</option>').join("");
+    sel.innerHTML='<option value="">閫夋嫨宸蹭繚瀛?Key</option>'+opts.map(p=>'<option value="'+escapeAttr(p.id)+'">'+escapeHtml(profileLabel(p))+'</option>').join("");
   }
 }
 function escapeHtml(value){return String(value||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
 function escapeAttr(value){return escapeHtml(value)}
 function selectedProfileId(){const sel=byId("model_profile_select");return sel?sel.value:""}
 async function loadSettings(){const r=await fetch("/api/settings");const data=await r.json();const s=data.settings||{},m=data.models||{};for(const [k,v] of Object.entries({...s,...m})){if(byId(k))byId(k).value=v||""}renderModelProfiles(data.model_profiles||{});applyKeyStatus(data.secrets||{});applyEmailStatus(data.email_secret||{})}
-function restoreDefaultUrls(){for(const id of modelUrlIds){if(byId(id))byId(id).value=defaultForeignBaseUrl}if(byId("deepseek_base_url"))byId("deepseek_base_url").value=defaultDeepseekBaseUrl;const p=(modelProfiles.profiles||[]).find(x=>x.id===selectedProfileId())||{};renderRouteSummary(p);if(byId("status"))status.textContent="模型地址已恢复默认，点击保存后生效"}
+function restoreDefaultUrls(){for(const id of modelUrlIds){if(byId(id))byId(id).value=defaultForeignBaseUrl}if(byId("deepseek_base_url"))byId("deepseek_base_url").value=defaultDeepseekBaseUrl;const p=(modelProfiles.profiles||[]).find(x=>x.id===selectedProfileId())||{};renderRouteSummary(p);if(byId("status"))status.textContent="妯″瀷鍦板潃宸叉仮澶嶉粯璁わ紝鐐瑰嚮淇濆瓨鍚庣敓鏁?}
 function collect(){const ids=["culture_book","culture_out_dir","culture_continue_folder","culture_text_provider","culture_text_model","culture_polish_provider","culture_polish_model","culture_image_provider","culture_image_model","research_out_dir","research_days","research_max_articles","research_journals","research_article_list","text_engine","polish_engine","image_engine","foreign_base_url","deepseek_base_url","culture_text_base_url","culture_polish_base_url","culture_image_base_url","research_text_base_url","research_polish_base_url","research_image_base_url","openai_api_key","image_api_key","gemini_api_key","deepseek_api_key","minimax_api_key","smtp_password","auto_clip_image_dir","auto_clip_lrc_dir","auto_clip_output_dir","auto_clip_bgm","minimax_voice_id","minimax_tts_model","minimax_bgm_model","minimax_bgm_prompt","email_recipient","smtp_host","smtp_port","smtp_user","smtp_sender"];const p={};for(const id of ids){if(byId(id))p[id]=byId(id).value}return p}
 function clearSecretInputs(){for(const id of ["openai_api_key","image_api_key","gemini_api_key","deepseek_api_key","minimax_api_key","smtp_password"]){if(byId(id))byId(id).value=""}}
-function hideSecret(key){const prefix=keyNameMap[key];visibleSecrets[key]=false;if(prefix&&byId(prefix+"_key_value"))byId(prefix+"_key_value").textContent="已隐藏"}
-async function toggleSecret(key){const prefix=keyNameMap[key];if(!prefix)return;if(visibleSecrets[key]){hideSecret(key);return}const box=byId(prefix+"_key_value");if(box)box.textContent="读取中...";const r=await fetch("/api/secret?key="+encodeURIComponent(key));const data=await r.json();if(key==="smtp_password"){const email=data.email_secret||{};if(box)box.textContent=email.smtp_password||"未配置";applyEmailStatus(email)}else{const sec=data.secrets||{};if(box)box.textContent=sec[key]||"未配置";applyKeyStatus(sec)}visibleSecrets[key]=true}
-function renderTest(id,result){const el=byId(id);if(!el)return;const ok=result&&result.ok;el.innerHTML=(ok?'<span class="ok">测试通过</span>':'<span class="missing">测试失败</span>')+" ｜ "+((result&&result.message)||"无结果")+((result&&result.suggestion)?(" ｜ 建议："+result.suggestion):"")}
-async function testModel(provider){const id=provider+"_test_result";if(byId(id))byId(id).textContent="测试中...";const payload={...collect(),provider};const r=await fetch("/api/test_model",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});const data=await r.json();clearSecretInputs();for(const key of Object.keys(keyNameMap))hideSecret(key);renderTest(id,data.result||{});applyKeyStatus(data.secrets||{});applyEmailStatus(data.email_secret||{})}
-async function testEmail(){if(byId("smtp_test_result"))byId("smtp_test_result").textContent="测试中...";const r=await fetch("/api/test_email",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(collect())});const data=await r.json();clearSecretInputs();hideSecret("smtp_password");renderTest("smtp_test_result",data.result||{});applyEmailStatus(data.email_secret||{})}
-async function saveSettings(){const r=await fetch("/api/settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(collect())});const data=await r.json();status.textContent=data.ok?"设置已保存":"保存失败";clearSecretInputs();for(const key of Object.keys(keyNameMap))hideSecret(key);renderModelProfiles(data.model_profiles||{});applyKeyStatus(data.secrets||{});applyEmailStatus(data.email_secret||{});return data}
-async function applyModelProfile(){const id=selectedProfileId();if(!id){status.textContent="请先选择模型方案";return}status.textContent="正在应用模型方案...";const r=await fetch("/api/model_profile",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"apply",profile_id:id})});const data=await r.json();if(!data.ok){status.textContent="应用方案失败："+(data.error||"unknown");return}clearSecretInputs();for(const key of Object.keys(keyNameMap))hideSecret(key);const s=data.settings||{},m=data.models||{};for(const [k,v] of Object.entries({...s,...m})){if(byId(k))byId(k).value=v||""}renderModelProfiles(data.model_profiles||{});applyKeyStatus(data.secrets||{});applyEmailStatus(data.email_secret||{});status.textContent="模型方案已应用"}
-async function applyProfileKey(key){const prefix=keyNameMap[key];const sel=prefix?byId(prefix+"_key_profile_select"):null;const profileId=sel?sel.value:"";if(!profileId){status.textContent="请先选择一个已保存 Key";return}status.textContent="正在应用 Key...";const r=await fetch("/api/model_profile",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"apply_key",profile_id:profileId,key_name:key})});const data=await r.json();if(!data.ok){status.textContent="应用 Key 失败："+(data.error||"unknown");return}clearSecretInputs();hideSecret(key);renderModelProfiles(data.model_profiles||{});applyKeyStatus(data.secrets||{});applyEmailStatus(data.email_secret||{});status.textContent="Key 已应用；各子项目启动时会使用总控台当前配置"}
-async function saveModelProfile(){const name=(byId("model_profile_name")&&byId("model_profile_name").value)||"";const id=selectedProfileId();status.textContent="正在保存模型方案...";const r=await fetch("/api/model_profile",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...collect(),action:"save",profile_id:id,profile_name:name})});const data=await r.json();if(!data.ok){status.textContent="保存方案失败："+(data.error||"unknown");return}clearSecretInputs();for(const key of Object.keys(keyNameMap))hideSecret(key);renderModelProfiles(data.model_profiles||{});applyKeyStatus(data.secrets||{});applyEmailStatus(data.email_secret||{});status.textContent="模型方案已保存"}
-async function deleteModelProfile(){const id=selectedProfileId();if(!id){status.textContent="请先选择模型方案";return}if(id==="foreign-default"){status.textContent="默认方案不能删除";return}const r=await fetch("/api/model_profile",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"delete",profile_id:id})});const data=await r.json();if(!data.ok){status.textContent="删除方案失败："+(data.error||"unknown");return}renderModelProfiles(data.model_profiles||{});status.textContent="模型方案已删除"}
-async function start(payload){await saveSettings();const r=await fetch("/api/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});const data=await r.json();currentJob=data.job_id||"";status.textContent=data.message||"已启动";cmd.textContent=(data.cmd||[]).join(" ");poll()}
+function hideSecret(key){const prefix=keyNameMap[key];visibleSecrets[key]=false;if(prefix&&byId(prefix+"_key_value"))byId(prefix+"_key_value").textContent="宸查殣钘?}
+async function toggleSecret(key){const prefix=keyNameMap[key];if(!prefix)return;if(visibleSecrets[key]){hideSecret(key);return}const box=byId(prefix+"_key_value");if(box)box.textContent="璇诲彇涓?..";const r=await fetch("/api/secret?key="+encodeURIComponent(key));const data=await r.json();if(key==="smtp_password"){const email=data.email_secret||{};if(box)box.textContent=email.smtp_password||"鏈厤缃?;applyEmailStatus(email)}else{const sec=data.secrets||{};if(box)box.textContent=sec[key]||"鏈厤缃?;applyKeyStatus(sec)}visibleSecrets[key]=true}
+function renderTest(id,result){const el=byId(id);if(!el)return;const ok=result&&result.ok;el.innerHTML=(ok?'<span class="ok">娴嬭瘯閫氳繃</span>':'<span class="missing">娴嬭瘯澶辫触</span>')+" 锝?"+((result&&result.message)||"鏃犵粨鏋?)+((result&&result.suggestion)?(" 锝?寤鸿锛?+result.suggestion):"")}
+async function testModel(provider){const id=provider+"_test_result";if(byId(id))byId(id).textContent="娴嬭瘯涓?..";const payload={...collect(),provider};const r=await fetch("/api/test_model",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});const data=await r.json();clearSecretInputs();for(const key of Object.keys(keyNameMap))hideSecret(key);renderTest(id,data.result||{});applyKeyStatus(data.secrets||{});applyEmailStatus(data.email_secret||{})}
+async function testEmail(){if(byId("smtp_test_result"))byId("smtp_test_result").textContent="娴嬭瘯涓?..";const r=await fetch("/api/test_email",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(collect())});const data=await r.json();clearSecretInputs();hideSecret("smtp_password");renderTest("smtp_test_result",data.result||{});applyEmailStatus(data.email_secret||{})}
+async function saveSettings(){const r=await fetch("/api/settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(collect())});const data=await r.json();status.textContent=data.ok?"璁剧疆宸蹭繚瀛?:"淇濆瓨澶辫触";clearSecretInputs();for(const key of Object.keys(keyNameMap))hideSecret(key);renderModelProfiles(data.model_profiles||{});applyKeyStatus(data.secrets||{});applyEmailStatus(data.email_secret||{});return data}
+async function applyModelProfile(){const id=selectedProfileId();if(!id){status.textContent="璇峰厛閫夋嫨妯″瀷鏂规";return}status.textContent="姝ｅ湪搴旂敤妯″瀷鏂规...";const r=await fetch("/api/model_profile",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"apply",profile_id:id})});const data=await r.json();if(!data.ok){status.textContent="搴旂敤鏂规澶辫触锛?+(data.error||"unknown");return}clearSecretInputs();for(const key of Object.keys(keyNameMap))hideSecret(key);const s=data.settings||{},m=data.models||{};for(const [k,v] of Object.entries({...s,...m})){if(byId(k))byId(k).value=v||""}renderModelProfiles(data.model_profiles||{});applyKeyStatus(data.secrets||{});applyEmailStatus(data.email_secret||{});status.textContent="妯″瀷鏂规宸插簲鐢?}
+async function applyProfileKey(key){const prefix=keyNameMap[key];const sel=prefix?byId(prefix+"_key_profile_select"):null;const profileId=sel?sel.value:"";if(!profileId){status.textContent="璇峰厛閫夋嫨涓€涓凡淇濆瓨 Key";return}status.textContent="姝ｅ湪搴旂敤 Key...";const r=await fetch("/api/model_profile",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"apply_key",profile_id:profileId,key_name:key})});const data=await r.json();if(!data.ok){status.textContent="搴旂敤 Key 澶辫触锛?+(data.error||"unknown");return}clearSecretInputs();hideSecret(key);renderModelProfiles(data.model_profiles||{});applyKeyStatus(data.secrets||{});applyEmailStatus(data.email_secret||{});status.textContent="Key 宸插簲鐢紱鍚勫瓙椤圭洰鍚姩鏃朵細浣跨敤鎬绘帶鍙板綋鍓嶉厤缃?}
+async function saveModelProfile(){const name=(byId("model_profile_name")&&byId("model_profile_name").value)||"";const id=selectedProfileId();status.textContent="姝ｅ湪淇濆瓨妯″瀷鏂规...";const r=await fetch("/api/model_profile",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...collect(),action:"save",profile_id:id,profile_name:name})});const data=await r.json();if(!data.ok){status.textContent="淇濆瓨鏂规澶辫触锛?+(data.error||"unknown");return}clearSecretInputs();for(const key of Object.keys(keyNameMap))hideSecret(key);renderModelProfiles(data.model_profiles||{});applyKeyStatus(data.secrets||{});applyEmailStatus(data.email_secret||{});status.textContent="妯″瀷鏂规宸蹭繚瀛?}
+async function deleteModelProfile(){const id=selectedProfileId();if(!id){status.textContent="璇峰厛閫夋嫨妯″瀷鏂规";return}if(id==="foreign-default"){status.textContent="榛樿鏂规涓嶈兘鍒犻櫎";return}const r=await fetch("/api/model_profile",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"delete",profile_id:id})});const data=await r.json();if(!data.ok){status.textContent="鍒犻櫎鏂规澶辫触锛?+(data.error||"unknown");return}renderModelProfiles(data.model_profiles||{});status.textContent="妯″瀷鏂规宸插垹闄?}
+async function start(payload){await saveSettings();const r=await fetch("/api/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});const data=await r.json();currentJob=data.job_id||"";status.textContent=data.message||"宸插惎鍔?;cmd.textContent=(data.cmd||[]).join(" ");poll()}
 function startCulture(test){start({...collect(),mode:"culture",stage:byId("culture_stage").value,test_b_image_limit:test?1:Number(byId("culture_test_b").value||0)})}
 function startResearch(action){start({...collect(),mode:"research",action})}
 function startClip(){start({...collect(),mode:"auto_clip"})}
@@ -2534,7 +3788,8 @@ if(location.hash==="#more"){showPanel("more")}else if(location.hash==="#culture"
 
 </script>
 </body>
-</html>""".encode("utf-8")
+</html>"""
+    return _clean_console_html(body.encode("utf-8"))
 
 
 def _assistant_html() -> bytes:
@@ -2543,7 +3798,7 @@ def _assistant_html() -> bytes:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>寰堟湁鑴戝瓙鐨勫皬鐚悊 Web</title>
+  <title>瀵板牊婀侀懘鎴濈摍閻ㄥ嫬鐨悮顏嗘倞 Web</title>
   <style>
     :root{font-family:Arial,"Microsoft YaHei",sans-serif;color:#202124;background:#f4f6f8}
     body{margin:0}.shell{display:grid;grid-template-columns:390px 1fr;min-height:100vh}
@@ -2564,64 +3819,64 @@ def _assistant_html() -> bytes:
   </style>
 </head>
 <body>
-<a class="boss-home" href="http://127.0.0.1:8765/">杩斿洖鎺у埗鍙伴椤?/a>
+<a class="boss-home" href="http://127.0.0.1:8765/">鏉╂柨娲栭幒褍鍩楅崣浼搭浕妞?/a>
 <div class="shell">
   <aside>
-    <h1>寰堟湁鑴戝瓙鐨勫皬鐚悊 Web</h1>
-    <p class="hint">缁熶竴鏈湴缃戦〉鏈嶅姟锛氭枃鍙插皬绉樸€佺鐮斿姪鎵嬨€佺瀛︾粡鍏搞€佽嚜鍔ㄥ壀杈戙€佽浼楁祴璇曘€佽嚜浼樺寲銆佸彂甯冨伐鍏烽兘浠庤繖閲屽惎鍔ㄣ€?/p>
+    <h1>瀵板牊婀侀懘鎴濈摍閻ㄥ嫬鐨悮顏嗘倞 Web</h1>
+    <p class="hint">缂佺喍绔撮張顒€婀寸純鎴︺€夐張宥呭閿涙碍鏋冮崣鎻掔毈缁夋ǜ鈧胶顫栭惍鏂垮И閹靛鈧胶顫栫€涳妇绮￠崗鎼炩偓浣藉殰閸斻劌澹€鏉堟垯鈧浇顫囨导妤佺ゴ鐠囨洏鈧浇鍤滄导妯哄閵嗕礁褰傜敮鍐ㄤ紣閸忕兘鍏樻禒搴ょ箹闁插苯鎯庨崝銊ｂ偓?/p>
     <section class="brief">
-      <div><span>褰撳墠鐘舵€?/span><strong>宸︿晶鏄换鍔￠厤缃紝鍙充晶鏄繍琛屾棩蹇椼€?/strong><p>姣忔鍚姩浠诲姟鍚庯紝鏃ュ織浼氬憡璇変綘鐜板湪璺戝埌鍝竴姝ャ€?/p></div>
-      <div><span>涓氬姟浠峰€?/span><strong>瀹冩妸鍐呭鐢熶骇鍙樻垚鍙拷韪殑娴佹按绾裤€?/strong><p>浣犲彲浠ュ垽鏂槸绱犳潗缂哄け銆佹ā鍨嬮棶棰橈紝杩樻槸浠诲姟宸茬粡瀹屾垚銆?/p></div>
-      <div><span>鐜板湪鍙互鍋?/span><strong>鍏堥€夊唴瀹圭被鍨嬶紝鍐嶅～绱犳潗璺緞锛屾渶鍚庡惎鍔ㄤ换鍔°€?/strong><p>浠诲姟杩愯涓笉瑕侀噸澶嶇偣鍑诲惎鍔紱濡傞渶鍋滄锛岀敤鈥滃仠姝㈠綋鍓嶄换鍔♀€濄€?/p></div>
+      <div><span>瑜版挸澧犻悩鑸碘偓?/span><strong>瀹革缚鏅堕弰顖欐崲閸旓繝鍘ょ純顕嗙礉閸欏厖鏅堕弰顖濈箥鐞涘本妫╄箛妞尖偓?/strong><p>濮ｅ繑顐奸崥顖氬З娴犺濮熼崥搴礉閺冦儱绻旀导姘啞鐠囧缍橀悳鏉挎躬鐠烘垵鍩岄崫顏冪濮濄儯鈧?/p></div>
+      <div><span>娑撴艾濮熸禒宄扳偓?/span><strong>鐎瑰啯濡搁崘鍛啇閻㈢喍楠囬崣妯诲灇閸欘垵鎷烽煪顏嗘畱濞翠焦鎸夌痪瑁も偓?/strong><p>娴ｇ姴褰叉禒銉ュ灲閺傤厽妲哥槐鐘虫綏缂傚搫銇戦妴浣鼓侀崹瀣６妫版﹫绱濇潻妯绘Ц娴犺濮熷鑼病鐎瑰本鍨氶妴?/p></div>
+      <div><span>閻滄澘婀崣顖欎簰閸?/span><strong>閸忓牓鈧鍞寸€瑰湱琚崹瀣剁礉閸愬秴锝炵槐鐘虫綏鐠侯垰绶為敍灞炬付閸氬骸鎯庨崝銊ゆ崲閸斅扳偓?/strong><p>娴犺濮熸潻鎰攽娑擃厺绗夌憰渚€鍣告径宥囧仯閸戣鎯庨崝顭掔幢婵″倿娓堕崑婊勵剾閿涘瞼鏁ら垾婊冧粻濮濄垹缍嬮崜宥勬崲閸斺檧鈧縿鈧?/p></div>
     </section>
     <div class="tabs">
-      <button id="tabCulture" onclick="showPanel('culture')">鏂囧彶</button>
-      <button id="tabResearch" onclick="showPanel('research')">绉戠爺</button>
-      <button id="tabClip" onclick="showPanel('clip')">鍓緫</button>
-      <button id="tabModel" onclick="showPanel('model')">妯″瀷鏂规绠＄悊</button>
-      <button id="tabMore" onclick="showPanel('more')">鏇村</button>
+      <button id="tabCulture" onclick="showPanel('culture')">閺傚洤褰?/button>
+      <button id="tabResearch" onclick="showPanel('research')">缁夋垹鐖?/button>
+      <button id="tabClip" onclick="showPanel('clip')">閸擃亣绶?/button>
+      <button id="tabModel" onclick="showPanel('model')">濡€崇€烽弬瑙勵攳缁狅紕鎮?/button>
+      <button id="tabMore" onclick="showPanel('more')">閺囨潙顦?/button>
     </div>
 
     <section id="panelCulture" class="panel active">
-      <h2>鏂囧彶灏忕</h2>
-      <label>涔︾睄 PDF</label><input id="culture_book" placeholder="D:/鐭ヨ瘑/璐┓鐨勬湰璐?pdf">
-      <label>杈撳嚭鐩綍</label><input id="culture_out_dir" placeholder="D:/鐭ヨ瘑/璐┓鐨勬湰璐?鐭棰戠礌鏉?>
-      <label>缁х画鐩綍</label><input id="culture_continue_folder" placeholder="鍙暀绌?>
-      <label>寮€濮嬮樁娈?/label>
+      <h2>閺傚洤褰剁亸蹇曨潩</h2>
+      <label>娑旓妇鐫?PDF</label><input id="culture_book" placeholder="D:/閻儴鐦?鐠愵偆鈹撻惃鍕拱鐠?pdf">
+      <label>鏉堟挸鍤惄顔肩秿</label><input id="culture_out_dir" placeholder="D:/閻儴鐦?鐠愵偆鈹撻惃鍕拱鐠?閻叀顫嬫０鎴犵閺?>
+      <label>缂佈呯敾閻╊喖缍?/label><input id="culture_continue_folder" placeholder="閸欘垳鏆€缁?>
+      <label>瀵偓婵妯佸▓?/label>
       <select id="culture_stage"><option>outline</option><option>split_pdf</option><option>episode_prompt</option><option>script</option><option>polish</option><option>images</option><option>postprocess</option><option>split_assets</option></select>
       <div class="grid2">
-        <div><label>鏂囨湰 provider</label><select id="culture_text_provider"><option>openai</option><option>gemini</option><option>deepseek</option><option>doubao</option><option>dry-run</option></select></div>
-        <div><label>鏂囨湰妯″瀷</label><input id="culture_text_model" placeholder="gpt-5.5"></div>
-        <div><label>娑﹁壊 provider</label><select id="culture_polish_provider"><option>deepseek</option><option>openai</option><option>gemini</option><option>doubao</option><option>dry-run</option></select></div>
-        <div><label>娑﹁壊妯″瀷</label><input id="culture_polish_model" placeholder="gpt-5.5"></div>
-        <div><label>鐢熷浘 provider</label><select id="culture_image_provider"><option>openai</option><option>gemini</option><option>dry-run</option><option>none</option></select></div>
-        <div><label>鐢熷浘妯″瀷</label><input id="culture_image_model" placeholder="gpt-image-2"></div>
+        <div><label>閺傚洦婀?provider</label><select id="culture_text_provider"><option>openai</option><option>gemini</option><option>deepseek</option><option>doubao</option><option>dry-run</option></select></div>
+        <div><label>閺傚洦婀板Ο鈥崇€?/label><input id="culture_text_model" placeholder="gpt-5.5"></div>
+        <div><label>濞戯箒澹?provider</label><select id="culture_polish_provider"><option>deepseek</option><option>openai</option><option>gemini</option><option>doubao</option><option>dry-run</option></select></div>
+        <div><label>濞戯箒澹婂Ο鈥崇€?/label><input id="culture_polish_model" placeholder="gpt-5.5"></div>
+        <div><label>閻㈢喎娴?provider</label><select id="culture_image_provider"><option>openai</option><option>gemini</option><option>dry-run</option><option>none</option></select></div>
+        <div><label>閻㈢喎娴樺Ο鈥崇€?/label><input id="culture_image_model" placeholder="gpt-image-2"></div>
       </div>
-      <label>娴嬭瘯 B 鍥炬暟</label><input id="culture_test_b" value="0">
-      <div class="row"><button onclick="startCulture(false)">寮€濮嬫枃鍙茬敓鎴?/button><button onclick="startCulture(true)">娴嬭瘯 B 鍥?/button></div>
-      <p class="desc"><b>寮€濮嬫枃鍙茬敓鎴愶細</b>鎸夊綋鍓?PDF銆佽緭鍑虹洰褰曞拰妯″瀷鍙傛暟璺戝畬鏁存枃鍙茬礌鏉愰摼璺€?br><b>娴嬭瘯 B 鍥撅細</b>鍙鐞嗗皯閲?B 鍥撅紝鐢ㄦ潵蹇€熸鏌ヨ剼鏈€佹彁绀鸿瘝銆佺敓鍥惧拰鍚庡鐞嗐€?/p>
+      <label>濞村鐦?B 閸ョ偓鏆?/label><input id="culture_test_b" value="0">
+      <div class="row"><button onclick="startCulture(false)">瀵偓婵鏋冮崣鑼晸閹?/button><button onclick="startCulture(true)">濞村鐦?B 閸?/button></div>
+      <p class="desc"><b>瀵偓婵鏋冮崣鑼晸閹存劧绱?/b>閹稿缍嬮崜?PDF閵嗕浇绶崙铏规窗瑜版洖鎷板Ο鈥崇€烽崣鍌涙殶鐠烘垵鐣弫瀛樻瀮閸欒尙绀岄弶鎰版懠鐠侯垬鈧?br><b>濞村鐦?B 閸ユ拝绱?/b>閸欘亜顦╅悶鍡楃毌闁?B 閸ユ拝绱濋悽銊︽降韫囶偊鈧喐顥呴弻銉ㄥ壖閺堫兙鈧焦褰佺粈楦跨槤閵嗕胶鏁撻崶鎯ф嫲閸氬骸顦╅悶鍡愨偓?/p>
     </section>
 
     <section id="panelResearch" class="panel">
-      <h2>绉戠爺鍔╂墜 / 绉戝缁忓吀</h2>
-      <label>杈撳嚭鐩綍</label><input id="research_out_dir" placeholder="鐣欑┖鍒欎娇鐢ㄩ粯璁よ緭鍑虹洰褰?>
-      <div class="grid2"><div><label>妫€绱㈠ぉ鏁?/label><input id="research_days" value="14"></div><div><label>鏂囩珷鏁?/label><input id="research_max_articles" value="5"></div></div>
-      <label>鏈熷垔鍒楄〃</label><input id="research_journals" placeholder="Nature, Science, Neuron...">
-      <label>宸叉湁鏂囩尞娓呭崟 / 缁仛鐩綍</label><input id="research_article_list" placeholder="鍙暀绌?>
-      <div class="grid2"><div><label>文本模型</label><input id="text_engine" placeholder="gpt-5.5"></div><div><label>润色模型</label><input id="polish_engine" placeholder="DeepSeek Chat（官方润色）"></div></div>
-      <label>鍥剧墖妯″瀷</label><input id="image_engine" placeholder="鐢熷浘涓撶敤锝淕PT Image 2">
-      <div class="row"><button onclick="startResearch('digest')">姣忔棩鐮旂┒閫熼€?/button><button onclick="startResearch('article_list')">琛ユ枃鐚竻鍗?/button><button onclick="startResearch('continue_list')">娓呭崟缁仛</button><button onclick="startResearch('resume')">缁仛妗ｆ湡</button></div>
-      <p class="desc"><b>姣忔棩鐮旂┒閫熼€掞細</b>妫€绱㈡湡鍒婃枃鐚苟鐢熸垚鐮旂┒閫熼€掔礌鏉愩€?br><b>琛ユ枃鐚竻鍗曪細</b>鍙敓鎴愭垨琛ラ綈鍊欓€夋枃鐚?JSON锛屼笉鐢熸垚绱犳潗銆?br><b>娓呭崟缁仛锛?/b>浠庡凡鏈夋枃鐚竻鍗曠户缁埗浣滃悗缁礌鏉愩€?br><b>缁仛妗ｆ湡锛?/b>浠庡凡鏈夋。鏈熺洰褰曠户缁ˉ榻愭湭瀹屾垚姝ラ銆?/p>
-      <div class="row"><button onclick="startTool('science')">绉戝缁忓吀瑙ｈ</button><button onclick="startTool('science_test_b')">绉戝缁忓吀娴嬭瘯 B 鍥?/button></div>
-      <p class="desc"><b>绉戝缁忓吀瑙ｈ锛?/b>鍚姩绉戠爺鍔╂墜閲岀殑缁忓吀璁烘枃/绉戝鍐呭瑙ｈ娴佺▼銆?br><b>绉戝缁忓吀娴嬭瘯 B 鍥撅細</b>鐢ㄦ渶灏?B 鍥鹃搴﹀揩閫熸鏌ョ瀛︾粡鍏哥殑鍥炬枃閾捐矾銆?/p>
+      <h2>缁夋垹鐖洪崝鈺傚 / 缁夋垵顒熺紒蹇撳悁</h2>
+      <label>鏉堟挸鍤惄顔肩秿</label><input id="research_out_dir" placeholder="閻ｆ瑧鈹栭崚娆庡▏閻劑绮拋銈堢翻閸戣櫣娲拌ぐ?>
+      <div class="grid2"><div><label>濡偓缁便垹銇夐弫?/label><input id="research_days" value="14"></div><div><label>閺傚洨鐝烽弫?/label><input id="research_max_articles" value="5"></div></div>
+      <label>閺堢喎鍨旈崚妤勩€?/label><input id="research_journals" placeholder="Nature, Science, Neuron...">
+      <label>瀹稿弶婀侀弬鍥╁盀濞撳懎宕?/ 缂侇厼浠涢惄顔肩秿</label><input id="research_article_list" placeholder="閸欘垳鏆€缁?>
+      <div class="grid2"><div><label>鏂囨湰妯″瀷</label><input id="text_engine" placeholder="gpt-5.5"></div><div><label>娑﹁壊妯″瀷</label><input id="polish_engine" placeholder="DeepSeek Chat锛堝畼鏂规鼎鑹诧級"></div></div>
+      <label>閸ュ墽澧栧Ο鈥崇€?/label><input id="image_engine" placeholder="閻㈢喎娴樻稉鎾舵暏閿濇窌PT Image 2">
+      <div class="row"><button onclick="startResearch('digest')">濮ｅ繑妫╅惍鏃傗敀闁喖鈧?/button><button onclick="startResearch('article_list')">鐞涖儲鏋冮悮顔界閸?/button><button onclick="startResearch('continue_list')">濞撳懎宕熺紒顓炰粵</button><button onclick="startResearch('resume')">缂侇厼浠涘锝嗘埂</button></div>
+      <p class="desc"><b>濮ｅ繑妫╅惍鏃傗敀闁喖鈧帪绱?/b>濡偓缁便垺婀￠崚濠冩瀮閻氼喖鑻熼悽鐔稿灇閻梻鈹掗柅鐔尖偓鎺旂閺夋劑鈧?br><b>鐞涖儲鏋冮悮顔界閸楁洩绱?/b>閸欘亞鏁撻幋鎰灗鐞涖儵缍堥崐娆撯偓澶嬫瀮閻?JSON閿涘奔绗夐悽鐔稿灇缁辩姵娼楅妴?br><b>濞撳懎宕熺紒顓炰粵閿?/b>娴犲骸鍑￠張澶嬫瀮閻氼喗绔婚崡鏇犳埛缂侇厼鍩楁担婊冩倵缂侇厾绀岄弶鎰┾偓?br><b>缂侇厼浠涘锝嗘埂閿?/b>娴犲骸鍑￠張澶嬨€傞張鐔烘窗瑜版洜鎴风紒顓∷夋鎰弓鐎瑰本鍨氬銉╊€冮妴?/p>
+      <div class="row"><button onclick="startTool('science')">缁夋垵顒熺紒蹇撳悁鐟欙綀顕?/button><button onclick="startTool('science_test_b')">缁夋垵顒熺紒蹇撳悁濞村鐦?B 閸?/button></div>
+      <p class="desc"><b>缁夋垵顒熺紒蹇撳悁鐟欙綀顕伴敍?/b>閸氼垰濮╃粔鎴犵埡閸斺晜澧滈柌宀€娈戠紒蹇撳悁鐠佺儤鏋?缁夋垵顒熼崘鍛啇鐟欙綀顕板ù浣衡柤閵?br><b>缁夋垵顒熺紒蹇撳悁濞村鐦?B 閸ユ拝绱?/b>閻劍娓剁亸?B 閸ラ箖顤傛惔锕€鎻╅柅鐔割梾閺屻儳顫栫€涳妇绮￠崗鍝ユ畱閸ョ偓鏋冮柧鎹愮熅閵?/p>
     </section>
 
     <section id="panelClip" class="panel">
-      <h2>鑷姩鍓緫 / BGM</h2>
-      <label>鍥剧墖鐩綍</label><input id="auto_clip_image_dir" placeholder="鍒嗛泦鍥剧墖鐩綍">
-      <label>LRC / 闊抽鐩綍</label><input id="auto_clip_lrc_dir" placeholder="瀛楀箷鎴栭煶棰戠洰褰?>
-      <label>杈撳嚭鐩綍</label><input id="auto_clip_output_dir" placeholder="鍙暀绌?>
-      <label>BGM 鏂囦欢/鐩綍</label><input id="auto_clip_bgm" placeholder="鍙暀绌?>
+      <h2>閼奉亜濮╅崜顏囩帆 / BGM</h2>
+      <label>閸ュ墽澧栭惄顔肩秿</label><input id="auto_clip_image_dir" placeholder="閸掑棝娉﹂崶鍓у閻╊喖缍?>
+      <label>LRC / 闂婃娊顣堕惄顔肩秿</label><input id="auto_clip_lrc_dir" placeholder="鐎涙绠烽幋鏍叾妫版垹娲拌ぐ?>
+      <label>鏉堟挸鍤惄顔肩秿</label><input id="auto_clip_output_dir" placeholder="閸欘垳鏆€缁?>
+      <label>BGM 閺傚洣娆?閻╊喖缍?/label><input id="auto_clip_bgm" placeholder="閸欘垳鏆€缁?>
       <h2>MiniMax Voice / BGM</h2>
       <label>MiniMax API Key</label><input id="minimax_api_key" type="password" placeholder="saved locally; never shown in logs">
       <div class="status" id="minimax_key_status">MiniMax key: checking...</div>
@@ -2631,56 +3886,56 @@ def _assistant_html() -> bytes:
         <div><label>BGM Model</label><input id="minimax_bgm_model" placeholder="music-2.6"></div>
         <div><label>BGM Prompt</label><input id="minimax_bgm_prompt" placeholder="instrumental, documentary, soft piano"></div>
       </div>
-      <div class="row"><button onclick="startClip()">鍚姩鑷姩鍓緫</button><button onclick="startBgm()">鐢熸垚 BGM</button></div>
-      <p class="desc"><b>鍚姩鑷姩鍓緫锛?/b>鎸?LRC 鐢婚潰缂栧彿鍖归厤鍥剧墖锛岃皟鐢?FFmpeg 鍚堟垚瑙嗛銆?br><b>鐢熸垚 BGM锛?/b>鏍规嵁涔︾睄/绱犳潗鎽樿鐢熸垚涓€鏉¤儗鏅煶涔愮礌鏉愩€?/p>
+      <div class="row"><button onclick="startClip()">閸氼垰濮╅懛顏勫З閸擃亣绶?/button><button onclick="startBgm()">閻㈢喐鍨?BGM</button></div>
+      <p class="desc"><b>閸氼垰濮╅懛顏勫З閸擃亣绶敍?/b>閹?LRC 閻㈠娼扮紓鏍у娇閸栧綊鍘ら崶鍓у閿涘矁鐨熼悽?FFmpeg 閸氬牊鍨氱憴鍡涱暥閵?br><b>閻㈢喐鍨?BGM閿?/b>閺嶈宓佹稊锔剧潉/缁辩姵娼楅幗妯款洣閻㈢喐鍨氭稉鈧弶陇鍎楅弲顖炵叾娑旀劗绀岄弶鎰┾偓?/p>
     </section>
 
     <section id="panelModel" class="panel">
-      <div class="panel-head"><div><h2>妯″瀷鏂规绠＄悊</h2><p class="desc">杩欓噷绠＄悊鏂规鐨勫垱寤恒€佸鍒躲€佷慨鏀广€佸垹闄ゅ拰搴旂敤銆傛瘡涓柟妗堝垎鍒繚瀛?GPT銆丟PT-Pro銆丟PT-image2銆丮iniMax 鐨?URL銆佹ā鍨嬪悕鍜?Key銆?/p></div><span class="panel-tag">鏂规绠＄悊</span></div>
+      <div class="panel-head"><div><h2>濡€崇€烽弬瑙勵攳缁狅紕鎮?/h2><p class="desc">鏉╂瑩鍣风粻锛勬倞閺傝顢嶉惃鍕灡瀵ゆ亽鈧礁顦查崚韬测偓浣锋叏閺€骞库偓浣稿灩闂勩倕鎷版惔鏃傛暏閵嗗倹鐦℃稉顏呮煙濡楀牆鍨庨崚顐＄箽鐎?GPT閵嗕笩PT-Pro閵嗕笩PT-image2閵嗕府iniMax 閻?URL閵嗕焦膩閸ㄥ鎮曢崪?Key閵?/p></div><span class="panel-tag">閺傝顢嶇粻锛勬倞</span></div>
       <div class="section soft">
-        <div class="section-title"><h3>鏂规鎺у埗</h3><span id="model_profile_status">鏂规鐘舵€侊細璇诲彇涓?/span></div>
+        <div class="section-title"><h3>閺傝顢嶉幒褍鍩?/h3><span id="model_profile_status">閺傝顢嶉悩鑸碘偓渚婄窗鐠囪褰囨稉?/span></div>
         <div class="grid2">
-          <div><label>閫夋嫨鏂规</label><select id="model_profile_select"></select></div>
-          <div><label>方案名称</label><input id="model_profile_name" placeholder="例如：GreatWall Link 系列 / DST 系列 / FHL 系列"></div>
+          <div><label>闁瀚ㄩ弬瑙勵攳</label><select id="model_profile_select"></select></div>
+          <div><label>鏂规鍚嶇О</label><input id="model_profile_name" placeholder="渚嬪锛欸reatWall Link 绯诲垪 / DST 绯诲垪 / FHL 绯诲垪"></div>
         </div>
-        <div class="row"><button class="secondary" onclick="newModelProfile()">鏂板缓鏂规</button><button class="secondary" onclick="applyModelProfile()">搴旂敤鎵€閫夋柟妗?/button><button onclick="saveModelProfile()">淇濆瓨/瑕嗙洊</button><button class="danger" onclick="deleteModelProfile()">鍒犻櫎鏂规</button></div>
+        <div class="row"><button class="secondary" onclick="newModelProfile()">閺傛澘缂撻弬瑙勵攳</button><button class="secondary" onclick="applyModelProfile()">鎼存梻鏁ら幍鈧柅澶嬫煙濡?/button><button onclick="saveModelProfile()">娣囨繂鐡?鐟曞棛娲?/button><button class="danger" onclick="deleteModelProfile()">閸掔娀娅庨弬瑙勵攳</button></div>
       </div>
       <div class="section">
-        <div class="section-title"><h3>鏂规鎽樿</h3><span id="route_profile_name">璇诲彇涓?/span></div>
+        <div class="section-title"><h3>閺傝顢嶉幗妯款洣</h3><span id="route_profile_name">鐠囪褰囨稉?/span></div>
         <div class="route-summary" id="model_route_summary"></div>
       </div>
       <div class="section">
-        <div class="section-title"><h3>妯″瀷閰嶇疆</h3><span>姣忎釜妯″瀷鍒嗗埆閰嶇疆 URL銆佹ā鍨嬪悕銆並ey</span></div>
+        <div class="section-title"><h3>濡€崇€烽柊宥囩枂</h3><span>濮ｅ繋閲滃Ο鈥崇€烽崚鍡楀焼闁板秶鐤?URL閵嗕焦膩閸ㄥ鎮曢妴涓y</span></div>
         <div class="grid2">
-          <div class="scheme-card"><b>GPT / 鏂囧彶鏂囨湰</b><label>URL</label><input id="gpt_base_url" placeholder="https://api.dstopology.com/v1"><label>妯″瀷鍚?/label><input id="culture_text_model" placeholder="gpt-5.5"><label>Key</label><input id="openai_api_key" type="password" autocomplete="off" placeholder="GPT Key"></div>
-          <div class="scheme-card"><b>GPT / 鏂囧彶娑﹁壊</b><label>URL</label><input id="deepseek_base_url" placeholder="https://api.dstopology.com/v1"><label>妯″瀷鍚?/label><input id="culture_polish_model" placeholder="gpt-5.5"><label>Key</label><input id="gpt_pro_api_key" type="password" autocomplete="off" placeholder="GPT Key"></div>
-          <div class="scheme-card"><b>GPT-image2 / 鏂囧彶鐢熷浘</b><label>URL</label><input id="gpt_image_base_url" placeholder="https://api.dstopology.com/v1"><label>妯″瀷鍚?/label><input id="culture_image_model" placeholder="gpt-image-2"><label>Key</label><input id="image_api_key" type="password" autocomplete="off" placeholder="GPT-image2 Key"></div>
-          <div class="scheme-card"><b>MiniMax / 閰嶉煶涓?BGM</b><label>URL</label><input id="minimax_base_url" placeholder="https://api.53hk.cn"><label>妯″瀷鍚?/label><input id="minimax_tts_model" placeholder="speech-2.8-hd"><label>Key</label><input id="minimax_api_key" type="password" autocomplete="off" placeholder="MiniMax Key"></div>
+          <div class="scheme-card"><b>GPT / 閺傚洤褰堕弬鍥ㄦ拱</b><label>URL</label><input id="gpt_base_url" placeholder="https://api.dstopology.com/v1"><label>濡€崇€烽崥?/label><input id="culture_text_model" placeholder="gpt-5.5"><label>Key</label><input id="openai_api_key" type="password" autocomplete="off" placeholder="GPT Key"></div>
+          <div class="scheme-card"><b>GPT / 閺傚洤褰跺☉锕佸</b><label>URL</label><input id="deepseek_base_url" placeholder="https://api.dstopology.com/v1"><label>濡€崇€烽崥?/label><input id="culture_polish_model" placeholder="gpt-5.5"><label>Key</label><input id="gpt_pro_api_key" type="password" autocomplete="off" placeholder="GPT Key"></div>
+          <div class="scheme-card"><b>GPT-image2 / 閺傚洤褰堕悽鐔锋禈</b><label>URL</label><input id="gpt_image_base_url" placeholder="https://api.dstopology.com/v1"><label>濡€崇€烽崥?/label><input id="culture_image_model" placeholder="gpt-image-2"><label>Key</label><input id="image_api_key" type="password" autocomplete="off" placeholder="GPT-image2 Key"></div>
+          <div class="scheme-card"><b>MiniMax / 闁板秹鐓舵稉?BGM</b><label>URL</label><input id="minimax_base_url" placeholder="https://api.53hk.cn"><label>濡€崇€烽崥?/label><input id="minimax_tts_model" placeholder="speech-2.8-hd"><label>Key</label><input id="minimax_api_key" type="password" autocomplete="off" placeholder="MiniMax Key"></div>
         </div>
       </div>
       <div class="section soft">
-        <div class="section-title"><h3>浠诲姟寮曟搸鍒悕</h3><span>鐢ㄤ簬鏂囧彶/绉戠爺浠诲姟锛屼笉鍗曠嫭閲嶅璺敱閰嶇疆</span></div>
+        <div class="section-title"><h3>娴犺濮熷鏇熸惛閸掝偄鎮?/h3><span>閻劋绨弬鍥у蕉/缁夋垹鐖烘禒璇插閿涘奔绗夐崡鏇犲闁插秴顦茬捄顖滄暠闁板秶鐤?/span></div>
         <div class="grid3">
-          <div><label>鏂囨湰寮曟搸</label><input id="text_engine" placeholder="gpt-5.5"></div>
-          <div><label>娑﹁壊寮曟搸</label><input id="polish_engine" placeholder="gpt-5.5"></div>
-          <div><label>鍥剧墖寮曟搸</label><input id="image_engine" placeholder="GPT-image2"></div>
+          <div><label>閺傚洦婀板鏇熸惛</label><input id="text_engine" placeholder="gpt-5.5"></div>
+          <div><label>濞戯箒澹婂鏇熸惛</label><input id="polish_engine" placeholder="gpt-5.5"></div>
+          <div><label>閸ュ墽澧栧鏇熸惛</label><input id="image_engine" placeholder="GPT-image2"></div>
         </div>
       </div>
     </section>
 
     <section id="panelMore" class="panel">
-      <h2>鏇村宸ュ叿</h2>
-      <label>鏀朵欢閭</label><input id="email_recipient" placeholder="澶氫釜閭鐢ㄩ€楀彿鍒嗛殧">
-      <div class="grid2"><div><label>SMTP 鏈嶅姟鍣?/label><input id="smtp_host" placeholder="smtp.qq.com"></div><div><label>SMTP 绔彛</label><input id="smtp_port" placeholder="465"></div><div><label>SMTP 璐﹀彿</label><input id="smtp_user" placeholder="閭璐﹀彿"></div><div><label>鍙戜欢浜?/label><input id="smtp_sender" placeholder="榛樿鍚岃处鍙?></div></div>
-      <div class="row"><button onclick="startTool('audience')">瑙備紬娴嬭瘯</button><button onclick="startTool('audience_apply')">瑙備紬娴嬭瘯骞跺簲鐢?/button><button onclick="startTool('self_optimizer_once')">鑷紭鍖栦竴娆?/button><button onclick="startTool('self_optimizer_daemon')">鍚姩鑷紭鍖栧櫒</button></div>
-      <p class="desc"><b>瑙備紬娴嬭瘯锛?/b>鎵弿鍏紑瑙嗛鍙?璇讳功绫诲弽棣堜俊鍙凤紝杈撳嚭瑙備紬椋庨櫓鎶ュ憡銆?br><b>瑙備紬娴嬭瘯骞跺簲鐢細</b>鍦ㄨ浼楁祴璇曞熀纭€涓婂厑璁歌嚜鍔ㄥ啓鍏ュ彲搴旂敤淇銆?br><b>鑷紭鍖栦竴娆★細</b>绔嬪嵆璺戜竴杞嚜浼樺寲瑙傚療銆乺ole-play銆佽鍒掑拰璁板綍銆?br><b>鍚姩鑷紭鍖栧櫒锛?/b>鍚姩闀胯繍琛?daemon锛屽畾鏃惰瀵熼」鐩苟鍐欏叆鏃ュ織/鐘舵€併€?/p>
-      <div class="row"><button onclick="startTool('package_update')">鐢熸垚娴嬭瘯鐗堟湰鏇存柊鍖?/button><button onclick="startTool('init_release')">鍒濆鍖栨祴璇曠増鏈洰褰?/button><button onclick="startTool('model_help')">CLI 鑷</button><button onclick="openXiaozhuli()">鎵撳紑灏忕尓鐞嗗唴宓?/button></div>
-      <p class="desc"><b>鐢熸垚娴嬭瘯鐗堟湰鏇存柊鍖咃細</b>鍙敓鎴?test 寰呮洿鏂?zip锛屼笉浼氬簲鐢ㄥ埌褰撳墠鏈嶅姟銆?br><b>鍒濆鍖栨祴璇曠増鏈洰褰曪細</b>鍒涘缓鎴栧垵濮嬪寲娴嬭瘯鐗堢洰褰曘€傚紑鍙戠増鏄綋鍓嶆簮鐮佺洰褰曪紱娴嬭瘯鐗堢敤浜庨獙鏀躲€?br><b>CLI 鑷锛?/b>鎵撳紑鏂囧彶 CLI help锛岄獙璇佸叆鍙ｅ弬鏁版槸鍚︽甯搞€?br><b>鎵撳紑灏忕尓鐞嗗唴宓岋細</b>鍦ㄥ綋鍓嶆湇鍔′笅浠ｇ悊鎵撳紑鍙︿竴涓皬鐚悊 dashboard銆?/p>
-      <p class="hint">鏁忔劅 Key 涓嶅湪缃戦〉涓睍绀恒€傛ā鍨嬪拰 SMTP 鐨勭湡瀹炶繛閫氭祴璇曚繚鐣欐湰鍦伴厤缃?鐜鍙橀噺鏂瑰紡锛屽悗缁彲缁х画鍋氫笓闂ㄦ祴璇曟帴鍙ｃ€?/p>
+      <h2>閺囨潙顦垮銉ュ徔</h2>
+      <label>閺€鏈垫闁喚顔?/label><input id="email_recipient" placeholder="婢舵矮閲滈柇顔绢唸閻劑鈧褰块崚鍡涙">
+      <div class="grid2"><div><label>SMTP 閺堝秴濮熼崳?/label><input id="smtp_host" placeholder="smtp.qq.com"></div><div><label>SMTP 缁旑垰褰?/label><input id="smtp_port" placeholder="465"></div><div><label>SMTP 鐠愶箑褰?/label><input id="smtp_user" placeholder="闁喚顔堢拹锕€褰?></div><div><label>閸欐垳娆㈡禍?/label><input id="smtp_sender" placeholder="姒涙顓婚崥宀冨閸?></div></div>
+      <div class="row"><button onclick="startTool('audience')">鐟欏倷绱ù瀣槸</button><button onclick="startTool('audience_apply')">鐟欏倷绱ù瀣槸楠炶泛绨查悽?/button><button onclick="startTool('self_optimizer_once')">閼奉亙绱崠鏍︾濞?/button><button onclick="startTool('self_optimizer_daemon')">閸氼垰濮╅懛顏冪喘閸栨牕娅?/button></div>
+      <p class="desc"><b>鐟欏倷绱ù瀣槸閿?/b>閹殿偅寮块崗顒€绱戠憴鍡涱暥閸?鐠囪鍔熺猾璇插冀妫ｅ牅淇婇崣鍑ょ礉鏉堟挸鍤憴鍌欑船妞嬪酣娅撻幎銉ユ啞閵?br><b>鐟欏倷绱ù瀣槸楠炶泛绨查悽顭掔窗</b>閸︺劏顫囨导妤佺ゴ鐠囨洖鐔€绾偓娑撳﹤鍘戠拋姝屽殰閸斻劌鍟撻崗銉ュ讲鎼存梻鏁ゆ穱顔碱槻閵?br><b>閼奉亙绱崠鏍︾濞嗏槄绱?/b>缁斿宓嗙捄鎴滅鏉烆喛鍤滄导妯哄鐟欏倸鐧傞妴涔簅le-play閵嗕浇顓搁崚鎺戞嫲鐠佹澘缍嶉妴?br><b>閸氼垰濮╅懛顏冪喘閸栨牕娅掗敍?/b>閸氼垰濮╅梹鑳箥鐞?daemon閿涘苯鐣鹃弮鎯邦潎鐎电喖銆嶉惄顔艰嫙閸愭瑥鍙嗛弮銉ョ箶/閻樿埖鈧降鈧?/p>
+      <div class="row"><button onclick="startTool('package_update')">閻㈢喐鍨氬ù瀣槸閻楀牊婀伴弴瀛樻煀閸?/button><button onclick="startTool('init_release')">閸掓繂顫愰崠鏍ㄧゴ鐠囨洜澧楅張顒傛窗瑜?/button><button onclick="startTool('model_help')">CLI 閼奉亝顥?/button><button onclick="openXiaozhuli()">閹垫挸绱戠亸蹇曞皳閻炲棗鍞村畵?/button></div>
+      <p class="desc"><b>閻㈢喐鍨氬ù瀣槸閻楀牊婀伴弴瀛樻煀閸栧拑绱?/b>閸欘亞鏁撻幋?test 瀵板懏娲块弬?zip閿涘奔绗夋导姘安閻劌鍩岃ぐ鎾冲閺堝秴濮熼妴?br><b>閸掓繂顫愰崠鏍ㄧゴ鐠囨洜澧楅張顒傛窗瑜版洩绱?/b>閸掓稑缂撻幋鏍у灥婵瀵插ù瀣槸閻楀牏娲拌ぐ鏇樷偓鍌氱磻閸欐垹澧楅弰顖氱秼閸撳秵绨惍浣烘窗瑜版洩绱卞ù瀣槸閻楀牏鏁ゆ禍搴ㄧ崣閺€韬测偓?br><b>CLI 閼奉亝顥呴敍?/b>閹垫挸绱戦弬鍥у蕉 CLI help閿涘矂鐛欑拠浣稿弳閸欙絽寮弫鐗堟Ц閸氾附顒滅敮鎼炩偓?br><b>閹垫挸绱戠亸蹇曞皳閻炲棗鍞村畵宀嬬窗</b>閸︺劌缍嬮崜宥嗘箛閸斺€茬瑓娴狅絿鎮婇幍鎾崇磻閸欙缚绔存稉顏勭毈閻氼亞鎮?dashboard閵?/p>
+      <p class="hint">閺佸繑鍔?Key 娑撳秴婀純鎴︺€夋稉顓炵潔缁€鎭掆偓鍌浤侀崹瀣嫲 SMTP 閻ㄥ嫮婀＄€圭偠绻涢柅姘ゴ鐠囨洑绻氶悾娆愭拱閸︿即鍘ょ純?閻滎垰顣ㄩ崣姗€鍣洪弬鐟扮础閿涘苯鎮楃紒顓炲讲缂佈呯敾閸嬫矮绗撻梻銊︾ゴ鐠囨洘甯撮崣锝冣偓?/p>
     </section>
 
-    <div class="row"><button class="secondary" onclick="saveSettings()">淇濆瓨璁剧疆</button><button class="danger" onclick="stopJob()">鍋滄褰撳墠浠诲姟</button></div>
-    <div class="status" id="status">寰呭懡</div><div class="cmd" id="cmd"></div>
+    <div class="row"><button class="secondary" onclick="saveSettings()">娣囨繂鐡ㄧ拋鍓х枂</button><button class="danger" onclick="stopJob()">閸嬫粍顒涜ぐ鎾冲娴犺濮?/button></div>
+    <div class="status" id="status">瀵板懎鎳?/div><div class="cmd" id="cmd"></div>
   </aside>
   <main><pre id="log"></pre></main>
 </div>
@@ -2722,37 +3977,38 @@ function restoreDefaultUrls(){
   syncModelMirrorFields();
   const p=(modelProfiles.profiles||[]).find(x=>x.id===selectedProfileId())||{};
   renderRouteSummary(p);
-  setStatus("妯″瀷鍦板潃宸叉仮澶嶉粯璁わ紝鐐瑰嚮淇濆瓨鍚庣敓鏁?,"ok");
+  setStatus("濡€崇€烽崷鏉挎絻瀹稿弶浠径宥夌帛鐠併倧绱濋悙鐟板毊娣囨繂鐡ㄩ崥搴ｆ晸閺?,"ok");
 }
 function collect(){const ids=["culture_book","culture_out_dir","culture_continue_folder","culture_text_provider","culture_text_model","culture_polish_provider","culture_polish_model","culture_image_provider","culture_image_model","research_out_dir","research_days","research_max_articles","research_journals","research_article_list","text_engine","polish_engine","image_engine","gpt_base_url","deepseek_base_url","gpt_image_base_url","minimax_base_url","culture_text_base_url","culture_polish_base_url","culture_image_base_url","research_text_base_url","research_polish_base_url","research_image_base_url","openai_api_key","image_api_key","gpt_pro_api_key","minimax_api_key","smtp_password","auto_clip_image_dir","auto_clip_lrc_dir","auto_clip_output_dir","auto_clip_bgm","minimax_voice_id","minimax_tts_model","minimax_bgm_model","minimax_bgm_prompt","email_recipient","smtp_host","smtp_port","smtp_user","smtp_sender"];const p={};for(const id of ids){if(byId(id))p[id]=byId(id).value}return p}
 function clearSecretInputs(){for(const id of ["openai_api_key","image_api_key","gpt_pro_api_key","minimax_api_key","smtp_password"]){if(byId(id))byId(id).value=""}}
-function hideSecret(key){const prefix=keyNameMap[key];visibleSecrets[key]=false;if(prefix&&byId(prefix+"_key_value"))byId(prefix+"_key_value").textContent="宸查殣钘?}
-async function toggleSecret(key){const prefix=keyNameMap[key];if(!prefix)return;if(visibleSecrets[key]){hideSecret(key);notify("宸查殣钘忔晱鎰熶俊鎭?,"ok");return}const b=beginAction("姝ｅ湪璇诲彇鏈満瀵嗛挜鐘舵€?..");try{const box=byId(prefix+"_key_value");if(box)box.textContent="璇诲彇涓?..";const r=await fetch("/api/secret?key="+encodeURIComponent(key));const data=await r.json();if(key==="smtp_password"){const email=data.email_secret||{};if(box)box.textContent=email.smtp_password||"鏈厤缃?;applyEmailStatus(email)}else{const sec=data.secrets||{};if(box)box.textContent=sec[key]||"鏈厤缃?;applyKeyStatus(sec)}visibleSecrets[key]=true;endAction(b,"瀵嗛挜宸茶鍙栵紱娉ㄦ剰涓嶈鍦ㄤ粬浜哄彲瑙佹椂灞曠ず","ok")}catch(err){failAction(b,err,"璇诲彇瀵嗛挜澶辫触")}}
-function renderTest(id,result){const el=byId(id);if(!el)return;const ok=result&&result.ok;el.innerHTML=(ok?'<span class="ok">娴嬭瘯閫氳繃</span>':'<span class="missing">娴嬭瘯澶辫触</span>')+" 锝?"+((result&&result.message)||"鏃犵粨鏋?)+((result&&result.suggestion)?(" 锝?寤鸿锛?+result.suggestion):"")}
-function appendLogLine(message){const el=byId("log");if(!el)return;const now=new Date().toLocaleTimeString();const current=el.textContent==="鏆傛棤鏃ュ織"?"":el.textContent;const lines=(current+"["+now+"] "+message+"\\n").split("\\n").slice(-1000);el.textContent=lines.join("\\n");el.scrollTop=el.scrollHeight}
-function selectedProfileName(){const p=(modelProfiles.profiles||[]).find(x=>x.id===selectedProfileId())||{};return profileLabel(p)}
-function newModelProfile(){const sel=byId("model_profile_select");if(sel)sel.value="";if(byId("model_profile_name"))byId("model_profile_name").value="";setStatus("宸插垏鎹㈠埌鏂板缓鏂规锛屽彲鐩存帴缂栬緫鍚庝繚瀛?,"ok")}
-function testMeta(provider,payload){const map={openai:{label:"GPT",model:payload.culture_text_model||payload.text_engine||"gpt-5.5",url:payload.culture_text_base_url||payload.foreign_base_url},image:{label:"GPT-image2",model:payload.culture_image_model||payload.image_engine||"gpt-image-2",url:payload.culture_image_base_url||payload.foreign_base_url},gpt_pro:{label:"润色文本",model:payload.culture_polish_model||payload.polish_engine||"gpt-5.5",url:payload.culture_polish_base_url||payload.gpt_base_url||payload.foreign_base_url},minimax:{label:"MiniMax",model:payload.minimax_tts_model||"speech-2.8-hd",url:payload.minimax_base_url||defaultMiniMaxBaseUrl}};return map[provider]||{label:provider,model:"",url:""}}
-function logTestResult(meta,result){const ok=result&&result.ok;appendLogLine((ok?"閫氳繃 ":"澶辫触 ")+meta.label+" 锝?model="+(result.model||meta.model||"鏈缃?)+" 锝?url="+(result.endpoint||meta.url||"鏈缃?)+" 锝?"+((result&&result.message)||"鏃犵粨鏋?));if(result&&result.suggestion)appendLogLine("寤鸿 "+meta.label+" 锝?"+result.suggestion)}
-async function runModelTest(provider,{batch=false}={}){const id=provider+"_test_result";const payload={...collect(),provider,profile_id:selectedProfileId()};const meta=testMeta(provider,payload);if(byId(id))byId(id).textContent="娴嬭瘯涓?..";appendLogLine("寮€濮嬫祴璇?"+meta.label+" 锝?鏂规="+selectedProfileName()+" 锝?model="+(meta.model||"鏈缃?)+" 锝?url="+(meta.url||"鏈缃?));const r=await fetch("/api/test_model",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});const data=await r.json();clearSecretInputs();for(const key of Object.keys(keyNameMap))hideSecret(key);const result=data.result||{};renderTest(id,result);applyKeyStatus(data.secrets||{});applyEmailStatus(data.email_secret||{});logTestResult(meta,result);if(!batch)setStatus(result.ok?"妯″瀷娴嬭瘯閫氳繃":"妯″瀷娴嬭瘯澶辫触锛?+(result.message||"璇风湅鍙充晶鏃ュ織"),result.ok?"ok":"error");return result}
-async function testModel(provider){const b=beginAction("姝ｅ湪娴嬭瘯妯″瀷杩為€氭€?..");try{const result=await runModelTest(provider);endAction(b,result.ok?"妯″瀷娴嬭瘯閫氳繃":"妯″瀷娴嬭瘯澶辫触锛?+(result.message||"璇风湅鍙充晶鏃ュ織"),result.ok?"ok":"error")}catch(err){appendLogLine("寮傚父 妯″瀷娴嬭瘯 锝?"+((err&&err.message)||err||"unknown"));failAction(b,err,"妯″瀷娴嬭瘯澶辫触")}}
-async function testAllModels(){const b=beginAction("姝ｅ湪娴嬭瘯鍏ㄩ儴妯″瀷閾炬帴...");appendLogLine("==== 寮€濮嬫祴璇曞叏閮ㄦā鍨嬮摼鎺?锝?鏂规="+selectedProfileName()+" ====");let okCount=0;const plan=["openai","image","gpt_pro","minimax"];try{for(const provider of plan){const result=await runModelTest(provider,{batch:true});if(result&&result.ok)okCount++}const allOk=okCount===plan.length;appendLogLine("==== 鍏ㄩ儴妯″瀷閾炬帴娴嬭瘯瀹屾垚 锝?閫氳繃 "+okCount+"/"+plan.length+" ====");endAction(b,allOk?"鍏ㄩ儴妯″瀷閾炬帴娴嬭瘯閫氳繃":"妯″瀷閾炬帴娴嬭瘯瀹屾垚锛岄儴鍒嗗け璐ワ紝璇风湅鍙充晶鏃ュ織",allOk?"ok":"error")}catch(err){appendLogLine("寮傚父 鍏ㄩ儴妯″瀷閾炬帴娴嬭瘯 锝?"+((err&&err.message)||err||"unknown"));failAction(b,err,"鍏ㄩ儴妯″瀷閾炬帴娴嬭瘯澶辫触")}}
-async function testEmail(){const b=beginAction("姝ｅ湪娴嬭瘯 SMTP...");try{if(byId("smtp_test_result"))byId("smtp_test_result").textContent="娴嬭瘯涓?..";appendLogLine("寮€濮嬫祴璇?SMTP 锝?host="+(fieldValue("smtp_host")||"鏈缃?)+" 锝?user="+(fieldValue("smtp_user")||"鏈缃?));const r=await fetch("/api/test_email",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(collect())});const data=await r.json();clearSecretInputs();hideSecret("smtp_password");const result=data.result||{};renderTest("smtp_test_result",result);applyEmailStatus(data.email_secret||{});appendLogLine((result.ok?"閫氳繃 ":"澶辫触 ")+"SMTP 锝?"+(result.message||"鏃犵粨鏋?));if(result.suggestion)appendLogLine("寤鸿 SMTP 锝?"+result.suggestion);endAction(b,result.ok?"SMTP 娴嬭瘯閫氳繃":"SMTP 娴嬭瘯澶辫触锛?+(result.message||"璇风湅鍙充晶鏃ュ織"),result.ok?"ok":"error")}catch(err){appendLogLine("寮傚父 SMTP 娴嬭瘯 锝?"+((err&&err.message)||err||"unknown"));failAction(b,err,"SMTP 娴嬭瘯澶辫触")}}
-async function saveSettings(){const b=beginAction("姝ｅ湪淇濆瓨鎬绘帶鍙拌缃?..");try{const payload={...collect(),...syncModelMirrorFields()};const r=await fetch("/api/settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});const data=await r.json();clearSecretInputs();for(const key of Object.keys(keyNameMap))hideSecret(key);renderModelProfiles(data.model_profiles||{});applyKeyStatus(data.secrets||{});applyEmailStatus(data.email_secret||{});loadApps();endAction(b,data.ok?"璁剧疆宸蹭繚瀛橈紱瀛愰」鐩細浣跨敤鎬绘帶鍙板綋鍓嶉厤缃?:"淇濆瓨澶辫触",data.ok?"ok":"error");return data}catch(err){failAction(b,err,"淇濆瓨澶辫触");return {ok:false,error:String(err&&err.message||err)}}}}
-async function applyModelProfile(){const id=selectedProfileId();if(!id){setStatus("璇峰厛閫夋嫨妯″瀷鏂规","error");return}const b=beginAction("姝ｅ湪搴旂敤妯″瀷鏂规...");try{const r=await fetch("/api/model_profile",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"apply",profile_id:id})});const data=await r.json();if(!data.ok){endAction(b,"搴旂敤鏂规澶辫触锛?+(data.error||"unknown"),"error");return}clearSecretInputs();for(const key of Object.keys(keyNameMap))hideSecret(key);const s=data.settings||{},m=data.models||{};for(const [k,v] of Object.entries({...s,...m})){if(byId(k))byId(k).value=v||""}syncModelMirrorFields();renderModelProfiles(data.model_profiles||{});applyKeyStatus(data.secrets||{});applyEmailStatus(data.email_secret||{});loadApps();endAction(b,"妯″瀷鏂规宸插簲鐢紱瀛愰」鐩惎鍔ㄦ椂浼氬悓姝ヤ娇鐢?,"ok")}catch(err){failAction(b,err,"搴旂敤鏂规澶辫触")}}
-async function applyProfileKey(key){const prefix=keyNameMap[key];const sel=prefix?byId(prefix+"_key_profile_select"):null;const profileId=sel?sel.value:"";if(!profileId){setStatus("璇峰厛閫夋嫨涓€涓凡淇濆瓨 Key","error");return}const b=beginAction("姝ｅ湪搴旂敤 Key...");try{const r=await fetch("/api/model_profile",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"apply_key",profile_id:profileId,key_name:key})});const data=await r.json();if(!data.ok){endAction(b,"搴旂敤 Key 澶辫触锛?+(data.error||"unknown"),"error");return}clearSecretInputs();hideSecret(key);renderModelProfiles(data.model_profiles||{});applyKeyStatus(data.secrets||{});applyEmailStatus(data.email_secret||{});loadApps();endAction(b,"Key 宸插簲鐢紱鍚勫瓙椤圭洰鍚姩鏃朵細浣跨敤鎬绘帶鍙板綋鍓嶉厤缃?,"ok")}catch(err){failAction(b,err,"搴旂敤 Key 澶辫触")}}
-async function saveModelProfile(){const name=(byId("model_profile_name")&&byId("model_profile_name").value)||"";const id=selectedProfileId();const b=beginAction("姝ｅ湪淇濆瓨妯″瀷鏂规...");try{const payload={...collect(),...syncModelMirrorFields()};const r=await fetch("/api/model_profile",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...payload,action:"save",profile_id:id,profile_name:name})});const data=await r.json();if(!data.ok){endAction(b,"淇濆瓨鏂规澶辫触锛?+(data.error||"unknown"),"error");return}clearSecretInputs();for(const key of Object.keys(keyNameMap))hideSecret(key);renderModelProfiles(data.model_profiles||{});applyKeyStatus(data.secrets||{});applyEmailStatus(data.email_secret||{});loadApps();endAction(b,"妯″瀷鏂规宸蹭繚瀛?,"ok")}catch(err){failAction(b,err,"淇濆瓨鏂规澶辫触")}}
-async function deleteModelProfile(){const id=selectedProfileId();if(!id){setStatus("璇峰厛閫夋嫨妯″瀷鏂规","error");return}if(id==="foreign-default"){setStatus("榛樿鏂规涓嶈兘鍒犻櫎","error");return}const b=beginAction("姝ｅ湪鍒犻櫎妯″瀷鏂规...");try{const r=await fetch("/api/model_profile",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"delete",profile_id:id})});const data=await r.json();if(!data.ok){endAction(b,"鍒犻櫎鏂规澶辫触锛?+(data.error||"unknown"),"error");return}renderModelProfiles(data.model_profiles||{});loadApps();endAction(b,"妯″瀷鏂规宸插垹闄?,"ok")}catch(err){failAction(b,err,"鍒犻櫎鏂规澶辫触")}}
-async function start(payload){const b=beginAction("姝ｅ湪淇濆瓨璁剧疆骞跺惎鍔ㄤ换鍔?..");try{const saved=await saveSettings();if(saved&&!saved.ok){endAction(b,"璁剧疆淇濆瓨澶辫触锛屼换鍔℃湭鍚姩","error");return}const r=await fetch("/api/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});const data=await r.json();currentJob=data.job_id||"";cmd.textContent=(data.cmd||[]).join(" ");endAction(b,data.message||"浠诲姟宸插惎鍔?,"ok");poll()}catch(err){failAction(b,err,"鍚姩浠诲姟澶辫触")}}
+function hideSecret(key){const prefix=keyNameMap[key];visibleSecrets[key]=false;if(prefix&&byId(prefix+"_key_value"))byId(prefix+"_key_value").textContent="瀹告煡娈ｉ挊?}
+async function toggleSecret(key){const prefix=keyNameMap[key];if(!prefix)return;if(visibleSecrets[key]){hideSecret(key);notify("瀹告煡娈ｉ挊蹇旀櫛閹扮喍淇婇幁?,"ok");return}const b=beginAction("濮濓絽婀拠璇插絿閺堫剚婧€鐎靛棝鎸滈悩鑸碘偓?..");try{const box=byId(prefix+"_key_value");if(box)box.textContent="鐠囪褰囨稉?..";const r=await fetch("/api/secret?key="+encodeURIComponent(key));const data=await r.json();if(key==="smtp_password"){const email=data.email_secret||{};if(box)box.textContent=email.smtp_password||"閺堫亪鍘ょ純?;applyEmailStatus(email)}else{const sec=data.secrets||{};if(box)box.textContent=sec[key]||"閺堫亪鍘ょ純?;applyKeyStatus(sec)}visibleSecrets[key]=true;endAction(b,"鐎靛棝鎸滃鑼额嚢閸欐牭绱卞▔銊﹀壈娑撳秷顩﹂崷銊ょ铂娴滃搫褰茬憴浣规鐏炴洜銇?,"ok")}catch(err){failAction(b,err,"鐠囪褰囩€靛棝鎸滄径杈Е")}}
+function renderTest(id,result){const el=byId(id);if(!el)return;const ok=result&&result.ok;el.innerHTML=(ok?'<span class="ok">濞村鐦柅姘崇箖</span>':'<span class="missing">濞村鐦径杈Е</span>')+" 閿?"+((result&&result.message)||"閺冪姷绮ㄩ弸?)+((result&&result.suggestion)?(" 閿?瀵ら缚顔呴敍?+result.suggestion):"")}
+function appendLogLine(message){const el=byId("log");if(!el)return;const now=new Date().toLocaleTimeString();const current=el.textContent==="暂无日志"?"":el.textContent;el.textContent=(current+"["+now+"] "+message+"\\n").split("\\n").slice(-1000).join("\\n");el.scrollTop=el.scrollHeight}
+function clearLog(){const el=byId("log");if(el)el.textContent=""}
+function releaseModelSearchFocus(){setTimeout(()=>{const search=byId("model_search");if(search&&document.activeElement===search)search.blur()},0)}
+function newModelProfile(){const sel=byId("model_profile_select");if(sel)sel.value="";if(byId("model_profile_name"))byId("model_profile_name").value="";setStatus("瀹告彃鍨忛幑銏犲煂閺傛澘缂撻弬瑙勵攳閿涘苯褰查惄瀛樺复缂傛牞绶崥搴濈箽鐎?,"ok")}
+function testMeta(provider,payload){const map={openai:{label:"GPT",model:payload.culture_text_model||payload.text_engine||"gpt-5.5",url:payload.culture_text_base_url||payload.foreign_base_url},image:{label:"GPT-image2",model:payload.culture_image_model||payload.image_engine||"gpt-image-2",url:payload.culture_image_base_url||payload.foreign_base_url},gpt_pro:{label:"娑﹁壊鏂囨湰",model:payload.culture_polish_model||payload.polish_engine||"gpt-5.5",url:payload.culture_polish_base_url||payload.gpt_base_url||payload.foreign_base_url},minimax:{label:"MiniMax",model:payload.minimax_tts_model||"speech-2.8-hd",url:payload.minimax_base_url||defaultMiniMaxBaseUrl}};return map[provider]||{label:provider,model:"",url:""}}
+function logTestResult(meta,result){const ok=result&&result.ok;appendLogLine((ok?"闁俺绻?":"婢惰精瑙?")+meta.label+" 閿?model="+(result.model||meta.model||"閺堫亣顔曠純?)+" 閿?url="+(result.endpoint||meta.url||"閺堫亣顔曠純?)+" 閿?"+((result&&result.message)||"閺冪姷绮ㄩ弸?));if(result&&result.suggestion)appendLogLine("瀵ら缚顔?"+meta.label+" 閿?"+result.suggestion)}
+async function runModelTest(provider,{batch=false}={}){const id=provider+"_test_result";const payload={...collect(),provider,profile_id:selectedProfileId()};const meta=testMeta(provider,payload);if(byId(id))byId(id).textContent="濞村鐦稉?..";appendLogLine("瀵偓婵绁寸拠?"+meta.label+" 閿?閺傝顢?"+selectedProfileName()+" 閿?model="+(meta.model||"閺堫亣顔曠純?)+" 閿?url="+(meta.url||"閺堫亣顔曠純?));const r=await fetch("/api/test_model",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});const data=await r.json();clearSecretInputs();for(const key of Object.keys(keyNameMap))hideSecret(key);const result=data.result||{};renderTest(id,result);applyKeyStatus(data.secrets||{});applyEmailStatus(data.email_secret||{});logTestResult(meta,result);if(!batch)setStatus(result.ok?"濡€崇€峰ù瀣槸闁俺绻?:"濡€崇€峰ù瀣槸婢惰精瑙﹂敍?+(result.message||"鐠囬婀呴崣鍏呮櫠閺冦儱绻?),result.ok?"ok":"error");return result}
+async function testModel(provider){const b=beginAction("濮濓絽婀ù瀣槸濡€崇€锋潻鐐衡偓姘偓?..");try{const result=await runModelTest(provider);endAction(b,result.ok?"濡€崇€峰ù瀣槸闁俺绻?:"濡€崇€峰ù瀣槸婢惰精瑙﹂敍?+(result.message||"鐠囬婀呴崣鍏呮櫠閺冦儱绻?),result.ok?"ok":"error")}catch(err){appendLogLine("瀵倸鐖?濡€崇€峰ù瀣槸 閿?"+((err&&err.message)||err||"unknown"));failAction(b,err,"濡€崇€峰ù瀣槸婢惰精瑙?)}}
+async function testAllModels(){const b=beginAction("濮濓絽婀ù瀣槸閸忋劑鍎村Ο鈥崇€烽柧鐐复...");appendLogLine("==== 瀵偓婵绁寸拠鏇炲弿闁劍膩閸ㄥ鎽奸幒?閿?閺傝顢?"+selectedProfileName()+" ====");let okCount=0;const plan=["openai","image","gpt_pro","minimax"];try{for(const provider of plan){const result=await runModelTest(provider,{batch:true});if(result&&result.ok)okCount++}const allOk=okCount===plan.length;appendLogLine("==== 閸忋劑鍎村Ο鈥崇€烽柧鐐复濞村鐦€瑰本鍨?閿?闁俺绻?"+okCount+"/"+plan.length+" ====");endAction(b,allOk?"閸忋劑鍎村Ο鈥崇€烽柧鐐复濞村鐦柅姘崇箖":"濡€崇€烽柧鐐复濞村鐦€瑰本鍨氶敍宀勫劥閸掑棗銇戠拹銉礉鐠囬婀呴崣鍏呮櫠閺冦儱绻?,allOk?"ok":"error")}catch(err){appendLogLine("瀵倸鐖?閸忋劑鍎村Ο鈥崇€烽柧鐐复濞村鐦?閿?"+((err&&err.message)||err||"unknown"));failAction(b,err,"閸忋劑鍎村Ο鈥崇€烽柧鐐复濞村鐦径杈Е")}}
+async function testEmail(){const b=beginAction("濮濓絽婀ù瀣槸 SMTP...");try{if(byId("smtp_test_result"))byId("smtp_test_result").textContent="濞村鐦稉?..";appendLogLine("瀵偓婵绁寸拠?SMTP 閿?host="+(fieldValue("smtp_host")||"閺堫亣顔曠純?)+" 閿?user="+(fieldValue("smtp_user")||"閺堫亣顔曠純?));const r=await fetch("/api/test_email",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(collect())});const data=await r.json();clearSecretInputs();hideSecret("smtp_password");const result=data.result||{};renderTest("smtp_test_result",result);applyEmailStatus(data.email_secret||{});appendLogLine((result.ok?"闁俺绻?":"婢惰精瑙?")+"SMTP 閿?"+(result.message||"閺冪姷绮ㄩ弸?));if(result.suggestion)appendLogLine("瀵ら缚顔?SMTP 閿?"+result.suggestion);endAction(b,result.ok?"SMTP 濞村鐦柅姘崇箖":"SMTP 濞村鐦径杈Е閿?+(result.message||"鐠囬婀呴崣鍏呮櫠閺冦儱绻?),result.ok?"ok":"error")}catch(err){appendLogLine("瀵倸鐖?SMTP 濞村鐦?閿?"+((err&&err.message)||err||"unknown"));failAction(b,err,"SMTP 濞村鐦径杈Е")}}
+async function saveSettings(){const b=beginAction("濮濓絽婀穱婵嗙摠閹粯甯堕崣鎷岊啎缂?..");try{const payload={...collect(),...syncModelMirrorFields()};const r=await fetch("/api/settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});const data=await r.json();clearSecretInputs();for(const key of Object.keys(keyNameMap))hideSecret(key);renderModelProfiles(data.model_profiles||{});applyKeyStatus(data.secrets||{});applyEmailStatus(data.email_secret||{});loadApps();endAction(b,data.ok?"鐠佸墽鐤嗗韫箽鐎涙﹫绱辩€涙劙銆嶉惄顔荤窗娴ｈ法鏁ら幀缁樺付閸欐澘缍嬮崜宥夊帳缂?:"娣囨繂鐡ㄦ径杈Е",data.ok?"ok":"error");return data}catch(err){failAction(b,err,"娣囨繂鐡ㄦ径杈Е");return {ok:false,error:String(err&&err.message||err)}}}}
+async function applyModelProfile(){const id=selectedProfileId();if(!id){setStatus("鐠囧嘲鍘涢柅澶嬪濡€崇€烽弬瑙勵攳","error");return}const b=beginAction("濮濓絽婀惔鏃傛暏濡€崇€烽弬瑙勵攳...");try{const r=await fetch("/api/model_profile",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"apply",profile_id:id})});const data=await r.json();if(!data.ok){endAction(b,"鎼存梻鏁ら弬瑙勵攳婢惰精瑙﹂敍?+(data.error||"unknown"),"error");return}clearSecretInputs();for(const key of Object.keys(keyNameMap))hideSecret(key);const s=data.settings||{},m=data.models||{};for(const [k,v] of Object.entries({...s,...m})){if(byId(k))byId(k).value=v||""}syncModelMirrorFields();renderModelProfiles(data.model_profiles||{});applyKeyStatus(data.secrets||{});applyEmailStatus(data.email_secret||{});loadApps();endAction(b,"濡€崇€烽弬瑙勵攳瀹告彃绨查悽顭掔幢鐎涙劙銆嶉惄顔兼儙閸斻劍妞傛导姘倱濮濄儰濞囬悽?,"ok")}catch(err){failAction(b,err,"鎼存梻鏁ら弬瑙勵攳婢惰精瑙?)}}
+async function applyProfileKey(key){const prefix=keyNameMap[key];const sel=prefix?byId(prefix+"_key_profile_select"):null;const profileId=sel?sel.value:"";if(!profileId){setStatus("鐠囧嘲鍘涢柅澶嬪娑撯偓娑擃亜鍑℃穱婵嗙摠 Key","error");return}const b=beginAction("濮濓絽婀惔鏃傛暏 Key...");try{const r=await fetch("/api/model_profile",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"apply_key",profile_id:profileId,key_name:key})});const data=await r.json();if(!data.ok){endAction(b,"鎼存梻鏁?Key 婢惰精瑙﹂敍?+(data.error||"unknown"),"error");return}clearSecretInputs();hideSecret(key);renderModelProfiles(data.model_profiles||{});applyKeyStatus(data.secrets||{});applyEmailStatus(data.email_secret||{});loadApps();endAction(b,"Key 瀹告彃绨查悽顭掔幢閸氬嫬鐡欐い鍦窗閸氼垰濮╅弮鏈电窗娴ｈ法鏁ら幀缁樺付閸欐澘缍嬮崜宥夊帳缂?,"ok")}catch(err){failAction(b,err,"鎼存梻鏁?Key 婢惰精瑙?)}}
+async function saveModelProfile(){const name=(byId("model_profile_name")&&byId("model_profile_name").value)||"";const id=selectedProfileId();const b=beginAction("濮濓絽婀穱婵嗙摠濡€崇€烽弬瑙勵攳...");try{const payload={...collect(),...syncModelMirrorFields()};const r=await fetch("/api/model_profile",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...payload,action:"save",profile_id:id,profile_name:name})});const data=await r.json();if(!data.ok){endAction(b,"娣囨繂鐡ㄩ弬瑙勵攳婢惰精瑙﹂敍?+(data.error||"unknown"),"error");return}clearSecretInputs();for(const key of Object.keys(keyNameMap))hideSecret(key);renderModelProfiles(data.model_profiles||{});applyKeyStatus(data.secrets||{});applyEmailStatus(data.email_secret||{});loadApps();endAction(b,"濡€崇€烽弬瑙勵攳瀹歌弓绻氱€?,"ok")}catch(err){failAction(b,err,"娣囨繂鐡ㄩ弬瑙勵攳婢惰精瑙?)}}
+async function deleteModelProfile(){const id=selectedProfileId();if(!id){setStatus("鐠囧嘲鍘涢柅澶嬪濡€崇€烽弬瑙勵攳","error");return}if(id==="foreign-default"){setStatus("姒涙顓婚弬瑙勵攳娑撳秷鍏橀崚鐘绘珟","error");return}const b=beginAction("濮濓絽婀崚鐘绘珟濡€崇€烽弬瑙勵攳...");try{const r=await fetch("/api/model_profile",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"delete",profile_id:id})});const data=await r.json();if(!data.ok){endAction(b,"閸掔娀娅庨弬瑙勵攳婢惰精瑙﹂敍?+(data.error||"unknown"),"error");return}renderModelProfiles(data.model_profiles||{});loadApps();endAction(b,"濡€崇€烽弬瑙勵攳瀹告彃鍨归梽?,"ok")}catch(err){failAction(b,err,"閸掔娀娅庨弬瑙勵攳婢惰精瑙?)}}
+async function start(payload){const b=beginAction("濮濓絽婀穱婵嗙摠鐠佸墽鐤嗛獮璺烘儙閸斻劋鎹㈤崝?..");try{const saved=await saveSettings();if(saved&&!saved.ok){endAction(b,"鐠佸墽鐤嗘穱婵嗙摠婢惰精瑙﹂敍灞兼崲閸斺剝婀崥顖氬З","error");return}const r=await fetch("/api/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});const data=await r.json();currentJob=data.job_id||"";cmd.textContent=(data.cmd||[]).join(" ");endAction(b,data.message||"娴犺濮熷鎻掓儙閸?,"ok");poll()}catch(err){failAction(b,err,"閸氼垰濮╂禒璇插婢惰精瑙?)}}
 function startCulture(test){start({...collect(),mode:"culture",stage:byId("culture_stage").value,test_b_image_limit:test?1:Number(byId("culture_test_b").value||0)})}
 function startResearch(action){start({...collect(),mode:"research",action})}
 function startClip(){start({...collect(),mode:"auto_clip"})}
 function startBgm(){start({...collect(),mode:"bgm"})}
 function startTool(action){start({...collect(),mode:"tool",action})}
-function openEegAnalyser(){notify("姝ｅ湪鎵撳紑鑴戠數鍒嗘瀽骞冲彴...","ok");window.open("/eeg/","_blank")}
-function openXiaozhuli(){notify("姝ｅ湪鎵撳紑鍏ㄦ緶灏忕尓鐞?..","ok");window.open("/xiaozhuli/","_blank")}
-async function stopJob(){if(!currentJob){setStatus("褰撳墠娌℃湁姝ｅ湪杩愯鐨勪换鍔?,"error");return}const b=beginAction("姝ｅ湪鍋滄褰撳墠浠诲姟...");try{await fetch("/api/stop?id="+encodeURIComponent(currentJob),{method:"POST"});endAction(b,"鍋滄璇锋眰宸插彂閫?,"ok");poll()}catch(err){failAction(b,err,"鍋滄浠诲姟澶辫触")}}
-async function poll(){if(!currentJob)return;const r=await fetch("/api/job?id="+encodeURIComponent(currentJob));const data=await r.json();const message=data.status+" / exit="+(data.exit_code??"");const el=byId("status");if(el)el.textContent=message;log.textContent=(data.lines||[]).join("");log.scrollTop=log.scrollHeight;if(["running","starting","stopping"].includes(data.status))setTimeout(poll,1000);else notify("浠诲姟鐘舵€侊細"+message,data.exit_code===0?"ok":"info")}
+function openEegAnalyser(){notify("濮濓絽婀幍鎾崇磻閼存垹鏁搁崚鍡樼€介獮鍐插酱...","ok");window.open("/eeg/","_blank")}
+function openXiaozhuli(){notify("濮濓絽婀幍鎾崇磻閸忋劍绶剁亸蹇曞皳閻?..","ok");window.open("/xiaozhuli/","_blank")}
+async function stopJob(){if(!currentJob){setStatus("瑜版挸澧犲▽鈩冩箒濮濓絽婀潻鎰攽閻ㄥ嫪鎹㈤崝?,"error");return}const b=beginAction("濮濓絽婀崑婊勵剾瑜版挸澧犳禒璇插...");try{await fetch("/api/stop?id="+encodeURIComponent(currentJob),{method:"POST"});endAction(b,"閸嬫粍顒涚拠閿嬬湴瀹告彃褰傞柅?,"ok");poll()}catch(err){failAction(b,err,"閸嬫粍顒涙禒璇插婢惰精瑙?)}}
+async function poll(){if(!currentJob)return;const r=await fetch("/api/job?id="+encodeURIComponent(currentJob));const data=await r.json();const message=data.status+" / exit="+(data.exit_code??"");const el=byId("status");if(el)el.textContent=message;log.textContent=(data.lines||[]).join("");log.scrollTop=log.scrollHeight;if(["running","starting","stopping"].includes(data.status))setTimeout(poll,1000);else notify("娴犺濮熼悩鑸碘偓渚婄窗"+message,data.exit_code===0?"ok":"info")}
 for(const id of ["culture_text_model","culture_polish_model","culture_image_model","text_engine","polish_engine","image_engine","gpt_base_url","deepseek_base_url","gpt_image_base_url","minimax_base_url"]){const el=byId(id);if(el)el.addEventListener("input",()=>{syncModelMirrorFields();const p=(modelProfiles.profiles||[]).find(x=>x.id===selectedProfileId())||{};renderRouteSummary(p)})}
 loadSettings();
 if(location.hash==="#more"){showPanel("more")}else if(location.hash==="#culture"){showPanel("culture")}else if(location.hash==="#research"){showPanel("research")}else if(location.hash==="#clip"){showPanel("clip")}else{showPanel("model")}
@@ -2761,49 +4017,219 @@ if(location.hash==="#more"){showPanel("more")}else if(location.hash==="#culture"
 </html>""".encode("utf-8")
 
 
+def _model_connection_html() -> bytes:
+    return """<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>大模型连接库</title>
+  <style>
+    :root{font-family:Arial,"Microsoft YaHei",sans-serif;color:#17202a;background:#f6f8fb;--brand:#0f766e;--line:#d8e0e7;--muted:#64748b;--soft:#eef6f4;--danger:#b3261e;--ok:#067647}
+    *{box-sizing:border-box}body{margin:0;background:#f6f8fb}.top{position:sticky;top:0;z-index:10;background:rgba(246,248,251,.94);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+    .top-inner{max-width:1380px;margin:0 auto;padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:12px}.back{color:#0f766e;text-decoration:none;font-weight:800}.title h1{font-size:22px;margin:0}.title p{margin:4px 0 0;color:var(--muted);font-size:13px}
+    .wrap{max-width:1380px;margin:0 auto;padding:16px 18px 28px;display:grid;grid-template-columns:minmax(420px,1fr) minmax(520px,1.15fr);gap:14px}.panel{background:#fff;border:1px solid var(--line);border-radius:8px;padding:14px;box-shadow:0 12px 28px rgba(15,23,42,.06);min-width:0}
+    h2{font-size:16px;margin:0 0 10px}h3{font-size:14px;margin:14px 0 8px}.hint{color:var(--muted);font-size:12px;line-height:1.6;margin:0 0 10px}.ops{display:grid;grid-template-columns:1fr 1fr;gap:8px}.ops button,.row button{min-height:38px}
+    button{border:0;border-radius:6px;background:var(--brand);color:white;font-weight:800;padding:8px 10px;cursor:pointer}button.secondary{background:#334155}button.ghost{background:#e8eef2;color:#243447}button.danger{background:var(--danger)}button:disabled{opacity:.55;cursor:not-allowed}
+    .log{background:#101827;color:#e5edf6;border-radius:8px;min-height:260px;max-height:380px;overflow:auto;padding:12px;font:12px/1.55 Consolas,"Microsoft YaHei",monospace;white-space:pre-wrap}.status{min-height:28px;color:#0f5132;font-weight:800;font-size:13px;margin:8px 0}
+    .step{border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:10px;background:#fbfdff}.step-head{display:flex;justify-content:space-between;gap:8px;align-items:center}.step h3{margin:0}.badge{display:inline-flex;align-items:center;border-radius:999px;background:#eef2f6;color:#334155;padding:3px 8px;font-size:12px;font-weight:800}.badge.ok{background:#ecfdf3;color:#067647}.badge.bad{background:#fef3f2;color:#b42318}
+    .route-list{min-height:54px;border:1px dashed #b8c4ce;border-radius:8px;margin-top:8px;padding:6px;background:#fff}.route-list.drag{border-color:#0f766e;background:#eefaf7}.item{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;border:1px solid #dbe3ea;border-radius:8px;background:#fff;padding:8px;margin:6px 0;min-width:0}.item[draggable=true]{cursor:grab}.item b{font-size:13px;overflow-wrap:anywhere}.meta{font-size:12px;color:#64748b;line-height:1.45;overflow-wrap:anywhere}.item-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+    .trash{border:1px dashed #f1a6a0;background:#fff7f6;color:#9f1d16;border-radius:8px;padding:10px;text-align:center;font-size:13px;font-weight:800;margin:10px 0}.trash.drag{background:#fee4e2;border-color:#d92d20}
+    .toolbar{display:grid;grid-template-columns:1fr auto auto;gap:8px;margin-bottom:10px}input,select{width:100%;border:1px solid #c8d2dc;border-radius:6px;padding:8px;background:white}.library-group{border:1px solid var(--line);border-radius:8px;margin-bottom:10px;background:#fff}.library-group h3{display:flex;justify-content:space-between;gap:8px;margin:0;padding:9px 10px;background:#f3f7fa;border-bottom:1px solid var(--line);border-radius:8px 8px 0 0}.library-body{padding:6px 8px}
+    .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.form-grid .wide{grid-column:1/-1}.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.small{font-size:12px;color:var(--muted)}.hidden{display:none!important}
+    @media(max-width:980px){.wrap{grid-template-columns:1fr}.ops{grid-template-columns:1fr}.toolbar{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}.form-grid .wide{grid-column:auto}}
+  </style>
+</head>
+<body>
+  <div class="top"><div class="top-inner"><a class="back" href="/">返回控制台首页</a><div class="title"><h1>大模型连接库</h1><p>右侧储备和测试模型，左侧给每个业务步骤拖入多个候选；应用前确保每个步骤至少有一个测通连接。</p></div></div></div>
+  <main class="wrap">
+    <section class="panel">
+      <h2>链接库操作</h2>
+      <div class="ops">
+        <button id="btnTestSteps" onclick="testBusinessChain()">一键测试和修复业务链中的模型</button>
+        <button id="btnTestLibrary" onclick="testLibraryModels()">一键测试和修复模型库中的模型</button>
+        <button class="secondary" onclick="refreshLibrary()">刷新连接库</button>
+        <button class="secondary" onclick="applyAllProjects()">应用到所有项目</button>
+      </div>
+      <div id="status" class="status">正在读取连接库...</div>
+      <pre id="log" class="log">暂无日志</pre>
+      <div class="row"><button class="ghost" onclick="clearLog()">清空日志</button></div>
+      <h2 style="margin-top:16px">业务步骤流程</h2>
+      <p class="hint">把右侧已测试的模型条目拖进步骤；同一步骤可以保留多个候选。运行任务时会优先使用测通连接。</p>
+      <div id="steps"></div>
+      <div id="trash" class="trash">拖到这里移出当前步骤候选</div>
+    </section>
+    <section class="panel">
+      <h2>模型库</h2>
+      <div class="toolbar">
+        <input id="modelSearch" placeholder="搜索模型、URL、名称" autocomplete="off">
+        <button class="ghost" onclick="newConnection()">新建</button>
+        <button class="ghost" onclick="refreshLibrary()">刷新</button>
+      </div>
+      <div id="editForm" class="form-grid hidden">
+        <input type="hidden" id="connId">
+        <label>名称<input id="connName"></label>
+        <label>类别<select id="connRole"><option value="text">文本</option><option value="polish">润色</option><option value="image">生图</option><option value="minimax">配音/BGM</option></select></label>
+        <label>供应商<input id="connProvider" placeholder="openai / deepseek / image / minimax"></label>
+        <label>模型名<input id="connModel" placeholder="gpt-5.5 / deepseek-chat / gpt-image-2"></label>
+        <label class="wide">URL<input id="connBaseUrl" placeholder="https://..."></label>
+        <label class="wide">Key（可留空；留空不会覆盖已有 Key）<input id="connKey" type="password" autocomplete="new-password"></label>
+        <div class="row wide"><button onclick="saveConnection()">保存到连接库</button><button class="ghost" onclick="cancelEdit()">取消</button></div>
+      </div>
+      <div id="library"></div>
+    </section>
+  </main>
+<script>
+const roleOrder=["text","polish","image","minimax"];
+let lib={connections:[],roles:{},steps:{},step_routes:{},active_connections:{}};
+let dragged={id:"",fromStep:""};
+function byId(id){return document.getElementById(id)}
+function esc(s){return String(s||"").replace(/[&<>"']/g,c=>c==="&"?"&amp;":c==="<"?"&lt;":c===">"?"&gt;":c.charCodeAt(0)===34?"&quot;":"&#39;")}
+function log(msg){const el=byId("log");const line="["+new Date().toLocaleTimeString()+"] "+msg;el.textContent=(el.textContent==="暂无日志"?"":el.textContent)+"\\n"+line;el.textContent=el.textContent.trim();el.scrollTop=el.scrollHeight}
+function setStatus(msg,kind=""){byId("status").textContent=msg;byId("status").style.color=kind==="error"?"#b42318":"#0f5132"}
+function clearLog(){byId("log").textContent="暂无日志";setStatus("日志已清空")}
+function friendlyError(x){const s=String((x&&x.error)||(x&&x.message)||x||"未知错误");if(s.includes("frequency limit"))return "飞书接口触发频率限制，已跳过飞书补 Key；稍后再试即可。";if(s.includes("whitelist"))return "飞书文档不在当前授权白名单内，已跳过飞书补 Key。";if(s.includes("HTTP 403"))return "接口拒绝访问，通常是 Key、URL 或模型权限不匹配。";if(s.includes("model_not_found"))return "模型通道不可用，请换同类可用连接。";return s.split("\\n")[0].slice(0,220)}
+function connections(){return Array.isArray(lib.connections)?lib.connections:[]}
+function conn(id){return connections().find(c=>c.id===id)||null}
+function allowed(step,c){const meta=(lib.steps||{})[step]||{};const roles=meta.roles||[meta.role];return roles.includes(c.role)}
+async function post(action,payload={}){const r=await fetch("/api/model_connection",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action,...payload})});const data=await r.json().catch(()=>({ok:false,error:"接口没有返回 JSON"}));if(!r.ok||data.ok===false)throw data;if(data.model_connection_library)lib=data.model_connection_library;else if(data.models&&data.model_connection_library)lib=data.model_connection_library;return data}
+async function refreshLibrary(){setStatus("正在刷新连接库...");const r=await fetch("/api/settings");const data=await r.json();lib=data.model_connection_library||{};renderAll();setStatus("连接库已刷新");log("连接库已刷新：共 "+connections().length+" 个连接。")}
+function stepKeys(){return Object.keys(lib.steps||{})}
+function routeIds(step){return Array.isArray((lib.step_routes||{})[step])?[...(lib.step_routes||{})[step]]:[]}
+function connectionLabel(c){return (c.name||c.model||c.id)+" ｜ "+(c.provider||"")+" / "+(c.model||"未填模型")}
+function statusText(c){if(c.last_test_ok===true)return "已通";if(c.last_test_ok===false&&c.last_tested_at)return "未通";return "未测"}
+function statusBadge(c){if(c.last_test_ok===true)return '<span class="badge ok">已通</span>';if(c.last_test_ok===false&&c.last_tested_at)return '<span class="badge bad">未通</span>';return '<span class="badge">未测</span>'}
+function itemMeta(c){return 'URL '+esc(c.base_url||"未填")+' ｜ Key '+(c.key_configured?"已存":"未存")+' ｜ 联通 '+statusText(c)+' ｜ 延迟 '+(Number(c.latency_ms||0)?Number(c.latency_ms||0)+" ms":"-")}
+function itemHtml(c,opts={}){const inStep=!!opts.step,remove=inStep?'<button class="danger" onclick="removeFromStep(\\''+esc(opts.step)+'\\',\\''+esc(c.id)+'\\')">移除</button>':'',manage=inStep?'':'<button class="ghost" onclick="editConnection(\\''+esc(c.id)+'\\')">编辑</button><button class="danger" onclick="deleteConnection(\\''+esc(c.id)+'\\')">删除</button>';return '<div class="item" draggable="true" data-id="'+esc(c.id)+'" data-step="'+esc(opts.step||'')+'" ondragstart="dragStart(event)"><div><b>'+esc(connectionLabel(c))+'</b><div class="meta">'+itemMeta(c)+'</div></div><div class="item-actions">'+statusBadge(c)+'<button class="ghost" onclick="testConnection(\\''+esc(c.id)+'\\')">测试</button>'+manage+remove+'</div></div>'}
+function renderSteps(){const box=byId("steps");box.innerHTML=stepKeys().map(step=>{const meta=lib.steps[step]||{},ids=routeIds(step),items=ids.map(id=>conn(id)).filter(Boolean),ok=items.some(c=>c.last_test_ok===true),allowedText=(meta.roles||[meta.role]).map(r=>(lib.roles&&lib.roles[r]&&lib.roles[r].label)||r).join(" / ");return '<div class="step"><div class="step-head"><h3>'+esc(meta.label||step)+'</h3>'+(ok?'<span class="badge ok">至少一个通</span>':'<span class="badge bad">需要通路</span>')+'</div><div class="small">可接收：'+esc(allowedText)+'</div><div class="route-list" data-step="'+esc(step)+'" ondragover="dragOver(event)" ondragleave="dragLeave(event)" ondrop="dropOnStep(event)">'+(items.length?items.map(c=>itemHtml(c,{step})).join(""):'<div class="small">把右侧模型拖到这里</div>')+'</div></div>'}).join("")}
+function renderLibrary(){const q=byId("modelSearch").value.trim().toLowerCase();const groups={};for(const c of connections()){const hay=[c.name,c.provider,c.model,c.base_url,c.role_label].join(" ").toLowerCase();if(q&&!hay.includes(q))continue;const key=c.model||"未填模型";(groups[key]||(groups[key]=[])).push(c)}const keys=Object.keys(groups).sort((a,b)=>a.localeCompare(b));byId("library").innerHTML=keys.length?keys.map(model=>'<div class="library-group"><h3><span>'+esc(model)+'</span><span class="badge">'+groups[model].length+' 条</span></h3><div class="library-body">'+groups[model].sort((a,b)=>(b.last_test_ok===true)-(a.last_test_ok===true)||(a.priority||0)-(b.priority||0)).map(c=>itemHtml(c)).join("")+'</div></div>').join(""):'<p class="hint">没有匹配的模型连接。</p>'}
+function renderAll(){renderSteps();renderLibrary()}
+function dragStart(e){dragged={id:e.currentTarget.dataset.id||"",fromStep:e.currentTarget.dataset.step||""};e.dataTransfer.setData("text/plain",dragged.id)}
+function dragOver(e){e.preventDefault();e.currentTarget.classList.add("drag")}
+function dragLeave(e){e.currentTarget.classList.remove("drag")}
+async function saveRoute(step,ids){await post("route",{step,connection_ids:ids});renderAll()}
+async function dropOnStep(e){e.preventDefault();e.currentTarget.classList.remove("drag");const step=e.currentTarget.dataset.step,id=dragged.id||e.dataTransfer.getData("text/plain"),c=conn(id);if(!step||!c)return;if(!allowed(step,c)){setStatus("这个模型类别不能用于该步骤","error");log("未加入："+connectionLabel(c)+" 不适合 "+((lib.steps[step]||{}).label||step));return}const ids=routeIds(step).filter(x=>x!==id);ids.push(id);await saveRoute(step,ids);setStatus("已加入步骤候选");log("已加入 "+((lib.steps[step]||{}).label||step)+"： "+connectionLabel(c))}
+async function removeFromStep(step,id){const ids=routeIds(step).filter(x=>x!==id);await saveRoute(step,ids);setStatus("已移出步骤候选");log("已从 "+((lib.steps[step]||{}).label||step)+" 移出： "+(conn(id)?connectionLabel(conn(id)):id))}
+function setupTrash(){const t=byId("trash");t.ondragover=e=>{e.preventDefault();t.classList.add("drag")};t.ondragleave=()=>t.classList.remove("drag");t.ondrop=async e=>{e.preventDefault();t.classList.remove("drag");if(dragged.fromStep&&dragged.id)await removeFromStep(dragged.fromStep,dragged.id)}}
+function newConnection(){byId("editForm").classList.remove("hidden");for(const id of ["connId","connName","connProvider","connModel","connBaseUrl","connKey"])byId(id).value="";byId("connRole").value="text";setStatus("正在新建连接");log("打开新建连接表单。")}
+function editConnection(id){const c=conn(id);if(!c)return;byId("editForm").classList.remove("hidden");byId("connId").value=c.id;byId("connName").value=c.name||"";byId("connRole").value=c.role||"text";byId("connProvider").value=c.provider||"";byId("connModel").value=c.model||"";byId("connBaseUrl").value=c.base_url||"";byId("connKey").value="";setStatus("正在编辑："+connectionLabel(c));log("打开编辑："+connectionLabel(c))}
+function cancelEdit(){byId("editForm").classList.add("hidden");setStatus("已取消编辑");log("已取消编辑。")}
+async function saveConnection(){const payload={connection_id:byId("connId").value,name:byId("connName").value,role:byId("connRole").value,provider:byId("connProvider").value,model:byId("connModel").value,base_url:byId("connBaseUrl").value,api_key:byId("connKey").value};try{await post("save",payload);byId("connKey").value="";cancelEdit();renderAll();setStatus("连接已保存");log("连接已保存："+(payload.name||payload.model))}catch(e){setStatus("保存失败："+friendlyError(e),"error");log("保存失败："+friendlyError(e))}}
+async function deleteConnection(id){const c=conn(id);if(!c)return;if(!confirm("确认删除这个连接？删除后会同时从步骤候选里移除。"))return;try{await post("delete",{connection_id:id});renderAll();setStatus("连接已删除");log("连接已删除："+connectionLabel(c))}catch(e){setStatus("删除失败："+friendlyError(e),"error");log("删除失败："+friendlyError(e))}}
+function applyLocalTestResult(id,result){for(const c of connections()){if(c.id===id){c.last_test_ok=!!(result&&result.ok);c.last_tested_at=(result&&result.tested_at)||new Date().toLocaleString();const elapsed=Number(result&&result.elapsed_seconds||0);if(elapsed)c.latency_ms=Math.round(elapsed*1000);return c}}return null}
+async function testConnection(id){const c=conn(id);if(!c)return;setStatus("正在测试："+connectionLabel(c));log("测试："+connectionLabel(c));try{const r=await fetch("/api/test_model",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({provider:c.provider,connection_id:c.id})});const data=await r.json();if(data.model_connection_library)lib=data.model_connection_library;else applyLocalTestResult(id,data.result||{});if(!r.ok||data.ok===false)throw data;renderAll();const next=conn(id)||c;setStatus("测试完成："+connectionLabel(next)+" / "+statusText(next),next.last_test_ok===true?"":"error");log("结果："+connectionLabel(next)+" ｜ 联通 "+statusText(next)+" ｜ 延迟 "+(Number(next.latency_ms||0)?Number(next.latency_ms||0)+" ms":"-"))}catch(e){applyLocalTestResult(id,{ok:false,tested_at:new Date().toLocaleString()});renderAll();setStatus("测试失败："+friendlyError(e),"error");log("测试失败："+friendlyError(e))}finally{document.activeElement&&document.activeElement.blur&&document.activeElement.blur()}}
+async function testBusinessChain(){const btn=byId("btnTestSteps");btn.disabled=true;setStatus("正在测试并修复业务链...");log("开始测试和修复业务链中的模型。");try{const r=await fetch("/api/test_step_routes_repair",{method:"POST"});const data=await r.json();if(data.model_connection_library)lib=data.model_connection_library;const rows=data.summary||[];for(const row of rows)log((row.ok?"通过：":"未通过：")+(row.step_label||row.step)+"，候选 "+(row.candidate_count||0)+" 个，测通 "+(row.passed_count||0)+" 个。"+(row.passed_model?" 使用 "+row.passed_model:""));if(data.repair&&data.repair.attempted)log("修复动作：已尝试从飞书/连接库补齐失败步骤，仍失败 "+((data.repair.remaining_failed_steps||[]).length)+" 个。");renderAll();setStatus(rows.every(x=>x.ok)?"业务链测试通过":"业务链仍有步骤未通",rows.every(x=>x.ok)?"":"error")}catch(e){setStatus("业务链测试失败："+friendlyError(e),"error");log("业务链测试失败："+friendlyError(e))}finally{btn.disabled=false;document.activeElement&&document.activeElement.blur&&document.activeElement.blur()}}
+async function testLibraryModels(){const btn=byId("btnTestLibrary");btn.disabled=true;setStatus("正在测试并修复模型库...");log("开始测试和修复模型库中的模型。");try{await post("dedupe");log("已按 URL + Key 去重。");try{const repaired=await post("repair_keys");const rep=repaired.key_repair_report||{};log(rep.ok?"已尝试从飞书补齐 Key，并同步飞书中能安全匹配的连接。":"飞书补 Key 未完成："+friendlyError(rep.error||rep.message||rep));}catch(e){log("飞书补 Key 跳过："+friendlyError(e))}const data=await post("test_library");const summary=data.summary||[];for(const s of summary)log("模型 "+(s.model||"未设置")+"：测试 "+(s.tested_count||0)+" 条，通过 "+(s.passed_count||0)+" 条，失败 "+(s.failed_count||0)+" 条。"+((s.failures&&s.failures[0])?" 主要原因："+friendlyError(s.failures[0].message):""));renderAll();setStatus("模型库测试完成")}catch(e){setStatus("模型库测试失败："+friendlyError(e),"error");log("模型库测试失败："+friendlyError(e))}finally{btn.disabled=false;document.activeElement&&document.activeElement.blur&&document.activeElement.blur()}}
+async function applyAllProjects(){setStatus("正在应用到所有项目...");log("开始应用当前连接库方案到所有项目。");try{const data=await post("apply_all");if(Array.isArray(data.log_lines))for(const line of data.log_lines)log(String(line));else log("应用完成。");await refreshLibrary();setStatus("已应用到所有项目")}catch(e){setStatus("应用失败："+friendlyError(e),"error");log("应用失败："+friendlyError(e))}}
+byId("modelSearch").addEventListener("input",renderLibrary);
+setupTrash();
+refreshLibrary();
+</script>
+</body>
+</html>""".encode("utf-8")
+
+
+
 def _entry_html_v2() -> bytes:
     return """<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>全澜应用总控台</title>
+  <title>郤冠楠的赛博办公室</title>
   <style>
-    :root{font-family:Arial,"Microsoft YaHei",sans-serif;color:#17202a;background:#f3f6f8;--brand:#0f766e;--line:#d8e0e7;--muted:#64748b;--card:#fff;--shadow:0 10px 26px rgba(15,23,42,.07)}
-    *{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#f8fafc 0%,#eef4f3 100%)}.wrap{max-width:1040px;margin:0 auto;padding:30px 18px}
-    h1{font-size:28px;margin:0 0 8px}.hint{color:var(--muted);font-size:14px;line-height:1.6;margin:0 0 22px;max-width:920px}
-    .section-head{align-items:flex-end;display:flex;gap:12px;justify-content:space-between;margin:20px 0 10px}.section-head h2{font-size:18px;margin:0}.section-head span{color:var(--muted);font-size:12px}
-    .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:16px;text-decoration:none;color:inherit;box-shadow:var(--shadow);min-width:0}.card:hover{border-color:#14b8a6;box-shadow:0 12px 28px rgba(15,118,110,.14);transform:translateY(-1px)}
-    .title{font-size:17px;font-weight:800;margin-bottom:6px}.desc{font-size:13px;color:var(--muted);line-height:1.5;margin-top:8px}.meta{color:var(--muted);font-size:12px;line-height:1.5;margin-top:8px;overflow-wrap:anywhere}
-    .row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}button{padding:8px 10px;border:0;border-radius:6px;background:var(--brand);color:#fff;cursor:pointer}button+button{background:#334155}
-    .pill{display:inline-flex;align-items:center;min-height:24px;padding:0 8px;border-radius:999px;background:#eef2f6;color:#334155;font-size:12px;font-weight:800}.pill.ok{background:#ecfdf3;color:#027a48}.pill.warn{background:#fff7ed;color:#b54708}
-    @media(max-width:900px){.grid{grid-template-columns:1fr}.section-head{align-items:flex-start;flex-direction:column}}
+    :root{font-family:Arial,"Microsoft YaHei",sans-serif;color:#17202a;background:#eef5f2;--brand:#0f766e;--brand2:#2563eb;--ink:#102033;--line:#d8e0e7;--muted:#64748b;--card:#fff;--shadow:0 16px 36px rgba(15,23,42,.10);--beam:rgba(250,204,21,.28);--glow:rgba(20,184,166,.24)}
+    *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 18% 0%,#d9f99d 0,#f8fafc 28%,transparent 48%),linear-gradient(145deg,#eef7f4 0%,#f7f2ea 52%,#eef4ff 100%);min-height:100vh;transition:background .5s ease,color .35s ease;cursor:none}a,button,.card,[data-light],[data-toy]{cursor:none}body:before{content:"";position:fixed;inset:0;pointer-events:none;background:linear-gradient(115deg,transparent 0 42%,var(--beam) 48%,transparent 56%);transform:translateX(-80%);animation:sweep 9s linear infinite;mix-blend-mode:multiply}body.lights-off{color:#dbeafe;background:radial-gradient(circle at 70% 8%,rgba(56,189,248,.16),transparent 28%),linear-gradient(145deg,#07111f 0%,#101827 60%,#20123a 100%);--card:rgba(15,23,42,.82);--line:rgba(148,163,184,.28);--muted:#a7b4c8;--shadow:0 18px 42px rgba(0,0,0,.32);--beam:rgba(59,130,246,.18);--glow:rgba(96,165,250,.30)}body.party{background:linear-gradient(125deg,#ecfeff,#fef3c7,#fce7f3,#e0e7ff);background-size:300% 300%;animation:partyBg 7s ease infinite;--beam:rgba(236,72,153,.24);--glow:rgba(245,158,11,.28)}body.focus{background:linear-gradient(145deg,#f8fafc,#eef7f4);--beam:rgba(20,184,166,.12);--glow:rgba(15,118,110,.16)}.wrap{max-width:1120px;margin:0 auto;padding:30px 18px 44px;position:relative}
+    .lamp-rig{position:fixed;left:0;right:0;top:0;height:130px;pointer-events:none;z-index:0}.lamp-rig:before,.lamp-rig:after{content:"";position:absolute;top:-18px;width:180px;height:180px;border-radius:50%;background:radial-gradient(circle,var(--glow),transparent 68%);filter:blur(2px);animation:lampFloat 5.5s ease-in-out infinite}.lamp-rig:before{left:8%}.lamp-rig:after{right:9%;animation-delay:1.2s}.control-strip{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;border:1px solid rgba(15,118,110,.16);border-radius:8px;background:rgba(255,255,255,.70);box-shadow:0 10px 22px rgba(15,23,42,.06);padding:10px}.control-strip b{font-size:13px}.switches{display:flex;gap:8px;flex-wrap:wrap}.light-btn{background:#102033;color:#fff;border:0;border-radius:999px;padding:8px 12px;font-weight:900}.light-btn.active{background:#f59e0b;color:#102033;box-shadow:0 0 0 4px rgba(245,158,11,.18)}
+    .hero{border:1px solid rgba(15,118,110,.18);border-radius:8px;background:rgba(255,255,255,.78);box-shadow:var(--shadow);padding:22px;position:relative;overflow:hidden;animation:panelIn .55s ease both}.lights-off .hero,.lights-off .control-strip{background:rgba(15,23,42,.72);border-color:rgba(96,165,250,.25)}.hero:before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(20,184,166,.10),rgba(37,99,235,.08),rgba(245,158,11,.10));pointer-events:none}.hero:after{content:"";position:absolute;left:-30%;top:0;width:24%;height:100%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.42),transparent);transform:skewX(-18deg);animation:shine 6s ease-in-out infinite}.hero>*{position:relative}.eyebrow{display:inline-flex;align-items:center;gap:8px;min-height:26px;padding:0 10px;border-radius:999px;background:#102033;color:#fff;font-size:12px;font-weight:800}.eyebrow:before{content:"";width:8px;height:8px;border-radius:50%;background:#22c55e;box-shadow:0 0 0 0 rgba(34,197,94,.6);animation:pulseDot 1.8s infinite}.hero-top{align-items:flex-start;display:flex;justify-content:space-between;gap:16px}.office-status{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;min-width:330px}.desk-chip{border:1px solid #dbe4ea;border-radius:8px;background:#fff;padding:9px 10px;transition:transform .22s ease,box-shadow .22s ease}.desk-chip:hover{transform:translateY(-2px) rotate(-.4deg);box-shadow:0 12px 24px rgba(15,23,42,.10)}.lights-off .desk-chip{background:rgba(15,23,42,.78);border-color:rgba(148,163,184,.28)}.desk-chip b{display:block;font-size:13px}.desk-chip span{color:var(--muted);font-size:11px}
+    h1{font-size:34px;line-height:1.14;margin:13px 0 8px;letter-spacing:0}.hint{color:#415267;font-size:14px;line-height:1.75;margin:0;max-width:780px}.toy-shelf{display:flex;gap:9px;flex-wrap:wrap;margin-top:16px}.toy-btn{border:1px solid #bfd2d6;border-radius:999px;background:#f8fafc;color:#334155;font-size:12px;font-weight:900;padding:7px 10px}.toy-btn:hover{background:#e0f2fe}
+    .section-head{align-items:flex-end;display:flex;gap:12px;justify-content:space-between;margin:24px 0 10px}.section-head h2{font-size:19px;margin:0;color:#102033}.section-head span{color:var(--muted);font-size:12px}.version-label{display:inline-flex;align-items:center;gap:8px;color:#334155;font-size:14px;font-weight:900;margin:18px 0 9px}.version-label:before{content:"";width:9px;height:9px;border-radius:50%;background:#14b8a6;box-shadow:0 0 0 4px rgba(20,184,166,.13)}.version-label.dev:before{background:#2563eb;box-shadow:0 0 0 4px rgba(37,99,235,.12)}
+    .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:16px;text-decoration:none;color:inherit;box-shadow:var(--shadow);min-width:0;position:relative;overflow:hidden;transition:transform .22s ease,box-shadow .22s ease,border-color .22s ease;animation:cardRise .42s ease both}.card:nth-child(2){animation-delay:.05s}.card:nth-child(3){animation-delay:.1s}.card:before{content:"";display:block;height:4px;background:linear-gradient(90deg,#14b8a6,#2563eb,#f59e0b);position:absolute;left:0;right:0;top:0}.card:after{content:"";position:absolute;inset:0;background:radial-gradient(circle at var(--mx,50%) var(--my,0%),rgba(20,184,166,.12),transparent 34%);opacity:0;transition:opacity .2s ease;pointer-events:none}.card[data-route]{cursor:pointer}.card:hover{border-color:#14b8a6;box-shadow:0 18px 34px rgba(15,118,110,.18);transform:translateY(-5px) rotate(.2deg)}.card:hover:after{opacity:1}.card:focus-visible{outline:2px solid #14b8a6;outline-offset:3px}.card.focus-card{border-color:#14b8a6;box-shadow:0 0 0 4px rgba(20,184,166,.16),0 18px 34px rgba(15,118,110,.18)}
+    .title{font-size:17px;font-weight:900;margin-bottom:6px}.desc{font-size:13px;color:#4f6072;line-height:1.55;margin-top:8px}.meta{color:var(--muted);font-size:12px;line-height:1.5;margin-top:8px;overflow-wrap:anywhere}
+    .row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}.card-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;position:relative;z-index:2}button{padding:8px 10px;border:0;border-radius:6px;background:var(--brand);color:#fff;cursor:pointer;font-weight:800;position:relative;overflow:hidden;transition:transform .18s ease,filter .18s ease,box-shadow .18s ease,opacity .18s ease}button:hover{transform:translateY(-1px);filter:brightness(1.06)}button+button{background:#334155}button.danger{background:#b3261e}button.control-start.control-active{background:linear-gradient(135deg,#16a34a,#22c55e);box-shadow:0 10px 20px rgba(34,197,94,.28),0 0 0 3px rgba(34,197,94,.14)}button.control-stop.control-active{background:linear-gradient(135deg,#dc2626,#f97316);box-shadow:0 10px 20px rgba(249,115,22,.30),0 0 0 3px rgba(248,113,113,.16)}button.control-muted,button[aria-disabled="true"]{background:#cbd5e1!important;color:#64748b;box-shadow:none;filter:saturate(.75);opacity:.72}button.control-muted:hover,button[aria-disabled="true"]:hover{transform:none;filter:saturate(.75)}button[data-busy="true"]{opacity:.72;cursor:wait}.open-hint{display:inline-flex;align-items:center;color:#0f766e;font-size:12px;font-weight:900;margin-top:10px}.spark{position:fixed;width:8px;height:8px;border-radius:50%;background:#facc15;pointer-events:none;animation:spark .75s ease-out forwards;z-index:20}
+    .pill{display:inline-flex;align-items:center;min-height:24px;padding:0 8px;border-radius:999px;background:#eef2f6;color:#334155;font-size:12px;font-weight:800}.pill.ok{background:#ecfdf3;color:#027a48}.pill.warn{background:#fff7ed;color:#b54708}.utility-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.utility-grid .card{min-height:120px}
+    .cursor-dot,.cursor-ring{position:fixed;left:0;top:0;pointer-events:none;z-index:1000;transform:translate(-50%,-50%)}.cursor-dot{width:8px;height:8px;border-radius:50%;background:#0f766e;box-shadow:0 0 18px rgba(20,184,166,.75)}.cursor-ring{width:34px;height:34px;border:1px solid rgba(15,118,110,.72);border-radius:50%;transition:width .16s ease,height .16s ease,border-color .16s ease,background .16s ease}.cursor-ring.hot{width:46px;height:46px;border-color:#f59e0b;background:rgba(245,158,11,.10)}.cursor-trail{position:fixed;width:10px;height:10px;border-radius:50%;background:rgba(37,99,235,.22);pointer-events:none;z-index:999;animation:trailFade .55s ease-out forwards}.scanline{position:fixed;left:0;right:0;height:4px;top:0;background:linear-gradient(90deg,transparent,#22d3ee,#facc15,transparent);box-shadow:0 0 24px rgba(34,211,238,.8);pointer-events:none;z-index:60;animation:scanDrop 1.1s ease-out forwards}.ripple{position:fixed;width:14px;height:14px;border-radius:50%;border:2px solid #14b8a6;pointer-events:none;z-index:998;transform:translate(-50%,-50%);animation:ripple .7s ease-out forwards}
+    @keyframes sweep{0%{transform:translateX(-80%)}45%,100%{transform:translateX(130%)}}@keyframes shine{0%,55%{left:-30%}75%,100%{left:120%}}@keyframes pulseDot{0%{box-shadow:0 0 0 0 rgba(34,197,94,.55)}70%{box-shadow:0 0 0 8px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}@keyframes panelIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}@keyframes cardRise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}@keyframes lampFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(12px)}}@keyframes partyBg{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}@keyframes spark{to{opacity:0;transform:translate(var(--dx),var(--dy)) scale(.2)}}@keyframes trailFade{to{opacity:0;transform:scale(.25)}}@keyframes scanDrop{from{top:-10px}to{top:100vh;opacity:.1}}@keyframes ripple{to{width:80px;height:80px;opacity:0}}@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}body{cursor:auto}a,button,.card,[data-light],[data-toy]{cursor:pointer}.cursor-dot,.cursor-ring,.cursor-trail,.scanline,.ripple{display:none!important}}
+    @media(max-width:900px){.hero-top{display:block}.office-status{grid-template-columns:1fr;margin-top:14px;min-width:0}.control-strip{align-items:flex-start;flex-direction:column}.grid,.utility-grid{grid-template-columns:1fr}.section-head{align-items:flex-start;flex-direction:column}}
   </style>
 </head>
 <body>
+  <div class="lamp-rig"></div>
+  <div class="cursor-dot" id="cursor_dot"></div>
+  <div class="cursor-ring" id="cursor_ring"></div>
   <div class="wrap">
-    <h1>全澜应用总控台</h1>
-    <p class="hint">这里是三个项目的统一入口和控制面板；项目页只保留业务操作，大模型连接统一在“连接库”维护并同步到各项目本地配置，Key 全程仅显示配置状态。</p>
-    <div class="section-head"><h2>项目入口</h2><span id="home_app_summary">正在读取状态</span></div>
-    <section class="grid" id="home_app_grid">
-      <a class="card" href="/assistant/"><div class="title">自媒体小猪理</div><div class="desc">文史、科研、剪辑与邮箱配置业务入口。</div></a>
+    <div class="control-strip">
+      <b id="light_status">办公室灯光：明亮营业</b>
+      <div class="switches">
+        <button type="button" class="light-btn active" data-light="on">开灯</button>
+        <button type="button" class="light-btn" data-light="off">关灯</button>
+        <button type="button" class="light-btn" data-light="party">派对灯</button>
+        <button type="button" class="light-btn" data-light="focus">专注灯</button>
+      </div>
+    </div>
+    <section class="hero">
+      <div class="hero-top">
+        <div>
+          <div class="eyebrow">OFFICE ONLINE</div>
+          <h1>郤冠楠的赛博办公室</h1>
+          <p class="hint">早上好，郤总。这里是三条业务线的驾驶舱、两套版本的分岔口，也是所有按钮开始认真工作的地方。上线区稳稳营业，开发区大胆折腾；模型、Key 和公共配置都收进抽屉，项目页只专心干活。</p>
+          <div class="toy-shelf"><button type="button" class="toy-btn" data-toy="scan">扫描全屋</button><button type="button" class="toy-btn" data-toy="confetti">发射火花</button><button type="button" class="toy-btn" data-toy="tidy">整理桌面</button></div>
+        </div>
+        <div class="office-status">
+          <div class="desk-chip"><b>3 条业务线</b><span>内容、销售、脑电各在工位</span></div>
+          <div class="desk-chip"><b>2 套版本</b><span>正式稳住，开发撒欢</span></div>
+          <div class="desk-chip"><b>1 个抽屉</b><span>模型连接统一收纳</span></div>
+        </div>
+      </div>
+    </section>
+    <div class="section-head"><h2>办公桌上的传送门</h2><span id="home_app_summary"></span></div>
+    <div class="version-label">上线区</div>
+    <section class="grid" id="home_production_grid">
+      <a id="production-assistant" class="card" href="http://127.0.0.1:8766/assistant/" target="_blank"><div class="title">自媒体小猪理（发布版）</div><div class="desc">本机发布版入口；运行在独立目录和端口，不受开发版代码修改影响。</div></a>
+      <a class="card" href="/xiaozhuli/"><div class="title">全澜小猪理</div><div class="desc">线上正式服务入口。</div></a>
+      <a class="card" href="/eeg/"><div class="title">脑电分析平台</div><div class="desc">线上正式服务入口。</div></a>
+    </section>
+    <div class="version-label dev">开发区</div>
+    <section class="grid" id="home_development_grid">
+      <a class="card" href="/assistant/"><div class="title">自媒体小猪理</div><div class="desc">文史、每日研究速递、科学经典、剪辑与邮件配置业务入口。</div></a>
       <a class="card" href="/xiaozhuli/"><div class="title">全澜小猪理</div><div class="desc">销售知识库、客户建议、Role-play 记录和服务状态。</div></a>
       <a class="card" href="/eeg/"><div class="title">脑电分析平台</div><div class="desc">NeuroCloud EEG 分析流程入口。</div></a>
     </section>
-    <div class="section-head"><h2>公共配置</h2><span>只在总控台维护</span></div>
-    <section class="grid">
-      <a class="card" href="/model/"><div class="title">大模型连接库</div><div class="desc">添加、查阅、编辑、删除和测试各类模型连接；任务自动组合可用连接。</div></a>
-      <a class="card" href="/audience/"><div class="title">虚拟用户测试</div><div class="desc">按项目自动列出虚拟用户评审入口，并在页面内查看运行日志。</div></a>
+    <div class="section-head"><h2>公共配置</h2><span></span></div>
+    <section class="grid utility-grid">
+      <a class="card" href="/model/"><div class="title">大模型连接库</div><div class="desc">添加、查看、编辑、删除和测试各类模型连接；任务自动组合可用连接。</div></a>
+      <a class="card" href="/audience/"><div class="title">虚拟用户测试</div><div class="desc">按项目列出虚拟用户评审入口，并在页面内查看运行日志。</div></a>
     </section>
-    <div class="section-head"><h2>自优化器统一控制</h2><span>代码保留在各自项目中</span></div>
-    <section class="grid">
-      <a class="card" href="/optimizer/"><div class="title">进入自优化器控制台</div><div class="desc">统一启动、停止三个项目的自优化器，并集中查看各项目运行日志。</div></a>
+    <div class="section-head"><h2>自由化器</h2><span>代码保留在各自项目中</span></div>
+    <section class="grid utility-grid">
+      <a class="card" href="/optimizer/"><div class="title">进入自优化器控制台</div><div class="desc">统一启动、停止各项目的自优化器，并集中查看运行日志。</div></a>
     </section>
   </div>
 <script>
 function pill(app){const online=!!(app&&app.online),sync=(app&&app.sync_state)||"未知";const cls=online&&(sync==="已同步"||sync==="流程平台")?"ok":(online?"warn":"");return '<span class="pill '+cls+'">'+(online?"在线":"离线")+' ｜ '+sync+'</span>'}
 function esc(s){return String(s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\\\"":"&quot;","'":"&#39;"}[c]))}
-fetch("/api/apps").then(r=>r.json()).then(data=>{const apps=data.apps||[];const grid=document.getElementById("home_app_grid");document.getElementById("home_app_summary").textContent="已读取 "+apps.length+" 个项目";if(!grid||!apps.length)return;grid.innerHTML=apps.map(app=>'<a class="card" href="'+esc(app.route||"/")+'"><div class="title">'+esc(app.name||app.id)+'</div><div>'+pill(app)+'</div><div class="desc">'+esc(app.description||app.config_scope||"")+'</div><div class="meta">'+esc(app.config_scope||"")+'</div></a>').join("")}).catch(()=>{document.getElementById("home_app_summary").textContent="状态读取失败"})
+function attr(s){return esc(s)}
+function jsq(s){return JSON.stringify(String(s||""))}
+function setLight(mode){document.body.classList.toggle("lights-off",mode==="off");document.body.classList.toggle("party",mode==="party");document.body.classList.toggle("focus",mode==="focus");document.querySelectorAll("[data-light]").forEach(b=>b.classList.toggle("active",b.dataset.light===mode));const text={on:"办公室灯光：明亮营业",off:"办公室灯光：夜航模式",party:"办公室灯光：正在庆功",focus:"办公室灯光：专注降噪"}[mode]||"办公室灯光：明亮营业";const el=document.getElementById("light_status");if(el)el.textContent=text;try{localStorage.setItem("office_light_mode",mode)}catch(e){}}
+function bindLightControls(){document.querySelectorAll("[data-light]").forEach(btn=>btn.addEventListener("click",e=>{setLight(btn.dataset.light||"on");sparkAt(e)}));let saved="on";try{saved=localStorage.getItem("office_light_mode")||"on"}catch(e){}setLight(saved)}
+function sparkAt(event){const x=event.clientX||0,y=event.clientY||0;for(let i=0;i<12;i++){const s=document.createElement("span");s.className="spark";s.style.left=x+"px";s.style.top=y+"px";const a=(Math.PI*2*i/12),d=22+Math.random()*24;s.style.setProperty("--dx",Math.cos(a)*d+"px");s.style.setProperty("--dy",Math.sin(a)*d+"px");document.body.appendChild(s);setTimeout(()=>s.remove(),780)}}
+function bindCardGlow(){document.addEventListener("pointermove",e=>{const card=e.target.closest&&e.target.closest(".card");if(!card)return;const r=card.getBoundingClientRect();card.style.setProperty("--mx",(e.clientX-r.left)+"px");card.style.setProperty("--my",(e.clientY-r.top)+"px")})}
+function bindCursor(){const dot=document.getElementById("cursor_dot"),ring=document.getElementById("cursor_ring");if(!dot||!ring)return;let last=0;document.addEventListener("pointermove",e=>{dot.style.transform="translate("+e.clientX+"px,"+e.clientY+"px) translate(-50%,-50%)";ring.style.transform="translate("+e.clientX+"px,"+e.clientY+"px) translate(-50%,-50%)";const hot=!!(e.target.closest&&e.target.closest("a,button,.card"));ring.classList.toggle("hot",hot);const now=Date.now();if(now-last>42){last=now;const t=document.createElement("span");t.className="cursor-trail";t.style.left=e.clientX-5+"px";t.style.top=e.clientY-5+"px";document.body.appendChild(t);setTimeout(()=>t.remove(),560)}});document.addEventListener("pointerdown",e=>{const r=document.createElement("span");r.className="ripple";r.style.left=e.clientX+"px";r.style.top=e.clientY+"px";document.body.appendChild(r);setTimeout(()=>r.remove(),720)})}
+function scanRoom(){const s=document.createElement("span");s.className="scanline";document.body.appendChild(s);setTimeout(()=>s.remove(),1200)}
+function tidyDesk(){document.querySelectorAll(".card").forEach((card,i)=>{card.style.transform="translateY(-6px)";setTimeout(()=>card.style.transform="",120+i*35)})}
+function bindToys(){document.querySelectorAll("[data-toy]").forEach(btn=>btn.addEventListener("click",e=>{e.preventDefault();sparkAt(e);const toy=btn.dataset.toy;if(toy==="scan")scanRoom();if(toy==="confetti")for(let i=0;i<5;i++)setTimeout(()=>sparkAt(e),i*90);if(toy==="tidy")tidyDesk()}))}
+function openCard(card,event){if(event&&event.target&&event.target.closest&&event.target.closest(".card-actions,.open-hint"))return;window.open(card.dataset.route||"/",card.dataset.target||"_self")}
+function cardOpenKey(event,card){if(event.key!=="Enter"&&event.key!==" ")return;if(event.target&&event.target.closest&&event.target.closest(".card-actions,.open-hint"))return;event.preventDefault();openCard(card,event)}
+function servicePill(app,mode){const online=mode==="production"?!!app.production_online:!!app.development_online;const state=mode==="production"?(app.production_state||app.sync_state||"未知"):(app.development_state||app.sync_state||"未知");const label=mode==="production"?(online?"正式版在线":"正式版离线"):(online?"开发版在线":"开发版离线");return '<span class="pill '+(online?"ok":"")+'">'+label+' ｜ '+esc(state)+'</span>'}
+function appLabel(app){return (app&&app.name)||app.id||"服务"}
+function serviceControlButtons(app,mode){const online=mode==="production"?!!app.production_online:!!app.development_online;const configured=mode==="development"||!!app.production_control_configured;const note=mode==="production"?(app.production_control_note||"正式服务控制"):"本地开发服务控制";const prefix=mode==="production"?"上线服务":"开发服务";const isProduction=mode==="production";const startDisabled=!isProduction&&online,stopDisabled=!isProduction&&!online;const restartDisabled=false;const startClass='control-start '+(!startDisabled&&configured?'control-active':'control-muted');const stopClass='control-stop danger '+(!stopDisabled&&configured?'control-active':'control-muted');const restartClass=configured?'control-active':'control-muted';return '<div class="card-actions" onclick="event.stopPropagation()" onpointerdown="event.stopPropagation()" onkeydown="event.stopPropagation()"><button type="button" data-service-control="'+attr(app.id)+'" data-scope="'+attr(mode)+'" data-app-name="'+attr(appLabel(app))+'" data-action="start" class="'+startClass+'" aria-disabled="'+(startDisabled?'true':'false')+'" title="'+attr(configured?'启动'+prefix:note)+'">启动</button><button type="button" data-service-control="'+attr(app.id)+'" data-scope="'+attr(mode)+'" data-app-name="'+attr(appLabel(app))+'" data-action="restart" class="'+restartClass+'" aria-disabled="'+(restartDisabled?'true':'false')+'" title="'+attr(configured?'重启'+prefix:note)+'">重启</button><button type="button" data-service-control="'+attr(app.id)+'" data-scope="'+attr(mode)+'" data-app-name="'+attr(appLabel(app))+'" data-action="stop" class="'+stopClass+'" aria-disabled="'+(stopDisabled?'true':'false')+'" title="'+attr(configured?'停止'+prefix:note)+'">停止</button></div>'}
+function appCard(app,mode){const route=mode==="production"?(app.production_url||app.route||"/"):(app.development_url||app.route||"/");const target=mode==="production"?"_blank":(app.isolated?"_blank":"_self");const desc=mode==="production"?(app.production_note||"正式服务入口"):(app.description||app.config_scope||"本地开发工程入口");const meta=mode==="production"?(app.production_target||route):(app.development_target||route);const state=servicePill(app,mode);const controls=serviceControlButtons(app,mode);const openText=mode==="production"?"打开上线入口":"进入开发工位";const suffix=mode==="production"?"（发布版）":"（开发版）";const anchor=(mode==="production"&&app.id==="assistant")?"production-assistant":(mode+"-"+(app.id||"app"));return '<article id="'+attr(anchor)+'" class="card" role="link" tabindex="0" data-route="'+attr(route)+'" data-target="'+target+'" onclick="openCard(this,event)" onkeydown="cardOpenKey(event,this)"><div class="title">'+esc((app.name||app.id)+suffix)+'</div><div>'+state+'</div><div class="desc">'+esc(desc)+'</div><div class="meta">'+esc(meta)+'</div><a class="open-hint" href="'+attr(route)+'" target="'+attr(target)+'" onclick="event.stopPropagation()">'+openText+'</a>'+controls+'</article>'}
+function focusHashCard(){const id=decodeURIComponent((location.hash||"").replace(/^#/,""));if(!id)return;const el=document.getElementById(id);if(!el)return;el.scrollIntoView({behavior:"smooth",block:"center"});el.classList.add("focus-card");setTimeout(()=>el.classList.remove("focus-card"),2600)}
+function renderApps(apps){const prod=document.getElementById("home_production_grid"),dev=document.getElementById("home_development_grid");if(prod)prod.innerHTML=apps.map(app=>appCard(app,"production")).join("");if(dev)dev.innerHTML=apps.map(app=>appCard(app,"development")).join("");setTimeout(focusHashCard,60)}
+function loadHomeApps(){return fetch("/api/apps").then(r=>r.json()).then(data=>{const apps=data.apps||[];if(apps.length)renderApps(apps);return data}).catch(()=>{document.getElementById("home_app_summary").textContent="状态读取失败"})}
+async function controlService(event,app,scope,action,sourceBtn){event.stopPropagation();event.preventDefault();const btn=sourceBtn||event.currentTarget;const name=(btn&&btn.dataset.appName)||app;if(btn&&(btn.getAttribute("aria-disabled")==="true"||btn.dataset.busy==="true"))return;sparkAt(event);document.querySelectorAll('[data-service-control="'+app+'"]').forEach(b=>b.dataset.busy="true");const summary=document.getElementById("home_app_summary");const scopeName=scope==="production"?"上线服务":"开发服务";const actionName={start:"启动",restart:"重启",stop:"停止"}[action]||"控制";if(summary)summary.textContent="正在"+actionName+scopeName+"："+name;try{const r=await fetch("/api/apps",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({app,action,scope,takeover:true})});const data=await r.json();if(data.apps)renderApps(data.apps);if(!data.ok){if(summary)summary.textContent="操作失败："+(data.error||"unknown");return}if(summary)summary.textContent=scopeName+"已"+actionName+"："+name}catch(err){if(summary)summary.textContent="操作失败："+(err&&err.message?err.message:"network error");loadHomeApps()}finally{document.querySelectorAll('[data-service-control="'+app+'"]').forEach(b=>delete b.dataset.busy)}}
+function bindServiceControls(){document.addEventListener("click",event=>{const btn=event.target&&event.target.closest&&event.target.closest("[data-service-control][data-action]");if(!btn)return;event.stopPropagation();event.preventDefault();controlService(event,btn.dataset.serviceControl,btn.dataset.scope||"development",btn.dataset.action,btn)},true)}
+bindLightControls();bindCardGlow();bindCursor();bindToys();bindServiceControls();loadHomeApps()
 </script>
 </body>
 </html>""".encode("utf-8")
@@ -2840,30 +4266,30 @@ def _project_control_html(kind: str) -> bytes:
 <div class="wrap">
   <div class="top">
     <div><h1>{title}</h1><p class="hint">{desc}</p></div>
-    <a class="home" href="/">返回总控台</a>
+    <a class="home" href="/">杩斿洖鎬绘帶鍙?/a>
   </div>
   <div class="layout">
     <section class="grid" id="project_grid"></section>
     <main class="card">
       <div class="title">{result_title}</div>
-      <div class="status" id="status">选择项目后可启动或查看日志</div>
+      <div class="status" id="status">閫夋嫨椤圭洰鍚庡彲鍚姩鎴栨煡鐪嬫棩蹇?/div>
       <section class="summary" id="summary_panel" style="{summary_style}">
-        <div class="summary-box"><h3>虚拟用户汇总</h3><ul id="summary_overview"><li>等待测试完成后生成汇总。</li></ul></div>
-        <div class="summary-box"><h3>优化建议</h3><ul id="summary_suggestions"><li>暂无建议。</li></ul></div>
-        <div class="summary-box"><h3>预计优化后的效果</h3><ul id="summary_effects"><li>暂无预计效果。</li></ul></div>
+        <div class="summary-box"><h3>铏氭嫙鐢ㄦ埛姹囨€?/h3><ul id="summary_overview"><li>绛夊緟娴嬭瘯瀹屾垚鍚庣敓鎴愭眹鎬汇€?/li></ul></div>
+        <div class="summary-box"><h3>浼樺寲寤鸿</h3><ul id="summary_suggestions"><li>鏆傛棤寤鸿銆?/li></ul></div>
+        <div class="summary-box"><h3>棰勮浼樺寲鍚庣殑鏁堟灉</h3><ul id="summary_effects"><li>鏆傛棤棰勮鏁堟灉銆?/li></ul></div>
       </section>
-      <details{raw_log_open}><summary>原始运行日志</summary><pre id="log">暂无日志</pre></details>
+      <details{raw_log_open}><summary>鍘熷杩愯鏃ュ織</summary><pre id="log">鏆傛棤鏃ュ織</pre></details>
     </main>
   </div>
 </div>
 <div class="dialog-backdrop" id="feedback_dialog">
   <div class="dialog">
-    <div class="title">输入优化建议</div>
-    <p class="desc" id="feedback_target">选择项目后可写入虚拟用户测试建议。</p>
-    <textarea id="feedback_text" placeholder="例如：普通观众看不懂开头，建议前 8 秒先抛出人物困境，再进入书名和章节。"></textarea>
+    <div class="title">杈撳叆浼樺寲寤鸿</div>
+    <p class="desc" id="feedback_target">閫夋嫨椤圭洰鍚庡彲鍐欏叆铏氭嫙鐢ㄦ埛娴嬭瘯寤鸿銆?/p>
+    <textarea id="feedback_text" placeholder="渚嬪锛氭櫘閫氳浼楃湅涓嶆噦寮€澶达紝寤鸿鍓?8 绉掑厛鎶涘嚭浜虹墿鍥板锛屽啀杩涘叆涔﹀悕鍜岀珷鑺傘€?></textarea>
     <div class="row">
-      <button class="ghost" onclick="closeFeedbackDialog()">取消</button>
-      <button onclick="submitFeedback()">写入建议</button>
+      <button class="ghost" onclick="closeFeedbackDialog()">鍙栨秷</button>
+      <button onclick="submitFeedback()">鍐欏叆寤鸿</button>
     </div>
   </div>
 </div>
@@ -2880,7 +4306,7 @@ function setStatus(text){{document.getElementById("status").textContent=text}}
 function listHtml(items,emptyText){{const arr=Array.isArray(items)?items.filter(Boolean):[];return (arr.length?arr:[emptyText]).slice(0,8).map(x=>"<li>"+esc(x)+"</li>").join("")}}
 function renderSummary(summary,data){{if(isOptimizer)return;const s=summary||{{}};const running=["running","starting","stopping"].includes((data&&data.status)||"");document.getElementById("summary_overview").innerHTML=listHtml(s.overview,running?"正在生成虚拟用户汇总...":"暂无汇总");document.getElementById("summary_suggestions").innerHTML=listHtml(s.suggestions,running?"测试完成后生成优化建议。":"暂无建议");document.getElementById("summary_effects").innerHTML=listHtml(s.expected_effects,running?"测试完成后估算优化效果。":"暂无预计效果")}}
 function actionLabel(mode){{
-  if(mode==="dev_upgrade")return "升级开发版本";
+  if(mode==="dev_upgrade")return "升级开发区";
   if(mode==="release_deploy")return "部署发布版本";
   return isOptimizer?"运行一次":"启动虚拟用户测试";
 }}
@@ -2931,672 +4357,243 @@ loadApps();
 </script>
 </body>
 </html>"""
-    return body.encode("utf-8")
+    return _clean_console_html(body.encode("utf-8"))
+
+
+def _clean_console_html(body: bytes) -> bytes:
+    text = body.decode("utf-8", errors="replace")
+    replacements = {
+        "澶фā鍨嬭繛鎺ュ簱": "大模型连接库",
+        "杩斿洖鎺у埗鍙伴椤?": "返回控制台首页",
+        "杩斿洖鎬绘帶鍙?": "返回总控台",
+        "鏆傛棤鏃ュ織": "暂无日志",
+        "鍘熷杩愯鏃ュ織": "原始运行日志",
+        "绛夊緟鎿嶄綔": "等待操作",
+        "閫夋嫨椤圭洰鍚庡彲鍚姩鎴栨煡鐪嬫棩蹇?": "选择项目后可启动或查看日志",
+        "铏氭嫙鐢ㄦ埛姹囨€?": "虚拟用户汇总",
+        "浼樺寲寤鸿": "优化建议",
+        "棰勮浼樺寲鍚庣殑鏁堟灉": "预计优化后的效果",
+        "绛夊緟娴嬭瘯瀹屾垚鍚庣敓鎴愭眹鎬汇€?": "等待测试完成后生成汇总。",
+        "鏆傛棤寤鸿銆?": "暂无建议。",
+        "鏆傛棤棰勮鏁堟灉銆?": "暂无预计效果。",
+        "杈撳叆浼樺寲寤鸿": "输入优化建议",
+        "鍐欏叆寤鸿": "写入建议",
+        "鍙栨秷": "取消",
+        "杩愯涓€娆?": "运行一次",
+        "鍚姩甯搁┗": "启动常驻",
+        "鍚姩铏氭嫙鐢ㄦ埛娴嬭瘯": "启动虚拟用户测试",
+        "涓€閿崌绾у紑鍙戠増": "一键升级开发版",
+        "涓€閿儴缃插彂甯冪増": "一键部署发布版",
+        "鏌ョ湅鏃ュ織": "查看日志",
+        "鍋滄": "停止",
+        "鍦ㄧ嚎": "在线",
+        "绂荤嚎": "离线",
+        "椤圭洰 ID锛?": "项目 ID：",
+        "鐘舵€侊細": "状态：",
+        "姝ｅ湪澶勭悊": "正在处理",
+        "姝ｅ湪鍋滄": "正在停止",
+        "宸插畬鎴?": "已完成",
+        "鏈畬鎴愶紝璇锋煡鐪嬫棩蹇?": "未完成，请查看日志",
+        "浠诲姟澶辫触": "任务失败",
+        "绛夊緟鎿嶄綔": "等待操作",
+        "鍋滄璇锋眰宸插彂閫?": "停止请求已发送",
+        "娌℃湁鍙仠姝㈢殑浠诲姟": "没有可停止的任务",
+        "澶фā鍨嬭繛鎺?": "大模型连接",
+        "杩炴帴搴撴搷浣?": "连接库操作",
+        "璇诲彇涓?": "读取中",
+        "娣诲姞杩炴帴": "添加连接",
+        "涓€閿簲鐢ㄥ埌鎵€鏈夐」鐩苟妫€娴?": "一键应用到所有项目并检测",
+        "涓€閿祴璇曞強淇": "一键测试及修复",
+        "鍒锋柊杩炴帴搴?": "刷新连接库",
+        "鑷姩缁勫悎鎽樿": "自动组合摘要",
+        "鏈€夋嫨": "未选择",
+        "姝ラ娴佺▼": "步骤流程",
+        "妯″瀷搴?": "模型库",
+        "娣诲姞澶фā鍨嬭繛鎺?": "添加大模型连接",
+        "妯″瀷绫诲埆": "模型类别",
+        "鏂囨湰": "文本",
+        "澶囩敤鏂囨湰": "备用文本",
+        "娑﹁壊": "润色",
+        "鐢熷浘": "生图",
+        "閰嶉煶 BGM": "配音 BGM",
+        "杩炴帴鍚嶇О": "连接名称",
+        "妯″瀷鍚?": "模型名",
+        "淇濆瓨鍒拌繛鎺ュ簱": "保存到连接库",
+        "宸插瓨": "已存",
+        "鏈瓨": "未存",
+        "鏈祴璇?": "未测试",
+        "娴嬭瘯": "测试",
+        "缂栬緫": "编辑",
+        "鍒犻櫎": "删除",
+        "渚涘簲鍟?": "供应商",
+        "妯″瀷": "模型",
+        "涓繛鎺?": "个连接",
+        "鏈缃?": "未设置",
+        "寤惰繜": "延迟",
+        "鏈€杩戠粨鏋滐細": "最近结果：",
+        "鎷栧叆妯″瀷杩炴帴浣滀负鍊欓€?": "拖入模型连接作为候选",
+        "褰撳墠浼氶€夛細": "当前会选：",
+        "杩炴帴搴撹嚜鍔ㄧ粍鍚?": "连接库自动组合",
+        "鏃犵粨鏋?": "无结果",
+        "閫氳繃": "通过",
+        "澶辫触": "失败",
+        "姝ｅ湪": "正在",
+        "浠诲姟": "任务",
+        "宸插惎鍔?": "已启动",
+        "宸插垱寤?": "已创建",
+        "璇诲彇": "读取",
+        "鍚庡彴": "后台",
+        "缂栧彿": "编号",
+        "椤圭洰": "项目",
+        "浼氬": "会",
+        "妯″瀷": "模型",
+        "杩炴帴": "连接",
+        "鍊欓€?": "候选",
+        "閰嶇疆": "配置",
+        "妫€娴?": "检测",
+        "鍐欏叆": "写入",
+        "宸叉敹鍒?": "已收到",
+        "鍚庣画": "后续",
+        "寤鸿": "建议",
+        "棰勮": "预计",
+        "鐢熸垚": "生成",
+        "姹囨€?": "汇总",
+        "鏁堟灉": "效果",
+        "娴嬭瘯": "测试",
+        "鍚姩": "启动",
+        "闁埧": "问题",
+        "閫夋嫨项目鍚庡彲写入铏氭嫙鐢ㄦ埛测试建议銆?": "选择项目后可写入虚拟用户测试建议。",
+        "渚嬪锛氭櫘閫氒浼楃湅涓嶆噦寮€澶达紝建议鍓?8 绉掑厛鎶涘嚭浜虹墿鍥板锛屽啀杩涘叆涔﹀悕鍜岀珷鑺傘€?": "例如：普通观众看不懂开头，建议前 8 秒先抛出人物困境，再进入书名和章节。",
+        "鏆傛棤汇总": "暂无汇总",
+        "鏆傛棤建议": "暂无建议",
+        "绛夊緟后台杩斿洖任务编号": "等待后台返回任务编号",
+        "绛夊緟虚拟用户测试瀹屾垚鍚庣敓鎴愬缓璁€?": "等待虚拟用户测试完成后生成建议。",
+        "测试瀹屾垚鍚庣敓鎴愪紭鍖栧缓璁€?": "测试完成后生成优化建议。",
+        "测试瀹屾垚鍚庝及绠椾紭鍖栨晥鏋溿€?": "测试完成后估算优化效果。",
+        "测试瀹屾垚鍚": "测试完成后",
+        "瀹屾垚": "完成",
+        "宸插惎鍔細": "已启动：",
+        "任务宸插垱寤猴紝正在读取后台鏃ュ織": "任务已创建，正在读取后台日志",
+        "鏆傛棤鏈〉启动鐨勪换鍔?": "暂无本页启动的任务",
+        "停止璇锋眰宸插彂閫?": "停止请求已发送",
+        "优化建议宸插啓鍏ワ細": "优化建议已写入：",
+        "宸叉敹鍒颁汉宸ヤ紭鍖栧缓璁紝后续虚拟用户测试浼氭妸瀹冪撼鍏ラ棶棰橀槦鍒椼€?": "已收到人工优化建议，后续虚拟用户测试会把它纳入问题队列。",
+        "预计涓嬩竴杞細鍥寸粫杩欐潯建议生成鏇村叿浣撶殑淇椤瑰拰澶嶆祴缁撴灉銆?": "预计下一轮会围绕这条建议生成更具体的修复项和复测结果。",
+        "锝?": " ｜ ",
+        "涓嬩竴": "下一",
+        "杞細": "轮会",
+        "鏇村叿浣撶殑": "更具体的",
+        "淇": "修复",
+        "澶嶆祴": "复测",
+        "缁撴灉": "结果",
+        "鐨勪换鍔?": "的任务",
+        "鍚庡彲": "后可",
+        "鍚庣敓鎴?": "后生成",
+        "杩斿洖": "返回",
+        "姣忕被": "每类",
+        "瀹屾垚": "完成",
+        "鏈〉": "本页",
+        "鍏堝閫?": "优先备选",
+        "淇濆瓨": "保存",
+        "鍒囨崲": "切换",
+        "涓嶈兘鏀惧叆璇ユ楠?": "不能放入该步骤",
+        "姝ラ": "步骤",
+        "鏃犲彲鐢ㄦā鍨?": "无可用模型",
+        "鏈€氳繃": "未通过",
+        "灏濊瘯": "尝试",
+        "鍏叡澶фā鍨嬮厤缃簲鐢ㄥ畬鎴?": "公共大模型配置应用完成",
+        "鎵€鏈夐渶瑕侀」鐩凡鏇存柊骞堕€氳繃妫€娴?": "所有需要的项目已更新并通过检测",
+        "鏈夐」鐩湭閫氳繃閰嶇疆妫€娴嬶紝璇︽儏瑙佸彸渚ф棩蹇?": "有项目未通过配置检测，详情见右侧日志",
+        "褰撳墠娌℃湁正在杩愯鐨勪换鍔?": "当前没有正在运行的任务",
+        "返回控制台首页/a>": "返回控制台首页",
+        "返回总控台/a>": "返回总控台",
+        "连接库操作/h3>": "连接库操作",
+        "读取中/span>": "读取中",
+        "一键应用到所有项目并检测/button>": "一键应用到所有项目并检测",
+        "刷新连接库/button>": "刷新连接库",
+        "模型库/h3>": "模型库",
+        "选择项目后可启动或查看日志/div>": "选择项目后可启动或查看日志",
+        "虚拟用户汇总/h3>": "虚拟用户汇总",
+        "等待测试完成后生成汇总。/li>": "等待测试完成后生成汇总。",
+        "暂无建议。/li>": "暂无建议。",
+        "暂无预计效果。/li>": "暂无预计效果。",
+        "涓嶅啀浜哄伐閫夋嫨鏁村澶фā鍨嬫柟妗堬紱杩欓噷鎸夋ā鍨嬬被鍒淮鎶よ繛鎺ュ簱锛屼换鍔″惎鍔ㄦ椂浼氳嚜鍔ㄤ粠每类鍙敤连接涓粍鍚堟墽琛屻€傜綉椤典笌鏃ュ織涓嶅洖鏄炬槑鏂?Key銆?/p>": "这里按模型类别维护连接库；任务启动时会自动从每类可用连接中组合执行。网页与日志不回显明文 Key。",
+        "鎶婂彸渚фā鍨嬫嫋鍒版楠ら噷浣滀负候选/span>": "把右侧模型拖到步骤里作为候选",
+        "鎸変緵搴斿晢鍜屾ā鍨嬪悕绉板垎绫伙紝鍙嫋鍔ㄥ埌宸︿晶步骤": "按供应商和模型名称分类，可拖动到左侧步骤",
+        "娴?GPT": "测 GPT",
+        "娴?GPT-Pro": "测 GPT-Pro",
+        "娴?DeepSeek 润色": "测 DeepSeek 润色",
+        "娴?gpt-image-2": "测 gpt-image-2",
+        "娴?MiniMax": "测 MiniMax",
+        "娣诲姞大模型连接/h3>": "添加大模型连接",
+        "濉啓连接鍙傛暟鍜屾ā鍨嬪悕锛屼繚瀛樺悗会姞鍏ョ浉搴旀ā鍨嬬被鍒綔涓哄閫夋柟妗堛€?/p>": "填写连接参数和模型名，保存后会加入对应模型类别作为备选方案。",
+        "澶囩敤文本": "备用文本",
+        "模型名/label>": "模型名",
+        "Key锛堝彲閫夛紝保存鍚庢竻绌轰笖涓嶅洖鏄撅級": "Key（可选，保存后清空且不回显）",
+        "脳": "×",
+        "杈撳叆优化建议": "输入优化建议",
+        "选择项目后可写入虚拟用户测试建议。/p>": "选择项目后可写入虚拟用户测试建议。",
+        "鎺ュ彛娴嬭瘯閫氳繃": "接口测试通过",
+        "鎺ュ彛娴嬭瘯澶辫触锛岃鎯呰鍙充晶鏃ュ織": "接口测试失败，详情见右侧日志",
+        "杩炴帴娴嬭瘯閫氳繃": "连接测试通过",
+        "杩炴帴娴嬭瘯澶辫触锛岃鎯呰鍙充晶鏃ュ織": "连接测试失败，详情见右侧日志",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    return text.encode("utf-8")
 
 
 def _automedia_html_v2() -> bytes:
-    return """<!doctype html>
+    body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+    handler.send_response(status)
+    handler.send_header("Content-Type", "application/json; charset=utf-8")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
+def _assistant_workbench_html() -> bytes:
+    return r"""<!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>自媒体小猪理工作台</title>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>自媒体小猪理工作台</title>
   <style>
-    :root{font-family:Arial,"Microsoft YaHei",sans-serif;color:#1f2937;background:#f5f7fb;--brand:#1769aa;--line:#d7dce2;--muted:#607080;--soft:#f7f9fc;--bad:#b3261e}
-    *{box-sizing:border-box}body{margin:0}.shell{display:grid;grid-template-columns:470px 1fr;min-height:100vh}
-    aside{background:#fff;border-right:1px solid var(--line);padding:16px;overflow:auto}main{padding:16px;min-width:0;display:grid;grid-template-rows:minmax(320px,1fr) minmax(118px,auto) minmax(220px,.55fr);gap:12px;height:100vh}
-    h1{font-size:20px;margin:0 0 6px}h2{font-size:16px;margin:14px 0 8px}.hint,.desc{font-size:12px;color:var(--muted);line-height:1.5}
-    .boss-home{position:fixed;right:18px;bottom:18px;z-index:50;display:inline-flex;align-items:center;min-height:42px;padding:0 16px;border-radius:999px;background:#111827;color:#fff;font-weight:700;text-decoration:none;box-shadow:0 10px 28px rgba(15,23,42,.24)}
-    .tabs{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin:14px 0}.tabs button{background:#e8eef5;color:#263238}.tabs button.active{background:var(--brand);color:#fff}
-    .panel{display:none}.panel.active{display:block}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
-    label{display:block;font-size:12px;margin:8px 0 4px;color:#4f5b67}input,select{width:100%;padding:8px;border:1px solid #c8d0d8;border-radius:6px;background:#fff}
-    .toggle-row{display:flex;align-items:center;gap:8px;margin-top:10px;color:#1f2937;font-size:13px}.toggle-row input{width:auto}
-    button{padding:8px 10px;border:0;border-radius:6px;background:var(--brand);color:#fff;cursor:pointer}button.secondary{background:#5f6368}button.danger{background:var(--bad)}button.ghost{background:#eef2f6;color:#263238}
-    .row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}.status{font-size:13px;color:var(--brand);margin:8px 0;word-break:break-all}.cmd{font-size:12px;color:var(--muted);word-break:break-all}
-    .tool-grid{display:grid;gap:10px;margin-top:10px}.tool-card{border:1px solid var(--line);border-radius:8px;background:var(--soft);padding:10px}.tool-card b{display:block;font-size:13px;margin-bottom:4px;color:#111827}.tool-card .desc{margin:0 0 8px}
-    .science-path{background:#fff;border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:10px}.checkbox-cell{display:flex;align-items:center;gap:6px}.checkbox-cell input{width:auto}.muted{color:var(--muted)}
-    .workspace-card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px;min-height:0;overflow:hidden}.section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:8px}.section-head h2{margin:0 0 4px}
-    .mini-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px}.mini-stat{background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:10px}.mini-stat b{display:block;font-size:18px;color:#111827}.mini-stat span{font-size:12px;color:var(--muted)}
-    .article-card{display:flex;flex-direction:column}.list-panel{margin-top:10px;border:1px solid var(--line);border-radius:8px;background:#fff;min-height:0;overflow:auto;flex:1}.list-row{display:grid;grid-template-columns:64px 78px minmax(280px,1fr) 150px;gap:10px;padding:10px 12px;border-top:1px solid #edf0f3;font-size:12px;align-items:start}.list-row:first-child{border-top:0}.list-row.header{position:sticky;top:0;background:#f8fafc;color:#4f5b67;font-weight:700;z-index:1}.tag{display:inline-flex;align-items:center;justify-content:center;min-height:22px;padding:0 7px;border-radius:999px;font-weight:700;background:#eef2f6;color:#334155}.tag.done{background:#ecfdf3;color:#027a48}.tag.todo{background:#fff7ed;color:#b54708}.paper-title{font-weight:700;color:#1f2937}.paper-meta{margin-top:3px;color:var(--muted);overflow-wrap:anywhere}
-    .jobs-card{display:flex;flex-direction:column;min-height:118px}.jobs-list{display:grid;gap:8px;overflow:auto;min-height:0}.job-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;border:1px solid var(--line);border-radius:8px;background:#fff;padding:8px 10px;cursor:pointer}.job-row.active{border-color:var(--brand);background:#f3f8fd}.job-title{font-weight:700;font-size:13px;color:#111827;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.job-meta{margin-top:3px;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.job-actions{display:flex;gap:6px}.job-actions button{padding:6px 8px;font-size:12px}
-    .log-card{display:flex;flex-direction:column}.log-card pre{white-space:pre-wrap;background:#111827;color:#e5e7eb;border-radius:8px;padding:12px;min-height:0;flex:1;overflow:auto;margin:0}
-    @media(max-width:900px){.shell{grid-template-columns:1fr}main{height:auto;grid-template-rows:auto auto auto}.grid2,.grid3{grid-template-columns:1fr}aside{border-right:0;border-bottom:1px solid var(--line)}.list-row{grid-template-columns:54px 62px minmax(0,1fr) 96px}.job-row{grid-template-columns:1fr}.job-actions{justify-content:flex-start}}
+    :root{font-family:Arial,"Microsoft YaHei",sans-serif;color:#17202a;background:#f6f8fb;--brand:#1769aa;--muted:#667085;--line:#d9e0e7;--soft:#eef4f8;--bad:#b3261e}*{box-sizing:border-box}body{margin:0}.shell{display:grid;grid-template-columns:430px 1fr;min-height:100vh}.side{background:#fff;padding:16px;display:grid;grid-template-rows:minmax(0,1.08fr) minmax(300px,.92fr);gap:12px;height:100vh;overflow:hidden}.mode-scroll{min-height:0;overflow:auto;padding-right:4px}.main{padding:16px;display:grid;grid-template-rows:minmax(320px,.9fr) minmax(320px,1fr);gap:12px;height:100vh}h1{font-size:20px;margin:0 0 6px}h2{font-size:16px;margin:0 0 10px}h3{font-size:13px;margin:14px 0 8px}.hint{font-size:12px;color:var(--muted);line-height:1.55}.tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:14px 0}.tabs button{background:#e8eef5;color:#263238}.tabs button.active{background:var(--brand);color:#fff}.page{display:none}.page.active{display:block}.block{background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:10px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}label{display:block;font-size:12px;margin:8px 0 4px;color:#435160}input,select{width:100%;padding:8px;border:1px solid #c8d0d8;border-radius:6px;background:#fff}.toggle{display:flex;gap:8px;align-items:center}.toggle input{width:auto}button{padding:8px 10px;border:0;border-radius:6px;background:var(--brand);color:#fff;cursor:pointer}button.secondary{background:#5f6368}button.danger{background:var(--bad)}button.ghost{background:#eef2f6;color:#263238}.row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}.status{font-size:13px;color:var(--brand);margin:8px 0;word-break:break-all}.card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px;min-height:0}.task-card{display:flex;flex-direction:column;min-height:0;padding:0;overflow:hidden;background:#fbfcfe;border-color:#d6dee7}.task-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;background:#f1f5f9;border-bottom:1px solid #dbe3ec}.task-head h2{margin:0;font-size:15px}.mode-pill{display:inline-flex;align-items:center;max-width:45%;min-height:24px;padding:3px 9px;border-radius:999px;background:#fff;color:#31546f;font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.task-body{padding:10px 12px;display:grid;grid-template-rows:auto auto minmax(0,1fr);min-height:0;gap:10px;flex:1}.task-body .hint{margin:0}.task-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin:0}.task-actions button{padding:7px 8px;white-space:nowrap}.jobs{display:grid;align-content:start;gap:8px;overflow:auto;min-height:0;padding-right:2px}.job{border:1px solid var(--line);border-radius:8px;padding:8px;background:#fff;display:grid;grid-template-columns:20px 1fr auto;gap:8px;align-items:center}.job b{display:block;font-size:12px}.job span{display:block;font-size:11px;color:var(--muted);word-break:break-all}.workspace-card{display:flex;flex-direction:column;overflow:auto}.workspace-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.kv{display:grid;grid-template-columns:110px 1fr;gap:8px;font-size:13px}.kv b{color:#334155}.flow{display:grid;gap:7px}.flow div{background:#f8fafc;border-radius:6px;padding:8px;font-size:12px;line-height:1.45}.back{display:inline-flex;text-decoration:none;background:#eef2f6;color:#334155;border-radius:6px;padding:7px 10px;font-weight:700;font-size:12px;margin-bottom:8px}pre{white-space:pre-wrap;background:#111827;color:#e5e7eb;border-radius:8px;padding:12px;margin:0;height:100%;min-height:280px;overflow:auto;font-size:12px;line-height:1.55}.log-tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}@media(max-width:980px){.shell{grid-template-columns:1fr}.side,.main{height:auto;display:block}.grid2,.grid3,.workspace-grid{grid-template-columns:1fr}.task-card{margin-top:12px;min-height:300px}.task-body{display:flex;flex-direction:column}}
   </style>
 </head>
-<body>
-<a class="boss-home" href="/">返回控制台首页</a>
-<div class="shell">
-  <aside>
-    <h1>自媒体小猪理工作台</h1>
-    <p class="hint">文史、每日研究速递、科学经典和剪辑任务集中在这里启动；运行日志在右侧显示。</p>
-    <div class="tabs">
-      <button id="tabCulture" onclick="showPanel('culture')">文史</button>
-      <button id="tabDigest" onclick="showPanel('digest')">每日研究速递</button>
-      <button id="tabScience" onclick="showPanel('science')">科学经典</button>
-      <button id="tabClip" onclick="showPanel('clip')">剪辑</button>
-      <button id="tabMore" onclick="showPanel('more')">更多</button>
-    </div>
-    <section id="panelCulture" class="panel">
-      <h2>文史小秘</h2>
-      <label>书籍 PDF</label><input id="culture_book" placeholder="D:/知识/xxx.pdf">
-      <label>输出目录</label><input id="culture_out_dir" placeholder="D:/输出/文史素材">
-      <label>继续目录</label><input id="culture_continue_folder" placeholder="可留空">
-      <label>开始阶段</label><select id="culture_stage"><option>outline</option><option>split_pdf</option><option>episode_prompt</option><option>script</option><option>polish</option><option>images</option><option>postprocess</option><option>split_assets</option></select>
-      <label>测试 B 图数</label><input id="culture_test_b" value="0">
-      <div class="row"><button onclick="startCulture(false)">开始文史生成</button><button class="secondary" onclick="startCulture(true)">测试 B 图</button><button class="secondary" onclick="openOutputFolder('culture')">打开作品文件夹</button></div>
-    </section>
-    <section id="panelDigest" class="panel">
-      <h2>每日研究速递</h2>
-      <label>输出目录</label><input id="research_out_dir" placeholder="可留空">
-      <div class="grid3"><div><label>检索天数</label><input id="research_days" value="14"></div><div><label>每期文章数</label><input id="research_max_articles" value="5"></div><div><label>每天期数</label><select id="research_issue_count"><option value="1">1 期</option><option value="2">2 期</option><option value="3">3 期</option></select></div></div>
-      <label>期刊列表</label><input id="research_journals" placeholder="Nature, Science, Neuron...">
-      <label>已有文献清单 / 续做目录</label><input id="research_article_list" placeholder="可留空">
-      <label class="toggle-row"><input id="research_skip_medical_related" type="checkbox"> 微信避险：跳过医学、疾病、临床和生物医学外推相关论文</label>
-      <label class="toggle-row"><input id="email_enabled" type="checkbox"> 完成后发送邮件</label>
-      <div class="row"><button onclick="startResearch('digest')">开始创作</button><button onclick="startResearch('article_list')">补文献清单</button><button onclick="startResearch('continue_list')">清单续做</button><button onclick="startResearch('resume')">续做档期</button><button class="secondary" onclick="loadArticleList()">查看文献清单</button><button class="secondary" onclick="openOutputFolder('research')">打开作品文件夹</button></div>
-    </section>
-    <section id="panelScience" class="panel">
-      <h2>科学经典</h2>
-      <p class="hint">面向经典论文/科学著作解读，使用已选 PDF 的目录和章节选择，不走每日研究速递的最新论文检索。</p>
-      <div class="science-path">
-        <label>书籍 PDF</label><input id="science_pdf_path" placeholder="D:/Quanlan/全澜脑科学视频号/神经科学经典/...pdf">
-        <label>作品文件夹</label><input id="science_out_dir" placeholder="D:/Quanlan/全澜脑科学视频号/神经科学经典/...">
-        <div class="row"><button class="secondary" onclick="loadScienceToc(true)">读取 / 刷新目录</button><button class="ghost" onclick="selectScienceAll(true)">全选正文</button><button class="ghost" onclick="selectScienceAll(false)">取消选择</button></div>
-      </div>
-      <div class="tool-grid">
-        <div class="tool-card"><b>开始创作</b><p class="desc">按右侧选中的章节执行解析、脚本、配图和后处理；适合正式生成科学经典素材。</p><button onclick="startScience(false)">开始创作</button></div>
-        <div class="tool-card"><b>测试 B 图</b><p class="desc">只限制首张 B 图额度，用来快速验证提示词、生图 Key、后处理和成品素材链路。</p><button class="secondary" onclick="startScience(true)">测试 B 图</button></div>
-        <div class="tool-card"><b>作品文件夹</b><p class="desc">打开或清空科学经典自己的输出目录，不影响每日研究速递目录。</p><div class="row"><button class="secondary" onclick="openOutputFolder('science')">打开作品文件夹</button><button class="danger" onclick="clearOutputFolder('science')">清空作品文件夹</button></div></div>
-      </div>
-    </section>
-    <section id="panelClip" class="panel">
-      <h2>自动剪辑 / BGM</h2>
-      <label>图片目录</label><input id="auto_clip_image_dir" placeholder="分集图片目录">
-      <label>LRC / 音频目录</label><input id="auto_clip_lrc_dir" placeholder="字幕或音频目录">
-      <label>输出目录</label><input id="auto_clip_output_dir" placeholder="可留空">
-      <label>BGM 音乐库</label><input id="auto_clip_bgm_library_dir" placeholder="默认使用项目音乐库">
-      <label>选择 BGM</label><select id="auto_clip_bgm_select" onchange="selectBgmFromLibrary()"><option value="">不使用背景音乐</option></select>
-      <label>BGM 文件/目录</label><input id="auto_clip_bgm" placeholder="可留空">
-      <div class="grid2">
-        <div><label>语音/音乐通道</label><select id="minimax_provider" onchange="applyMinimaxProvider()"><option value="official">MiniMax（官方）</option><option value="fast">MiniMax（极速）</option></select></div>
-        <div><label>Base URL</label><input id="minimax_base_url" placeholder="https://api.53hk.cn"></div>
-        <div><label>TTS 模型</label><input id="minimax_tts_model" placeholder="speech-2.8-hd"></div>
-        <div><label>BGM 模型</label><input id="minimax_bgm_model" placeholder="music-2.6"></div>
-      </div>
-      <label>MiniMax Key</label><input id="minimax_api_key" type="password" autocomplete="off" placeholder="粘贴新 Key；保存后清空">
-      <div class="grid2"><div><label>Voice ID</label><input id="minimax_voice_id" placeholder="male-qn-qingse"></div><div><label>BGM Prompt</label><input id="minimax_bgm_prompt" placeholder="instrumental, documentary, soft piano"></div></div>
-      <div class="row"><button onclick="startClip()">启动自动剪辑</button><button class="secondary" onclick="startBgm()">生成并入库 BGM</button><button class="secondary" onclick="refreshBgmLibrary()">刷新音乐库</button><button class="secondary" onclick="openOutputFolder('clip')">打开作品文件夹</button></div>
-    </section>
-    <section id="panelMore" class="panel">
-      <h2>更多工具</h2>
-      <p class="hint">模型方案、虚拟用户、自优化和版本发布在这里集中入口；不会和文史/每日研究速递任务混在一起。</p>
-      <div class="row"><button onclick="location.href='/model/'">大模型连接库</button><button class="secondary" onclick="location.href='/audience/'">虚拟用户测试</button><button class="secondary" onclick="location.href='/optimizer/'">自优化器控制台</button></div>
-      <div class="row"><button onclick="startTool('audience_full_review')">当前项目虚拟用户测试</button><button class="secondary" onclick="startTool('self_optimizer_once')">自优化一次</button><button class="secondary" onclick="startTool('self_optimizer_daemon')">启动自优化器</button></div>
-      <div class="row"><button class="secondary" onclick="startTool('package_update')">生成测试版更新包</button><button class="secondary" onclick="startTool('init_release')">初始化测试版目录</button><button class="secondary" onclick="startTool('model_help')">CLI 自检</button><button class="secondary" onclick="openXiaozhuli()">打开小猪理内嵌</button></div>
-      <h2>邮箱配置</h2>
-      <p class="hint">这里只保存发件与收件参数；SMTP 密码只写入本机配置，网页不回显明文。</p>
-      <label>收件邮箱</label><input id="email_recipient" placeholder="多个邮箱用逗号分隔">
-      <div class="grid2">
-        <div><label>SMTP 服务器</label><input id="smtp_host" placeholder="smtp.qq.com"></div>
-        <div><label>SMTP 端口</label><input id="smtp_port" placeholder="465"></div>
-        <div><label>SMTP 账号</label><input id="smtp_user" placeholder="邮箱账号"></div>
-        <div><label>发件人</label><input id="smtp_sender" placeholder="默认同账号"></div>
-      </div>
-      <label>SMTP 密码 / 授权码</label><input id="smtp_password" type="password" autocomplete="off" placeholder="粘贴新密码或授权码；保存后清空">
-    </section>
-    <div class="row"><button class="secondary" onclick="saveSettings()">保存当前设置</button><button class="danger" onclick="stopJob()">停止当前任务</button></div>
-    <div class="status" id="status">待命</div><div class="cmd" id="cmd"></div>
-  </aside>
-  <main>
-    <section class="workspace-card article-card" id="article_list_box">
-      <div class="section-head">
-        <div><h2 id="workspace_title">文献清单</h2><p class="hint" id="workspace_hint">查看当前有哪些文献、哪些已做、用在了哪几期。</p></div>
-        <button class="secondary" id="workspace_refresh" onclick="loadArticleList()">刷新清单</button>
-      </div>
-      <div class="mini-stats">
-        <div class="mini-stat"><b id="article_total">-</b><span>清单总数</span></div>
-        <div class="mini-stat"><b id="article_done">-</b><span id="stat_done_label">已做</span></div>
-        <div class="mini-stat"><b id="article_todo">-</b><span id="stat_todo_label">未做</span></div>
-      </div>
-      <div class="status" id="article_list_status">填写或选择文献清单后，点击查看。</div>
-      <div class="list-panel" id="article_list_rows"></div>
-    </section>
-    <section class="workspace-card jobs-card">
-      <div class="section-head"><div><h2>运行任务</h2><div class="hint">每个模式独立启动、独立停止，可同时制作多组素材。</div></div><button class="secondary" onclick="refreshAllJobs()">刷新任务</button></div>
-      <div class="jobs-list" id="jobs_list">暂无运行任务</div>
-    </section>
-    <section class="workspace-card log-card">
-      <div class="section-head"><div><h2>运行日志</h2><div class="status" id="job_status">等待操作</div></div></div>
-      <pre id="log">暂无日志</pre>
-    </section>
-  </main>
-</div>
+<body><div class="shell"><aside class="side"><div class="mode-scroll"><a class="back" href="/">返回控制台首页</a><h1>自媒体小猪理工作台</h1><p class="hint">每个模式是一张独立控制台：只放本模式要配置的东西、剪辑交付、模型步骤、任务和日志。</p><div class="tabs"><button id="tabCulture" onclick="showMode('culture')">文史解读</button><button id="tabResearch" onclick="showMode('research')">每日速递</button><button id="tabScience" onclick="showMode('science')">科学经典</button><button id="tabLocal" onclick="showMode('local')">自优化</button></div>
+<section id="pageCulture" class="page active"><div class="block"><h2>文史解读</h2><label>书籍 PDF</label><input id="culture_book" placeholder="D:/知识/xxx.pdf"><label>输出目录</label><input id="culture_out_dir" placeholder="D:/输出/文史素材"><label>继续目录</label><input id="culture_continue_folder" placeholder="可留空"><label>开始阶段</label><select id="culture_stage"><option>outline</option><option>split_pdf</option><option>episode_prompt</option><option>script</option><option>polish</option><option>images</option><option>postprocess</option><option>split_assets</option></select><label>测试 B 图数</label><input id="culture_test_b" value="0"><div class="row"><button onclick="startCulture(false)">开始文史生成</button><button class="secondary" onclick="startCulture(true)">快速测试：1 张 B 图</button><button class="secondary" onclick="openOutputFolder('culture')">打开作品文件夹</button></div></div><div class="block"><h3>文史剪辑交付</h3><label>图片目录</label><input id="culture_clip_image_dir"><label>LRC / 音频目录</label><input id="culture_clip_lrc_dir"><label>输出目录</label><input id="culture_clip_output_dir"><label>BGM 文件/目录</label><input id="culture_clip_bgm"><div class="row"><button class="secondary" onclick="startModeClip('culture')">启动文史剪辑</button><button class="secondary" onclick="startBgm('culture')">生成文史 BGM</button></div></div></section>
+<section id="pageResearch" class="page"><div class="block"><h2>每日研究速递</h2><label>输出目录</label><input id="research_out_dir" placeholder="可留空，默认科研速递栏目下新建分集文件夹"><div class="grid3"><div><label>检索天数</label><input id="research_days" value="14"></div><div><label>每期文章数</label><input id="research_max_articles" value="5"></div><div><label>每天期数</label><select id="research_issue_count"><option value="1">1 期</option><option value="2">2 期</option><option value="3">3 期</option></select></div></div><label>期刊列表</label><input id="research_journals" placeholder="Nature, Science, Neuron..."><label>已有文献清单 / 续做目录</label><input id="research_article_list"><label class="toggle"><input id="research_skip_medical_related" type="checkbox"> 微信避险：跳过医学、疾病、临床和生物医学外推相关论文</label><p class="hint" id="digest_email_hint"></p><div class="row"><button onclick="startResearch('digest')">开始创作</button><button class="secondary" onclick="startResearchQuickTest()">快速测试：1 张 B 图</button><button onclick="startResearch('article_list')">补文献清单</button><button onclick="startResearch('continue_list')">清单续做</button><button onclick="startResearch('resume')">续做档期</button><button class="secondary" onclick="openOutputFolder('research')">打开作品文件夹</button></div></div><div class="block"><h3>速递剪辑交付</h3><label>图片目录</label><input id="research_clip_image_dir" placeholder="本期 cards 目录"><label>LRC / 音频目录</label><input id="research_clip_lrc_dir"><label>输出目录</label><input id="research_clip_output_dir"><label>BGM 文件/目录</label><input id="research_clip_bgm"><div class="row"><button class="secondary" onclick="startModeClip('research')">启动速递剪辑</button><button class="secondary" onclick="startBgm('research')">生成速递 BGM</button></div></div></section>
+<section id="pageScience" class="page"><div class="block"><h2>科学经典</h2><label>书籍 PDF</label><input id="science_pdf_path"><label>作品文件夹</label><input id="science_out_dir"><div class="row"><button onclick="startScience(false)">开始创作</button><button class="secondary" onclick="startScience(true)">快速测试：1 张 B 图</button><button class="secondary" onclick="openOutputFolder('science')">打开作品文件夹</button></div></div><div class="block"><h3>科学经典剪辑交付</h3><label>图片目录</label><input id="science_clip_image_dir"><label>LRC / 音频目录</label><input id="science_clip_lrc_dir"><label>输出目录</label><input id="science_clip_output_dir"><label>BGM 文件/目录</label><input id="science_clip_bgm"><div class="row"><button class="secondary" onclick="startModeClip('science')">启动科学经典剪辑</button><button class="secondary" onclick="startBgm('science')">生成科学经典 BGM</button></div></div></section>
+<section id="pageLocal" class="page"><div class="block"><h2>自优化</h2><p class="hint">自优化用于本机工作流维护、调试和持续改进。它不抢占文史、速递、科学经典的任务和日志。</p><div class="row"><button onclick="startLocalTool('self_optimizer_once')">跑一次自优化</button><button class="secondary" onclick="startLocalTool('self_optimizer_daemon')">启动持续自优化</button><button class="secondary" onclick="location.href='/model/'">大模型连接库</button><button class="secondary" onclick="location.href='/optimizer/'">自优化器控制台</button><button class="secondary" onclick="location.href='/audience/'">虚拟用户测试</button></div></div><div class="block"><h3>自优化剪辑试验</h3><label>图片目录</label><input id="local_clip_image_dir"><label>LRC / 音频目录</label><input id="local_clip_lrc_dir"><label>输出目录</label><input id="local_clip_output_dir"><label>BGM 文件/目录</label><input id="local_clip_bgm"><div class="row"><button class="secondary" onclick="startModeClip('local')">启动自优化剪辑</button><button class="secondary" onclick="startBgm('local')">生成自优化 BGM</button></div></div></section>
+<div class="block"><h3>当前模式邮箱</h3><label class="toggle"><input id="email_enabled" type="checkbox" onchange="saveCurrentEmailProfile()"> 当前模式完成后发送邮件</label><label>当前模式收件邮箱</label><input id="email_recipient" oninput="saveCurrentEmailProfile()" placeholder="多个邮箱用逗号分隔"><p class="hint" id="email_profile_status"></p><div class="grid2"><div><label>SMTP 服务器</label><input id="smtp_host"></div><div><label>SMTP 端口</label><input id="smtp_port"></div><div><label>SMTP 账号</label><input id="smtp_user"></div><div><label>发件人</label><input id="smtp_sender"></div></div><label>SMTP 密码 / 授权码</label><input id="smtp_password" type="password" autocomplete="off" placeholder="粘贴新密码或授权码；保存后清空"><div class="row"><button class="secondary" onclick="testEmail()">测试 SMTP</button><button onclick="saveSettings()">保存当前模式配置</button></div></div><div class="block"><h3>模型连接总览</h3><p class="hint">这里只读总控台 /model/ 的当前连接，不显示 key。总控台改完后点刷新即可同步到本页。</p><div class="row"><button class="secondary" onclick="refreshModelConfig()">刷新模型配置</button><button class="ghost" onclick="location.href='/model/'">打开总控台</button></div><div class="flow" id="left_model_flow"></div><div class="grid2"><div><label>Voice ID</label><input id="minimax_voice_id"></div><div><label>BGM Prompt</label><input id="minimax_bgm_prompt"></div></div><input id="minimax_base_url" type="hidden"><input id="minimax_tts_model" type="hidden"><input id="minimax_bgm_model" type="hidden"><input id="minimax_api_key" type="password" autocomplete="off" style="display:none"></div><div class="row"><button class="secondary" onclick="saveSettings()">保存当前设置</button><button class="danger" onclick="stopJob()">停止当前任务</button></div><div class="status" id="status">待命</div><div class="hint" id="cmd"></div></div><section class="card task-card"><div class="task-head"><h2>运行任务</h2><span class="mode-pill" id="task_mode_label"></span></div><div class="task-body"><p class="hint" id="task_hint"></p><div class="task-actions"><button class="secondary" onclick="refreshAllJobs()">刷新</button><button class="danger" onclick="stopJob()">停止任务</button><button onclick="deployReleaseWhenIdle()">升级发布版</button><button class="ghost" onclick="openProductionCard()">上线区卡片</button><button class="ghost" onclick="selectAllJobs(true)">全选</button><button class="danger" onclick="deleteSelectedJobs()">批量删除</button></div><div class="jobs" id="jobs_list">暂无运行任务</div></div></section></aside>
+<main class="main"><section class="card workspace-card"><h2 id="workspace_title">文史解读</h2><p class="hint">这里回答两个问题：这个模式现在配了什么；每个用模型的步骤正在用哪一路。</p><div class="workspace-grid"><div><h3>当前配置</h3><div class="kv" id="workspace_kv"></div></div><div><h3>模型步骤</h3><div class="flow" id="model_flow"></div></div></div></section><section class="card"><div class="log-tools"><select id="log_job_select" onchange="selectLogJob(this.value)"><option value="">当前模式日志</option></select><button class="secondary" onclick="scrollLogBottom()">跳到底部</button><button class="secondary" onclick="copyLog()">复制日志</button><button class="secondary" onclick="clearLog()">清空当前日志</button></div><pre id="log">暂无日志</pre></section></main></div>
 <script>
-const jobsStorageKey="quanlan_automedia_jobs_v2";
-const selectedJobStorageKey="quanlan_automedia_selected_job";
-let jobsById=JSON.parse(localStorage.getItem(jobsStorageKey)||"{}");
-let selectedJobId=localStorage.getItem(selectedJobStorageKey)||"";
-let pollHandles={};
-let scienceToc=[];
-function byId(id){return document.getElementById(id)}
-function cap(s){return s[0].toUpperCase()+s.slice(1)}
-function showPanel(name){for(const n of ["culture","digest","science","clip","more"]){const p=byId("panel"+cap(n)),t=byId("tab"+cap(n));if(p)p.classList.toggle("active",n===name);if(t)t.classList.toggle("active",n===name)}if(name==="science")loadScienceToc(false);else if(name==="digest")loadArticleList();else if(name==="culture")renderCultureWorkspace();else renderModeWorkspace(name)}
-function fieldValue(id){const el=byId(id);return el?String(el.value||""):""}
-function setField(id,value){const el=byId(id);if(el)el.value=value||""}
-function setStatus(message){byId("status").textContent=message}
-function jobStatusText(data){const s=String((data&&data.status)||"");if(["running","starting"].includes(s))return"正在处理";if(s==="stopping")return"正在停止";if(s==="finished")return data.exit_code===0?"已完成":"未完成，请查看日志";if(s==="failed")return"任务失败，请查看日志";return"等待操作"}
-function isLiveStatus(s){return["running","starting","stopping"].includes(String(s||""))}
-function saveJobs(){localStorage.setItem(jobsStorageKey,JSON.stringify(jobsById));localStorage.setItem(selectedJobStorageKey,selectedJobId||"")}
-function jobBaseLabel(baseKey){const labels={"culture:test_b":"文史 / 测试 B 图","research:digest":"研究速递 / 开始创作","research:article_list":"研究速递 / 补文献清单","research:continue_list":"研究速递 / 清单续做","research:resume":"研究速递 / 续做档期","science:test_b":"科学经典 / 测试 B 图","science:run":"科学经典 / 开始创作","clip":"自动剪辑","bgm":"BGM 入库","tool:audience_full_review":"虚拟用户测试","tool:self_optimizer_once":"自优化一次","tool:self_optimizer_daemon":"自优化器","tool:package_update":"测试版更新包","tool:init_release":"初始化测试版","tool:model_help":"CLI 自检"};if(labels[baseKey])return labels[baseKey];if(baseKey&&baseKey.startsWith("culture:"))return"文史 / "+baseKey.slice(8);if(baseKey&&baseKey.startsWith("tool:"))return"工具 / "+baseKey.slice(5);return baseKey||"任务"}
-function jobKindForBase(baseKey){if(!baseKey)return"";if(baseKey.startsWith("culture:"))return"culture";if(baseKey.startsWith("research:"))return"research";if(baseKey.startsWith("science:"))return"science";if(baseKey==="clip"||baseKey==="bgm")return"clip";if(baseKey.startsWith("tool:"))return"tool";return baseKey}
-function selectedJob(){return jobsById[selectedJobId]||null}
-function latestJobForKind(kind){const items=Object.values(jobsById).filter(j=>!kind||j.kind===kind).sort((a,b)=>(b.started_at||0)-(a.started_at||0));return items[0]||null}
-function renderJobs(){
-  const box=byId("jobs_list");if(!box)return;
-  if(!box.dataset.bound){box.dataset.bound="1";box.addEventListener("click",e=>{const btn=e.target.closest("[data-job-action]");const row=e.target.closest(".job-row");if(!row)return;const id=row.dataset.jobId;if(btn){e.stopPropagation();if(btn.dataset.jobAction==="stop")stopJob(id);else viewJob(id);return}viewJob(id)})}
-  const items=Object.values(jobsById).sort((a,b)=>(b.started_at||0)-(a.started_at||0)).slice(0,24);
-  if(!items.length){box.textContent="暂无运行任务";return}
-  box.innerHTML=items.map(j=>{const active=j.id===selectedJobId;const status=jobStatusText(j);const when=j.started_at?new Date(j.started_at).toLocaleTimeString():"";const cmd=Array.isArray(j.cmd)?j.cmd.join(" "):"";return '<div class="job-row '+(active?'active':'')+'" data-job-id="'+esc(j.id)+'"><div><div class="job-title">'+esc(j.label||j.id)+' ｜ '+esc(status)+'</div><div class="job-meta">'+esc([when,j.id,cmd].filter(Boolean).join(" ｜ "))+'</div></div><div class="job-actions"><button class="secondary" data-job-action="view">查看</button><button class="danger" data-job-action="stop">停止</button></div></div>'}).join("");
-}
-function rememberJob(id,baseKey,payload,data){jobsById[id]={id,label:jobBaseLabel(baseKey),base_key:baseKey,kind:jobKindForBase(baseKey),mode:payload.mode||"",action:payload.action||payload.stage||"",status:"starting",exit_code:null,cmd:data.cmd||[],started_at:Date.now(),updated_at:Date.now()};selectedJobId=id;saveJobs();renderJobs()}
-function schedulePoll(id){if(!id||pollHandles[id])return;pollHandles[id]=setTimeout(()=>{pollHandles[id]=0;poll(id)},1000)}
-function refreshAllJobs(){const ids=Object.keys(jobsById);if(!ids.length){setStatus("暂无运行任务");return}for(const id of ids)poll(id)}
-function applyMinimaxProvider(){const provider=fieldValue("minimax_provider");if(provider==="official"&&!fieldValue("minimax_base_url"))setField("minimax_provider","fast");if(!fieldValue("minimax_base_url")||fieldValue("minimax_base_url")==="https://api.minimaxi.com/v1")setField("minimax_base_url","https://api.53hk.cn");if(!fieldValue("minimax_tts_model")||fieldValue("minimax_tts_model")==="MiniMax-M2.7")setField("minimax_tts_model","speech-2.8-hd");if(!fieldValue("minimax_bgm_model")||fieldValue("minimax_bgm_model")==="MiniMax-M2.7"||fieldValue("minimax_bgm_model")==="music-2.6-free")setField("minimax_bgm_model","music-2.6")}
-function collect(){const ids=["culture_book","culture_out_dir","culture_continue_folder","research_out_dir","research_days","research_max_articles","research_issue_count","research_journals","research_article_list","minimax_provider","minimax_base_url","minimax_api_key","minimax_tts_model","minimax_bgm_model","minimax_voice_id","minimax_bgm_prompt","smtp_password","auto_clip_image_dir","auto_clip_lrc_dir","auto_clip_output_dir","auto_clip_bgm","auto_clip_bgm_library_dir","email_recipient","smtp_host","smtp_port","smtp_user","smtp_sender"];const p={};for(const id of ids){if(byId(id))p[id]=fieldValue(id)}p.email_enabled=!!(byId("email_enabled")&&byId("email_enabled").checked);p.research_skip_medical_related=!!(byId("research_skip_medical_related")&&byId("research_skip_medical_related").checked);return p}
-function renderBgmLibrary(library){const sel=byId("auto_clip_bgm_select");if(!sel)return;const current=fieldValue("auto_clip_bgm");const items=(library&&library.items)||[];sel.innerHTML='<option value="">不使用背景音乐</option>'+items.map(x=>'<option value="'+esc(x.path)+'">'+esc(x.name)+'</option>').join("");if(current){sel.value=current}if(library&&library.path&&!fieldValue("auto_clip_bgm_library_dir"))setField("auto_clip_bgm_library_dir",library.path)}
-function selectBgmFromLibrary(){setField("auto_clip_bgm",fieldValue("auto_clip_bgm_select"))}
-async function refreshBgmLibrary(){const url="/api/bgm_library?path="+encodeURIComponent(fieldValue("auto_clip_bgm_library_dir"));const r=await fetch(url);const data=await r.json();renderBgmLibrary(data.bgm_library||{});setStatus(data.ok?"音乐库已刷新":"音乐库读取失败")}
-async function loadSettings(){const r=await fetch("/api/settings");const data=await r.json();const merged={...(data.models||{}),...(data.settings||{})};for(const [k,v] of Object.entries(merged)){if(k==="email_enabled"&&byId("email_enabled"))byId("email_enabled").checked=String(v).toLowerCase()==="true";else if(k==="research_skip_medical_related"&&byId("research_skip_medical_related"))byId("research_skip_medical_related").checked=String(v).toLowerCase()==="true";else setField(k,v)}if(!fieldValue("minimax_provider"))setField("minimax_provider",fieldValue("minimax_base_url")==="https://api.53hk.cn"?"fast":"official");renderBgmLibrary(data.bgm_library||{});renderCultureWorkspace()}
-async function saveSettings(){const r=await fetch("/api/settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(collect())});const data=await r.json();setField("smtp_password","");setField("minimax_api_key","");setStatus(data.ok?"设置已保存":"保存失败");return data}
-async function start(payload,baseKey){const saved=await saveSettings();if(saved&&!saved.ok)return;const r=await fetch("/api/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});const data=await r.json();if(!r.ok||data.ok===false||!data.job_id){setStatus(data.error||"任务未启动");if(byId("log"))byId("log").textContent=data.error||"任务未启动";return}rememberJob(data.job_id,baseKey,payload,data);byId("cmd").textContent="";setStatus((data.message||"任务已开始处理")+"："+jobBaseLabel(baseKey));byId("log").textContent="任务已创建，正在读取后台日志...";poll(data.job_id)}
-function startCulture(test){const stage=fieldValue("culture_stage")||"outline";start({...collect(),mode:"culture",stage,test_b_image_limit:test?1:Number(fieldValue("culture_test_b")||0)},test?"culture:test_b":"culture:"+stage)}
-function startResearch(action){const p=collect();if(p.email_enabled&&!p.email_recipient){setStatus("请先填写收件邮箱，或取消邮件发送");showPanel("more");return}start({...p,mode:"research",action},"research:"+action)}
-function startClip(){start({...collect(),mode:"auto_clip"},"clip")}
-function startBgm(){start({...collect(),mode:"bgm"},"bgm")}
-function startTool(action){start({...collect(),mode:"tool",action},"tool:"+action)}
-function outputPathFor(kind){
-  if(kind==="culture")return fieldValue("culture_out_dir");
-  if(kind==="research")return fieldValue("research_out_dir")||"D:/Quanlan/全澜脑科学视频号/科研速递";
-  if(kind==="science")return fieldValue("science_out_dir")||"D:/Quanlan/全澜脑科学视频号/神经科学经典";
-  if(kind==="clip")return fieldValue("auto_clip_output_dir")||fieldValue("auto_clip_image_dir");
-  const active=["culture","digest","science","clip"].find(n=>{const p=byId("panel"+cap(n));return p&&p.classList.contains("active")});
-  if(active==="culture")return outputPathFor("culture");
-  if(active==="digest")return outputPathFor("research");
-  if(active==="science")return outputPathFor("science");
-  if(active==="clip")return outputPathFor("clip");
-  return fieldValue("research_out_dir")||fieldValue("culture_out_dir")||fieldValue("auto_clip_output_dir")||"D:/Quanlan/全澜脑科学视频号/科研速递";
-}
-async function openOutputFolder(kind){
-  const job=latestJobForKind(kind==="research"?"research":kind==="science"?"science":kind==="culture"?"culture":kind==="clip"?"clip":"");
-  const payload={job_id:job?job.id:"",path:outputPathFor(kind)};
-  const r=await fetch("/api/open_output_folder",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
-  const data=await r.json();
-  setStatus(data.ok?"作品文件夹已打开":(data.message||"没有可打开的作品文件夹"));
-}
-async function clearOutputFolder(kind){
-  const target=outputPathFor(kind);
-  if(!target){setStatus("没有可清空的作品文件夹");return}
-  if(!confirm("确认清空这个作品文件夹里的内容？\\n"+target))return;
-  const r=await fetch("/api/clear_output_folder",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:target})});
-  const data=await r.json();
-  setStatus(data.ok?"作品文件夹已清空":(data.message||"清空失败"));
-}
-function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;")}
-function renderArticleList(data){
-  byId("article_total").textContent=data.total??0;byId("article_done").textContent=data.done??0;byId("article_todo").textContent=data.todo??0;
-  byId("article_list_status").textContent=data.ok?("清单："+(data.article_list_path||"")+" ｜ 进度："+(data.progress_path||"未生成")):(data.error||"读取失败");
-  const rows=data.items||[];
-  const html=['<div class="list-row header"><div>状态</div><div>PMID</div><div>文献</div><div>用于期数</div></div>'].concat(rows.map(x=>'<div class="list-row"><div><span class="tag '+(x.status==="done"?"done":"todo")+'">'+(x.status==="done"?"已做":"未做")+'</span></div><div>'+esc(x.pmid||"-")+'</div><div><div class="paper-title">'+esc(x.title||"未命名文献")+'</div><div class="paper-meta">'+esc([x.journal,x.pub_date].filter(Boolean).join(" ｜ "))+'</div></div><div>'+esc(x.issue||x.used_date||"-")+'</div></div>')).join("");
-  byId("article_list_rows").innerHTML=html;
-}
-function renderCultureWorkspace(){
-  byId("workspace_title").textContent="文史解读工作台";
-  byId("workspace_hint").textContent="当前文史素材的书籍、输出、阶段和质检状态集中在这里。";
-  byId("workspace_refresh").textContent="刷新文史";
-  byId("workspace_refresh").onclick=renderCultureWorkspace;
-  const book=fieldValue("culture_book");
-  const out=fieldValue("culture_out_dir");
-  const cont=fieldValue("culture_continue_folder");
-  const stage=fieldValue("culture_stage")||"outline";
-  const bLimit=Number(fieldValue("culture_test_b")||0)||1;
-  byId("article_total").textContent=stage;
-  byId("article_done").textContent=bLimit;
-  byId("article_todo").textContent=out?"已设置":"待设置";
-  byId("stat_done_label").textContent="B图额度";
-  byId("stat_todo_label").textContent="输出目录";
-  byId("article_list_status").textContent="书籍："+(book||"未设置")+" ｜ 输出："+(out||"未设置")+" ｜ 继续："+(cont||"新任务");
-  const rows=[
-    ["书籍来源",book||"未设置","文史 PDF / 章节素材入口",""],
-    ["输出目录",out||"未设置","样例、脚本、配图和拆分素材会落到这里",""],
-    ["继续目录",cont||"新任务","断点续做时读取已有分集目录",""],
-    ["启动阶段",stage,"outline / script / images / postprocess / split_assets",""],
-    ["测试 B 图",String(bLimit),"快速验证提示词、生图、后处理和成品链路",""],
-  ];
-  byId("article_list_rows").innerHTML='<div class="list-row header"><div>项目</div><div>当前值</div><div>用途</div><div>状态</div></div>'+rows.map(x=>'<div class="list-row"><div><span class="tag '+(x[1]==="未设置"?"todo":"done")+'">'+esc(x[0])+'</span></div><div>'+esc(x[1])+'</div><div>'+esc(x[2])+'</div><div>'+esc(x[3])+'</div></div>').join("");
-}
-function renderModeWorkspace(name){
-  if(name==="clip"){
-    byId("workspace_title").textContent="剪辑与音乐素材";
-    byId("workspace_hint").textContent="当前图片、字幕、音频和 BGM 输出位置。";
-    byId("workspace_refresh").textContent="刷新音乐库";
-    byId("workspace_refresh").onclick=refreshBgmLibrary;
-    byId("article_total").textContent=fieldValue("minimax_tts_model")||"-";
-    byId("article_done").textContent=fieldValue("minimax_bgm_model")||"-";
-    byId("article_todo").textContent=fieldValue("auto_clip_output_dir")?"已设置":"待设置";
-    byId("stat_done_label").textContent="BGM";
-    byId("stat_todo_label").textContent="输出";
-    byId("article_list_status").textContent="图片："+(fieldValue("auto_clip_image_dir")||"未设置")+" ｜ LRC："+(fieldValue("auto_clip_lrc_dir")||"未设置");
-    byId("article_list_rows").innerHTML="";
-  }
-}
-async function loadArticleList(){
-  byId("workspace_title").textContent="文献清单";byId("workspace_hint").textContent="查看当前有哪些文献、哪些已做、用在了哪几期。";byId("workspace_refresh").textContent="刷新清单";byId("workspace_refresh").onclick=loadArticleList;byId("stat_done_label").textContent="已做";byId("stat_todo_label").textContent="未做";
-  setStatus("正在读取文献清单...");
-  const url="/api/research_article_list?path="+encodeURIComponent(fieldValue("research_article_list"));
-  const r=await fetch(url);const data=await r.json();renderArticleList(data);setStatus(data.ok?"文献清单已更新":"文献清单读取失败");
-}
-function renderScienceToc(data){
-  if(data.pdf_path)setField("science_pdf_path",data.pdf_path);
-  if(data.out_dir)setField("science_out_dir",data.out_dir);
-  scienceToc=(data.toc||[]).map((x,i)=>({...x,index:Number(x.index??i),selected:!!x.selected,scriptable:x.scriptable!==false}));
-  byId("workspace_title").textContent="科学经典目录";
-  byId("workspace_hint").textContent="选择要创作的章节；开始创作和测试 B 图都会使用这里的勾选。";
-  byId("workspace_refresh").textContent="刷新目录";
-  byId("workspace_refresh").onclick=()=>loadScienceToc(true);
-  byId("article_total").textContent=data.total??scienceToc.length;
-  byId("article_done").textContent=data.selected??scienceToc.filter(x=>x.selected).length;
-  byId("article_todo").textContent=data.scriptable??scienceToc.filter(x=>x.scriptable).length;
-  byId("stat_done_label").textContent="已选";
-  byId("stat_todo_label").textContent="可处理";
-  byId("article_list_status").textContent=data.ok?("PDF："+(data.pdf_path||"未设置")+" ｜ 输出："+(data.out_dir||"未设置")):(data.error||"目录读取失败");
-  const rows=scienceToc.map(x=>{
-    const pad=Math.max(0,Number(x.level||1)-1)*16;
-    const disabled=x.scriptable?"":" disabled";
-    const cls=x.selected?"done":"todo";
-    const label=x.selected?"已选":(x.scriptable?"可选":"跳过");
-    return '<div class="list-row"><div class="checkbox-cell"><input type="checkbox" data-science-index="'+x.index+'" '+(x.selected?'checked ':'')+disabled+' onchange="toggleScienceChapter(this)"><span class="tag '+cls+'">'+label+'</span></div><div>'+esc(x.page||"-")+'</div><div><div class="paper-title" style="padding-left:'+pad+'px">'+esc(x.title||"未命名章节")+'</div><div class="paper-meta">'+esc("层级 "+(x.level||1))+'</div></div><div>'+esc(x.parsed?"已解析":"")+'</div></div>';
-  }).join("");
-  byId("article_list_rows").innerHTML='<div class="list-row header"><div>选择</div><div>页码</div><div>章节</div><div>状态</div></div>'+rows;
-}
-async function saveScienceState(){
-  const payload={pdf_path:fieldValue("science_pdf_path"),out_dir:fieldValue("science_out_dir"),toc:scienceToc};
-  const r=await fetch("/api/science_state",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
-  const data=await r.json();
-  renderScienceToc(data);
-  return data;
-}
-async function loadScienceToc(extract){
-  const path=fieldValue("science_pdf_path"),out=fieldValue("science_out_dir");
-  if(path||out)await fetch("/api/science_state",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pdf_path:path,out_dir:out,toc:scienceToc})});
-  const r=await fetch("/api/science_state?extract="+(extract?"1":"0"));
-  const data=await r.json();
-  renderScienceToc(data);
-  setStatus(data.ok?(extract?"目录已刷新":"科学经典设置已读取"):(data.error||"科学经典设置读取失败"));
-}
-async function toggleScienceChapter(el){
-  const idx=Number(el.getAttribute("data-science-index"));
-  for(const item of scienceToc){if(Number(item.index)===idx)item.selected=!!el.checked}
-  await saveScienceState();
-}
-async function selectScienceAll(flag){
-  scienceToc=scienceToc.map(x=>({...x,selected:!!flag&&x.scriptable}));
-  await saveScienceState();
-}
-async function startScience(test){
-  const data=await saveScienceState();
-  if(!data.pdf_path){setStatus("请先设置科学经典 PDF");return}
-  if(!data.selected){setStatus("请先在右侧选择至少一个章节");return}
-  start({...collect(),mode:"tool",action:test?"science_test_b":"science",science_pdf_path:data.pdf_path,science_out_dir:data.out_dir},test?"science:test_b":"science:run");
-}
-async function viewJob(id){if(!id||!jobsById[id]){setStatus("没有可查看的任务");return}selectedJobId=id;saveJobs();renderJobs();await poll(id)}
-async function stopJob(id){const target=id||selectedJobId;if(!target||!jobsById[target]){setStatus("当前没有选中的运行任务");return}await fetch("/api/stop?id="+encodeURIComponent(target),{method:"POST"});jobsById[target].status="stopping";jobsById[target].updated_at=Date.now();saveJobs();renderJobs();setStatus("停止请求已发送："+(jobsById[target].label||target));poll(target)}
-async function poll(id){const target=id||selectedJobId;if(!target||!jobsById[target])return;const r=await fetch("/api/job?id="+encodeURIComponent(target));const data=await r.json();const job=jobsById[target];job.status=data.status||"missing";job.exit_code=data.exit_code??null;job.updated_at=Date.now();saveJobs();renderJobs();const msg=(job.label||target)+" ｜ "+jobStatusText(data);if(target===selectedJobId){byId("status").textContent=msg;if(byId("job_status"))byId("job_status").textContent=msg;byId("log").textContent=(data.lines||[]).join("")||"暂无日志"}if(isLiveStatus(data.status))schedulePoll(target);else if(job.base_key==="bgm")refreshBgmLibrary()}
-loadSettings().then(()=>{const hash=location.hash.replace("#","");showPanel(["culture","digest","science","clip","more"].includes(hash)?hash:"culture");renderJobs();if(selectedJobId&&jobsById[selectedJobId])poll(selectedJobId);refreshAllJobs()});
-</script>
-</body>
-</html>""".encode("utf-8")
-
-
-def _assistant_html_v2() -> bytes:
-    return """<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>大模型连接库</title>
-  <style>
-    :root{font-family:Arial,"Microsoft YaHei",sans-serif;color:#1f2937;background:#f5f7fb;--brand:#1769aa;--line:#d7dce2;--muted:#607080;--soft:#f7f9fc;--ok:#16833a;--bad:#b3261e}
-    *{box-sizing:border-box}body{margin:0}.shell{display:grid;grid-template-columns:420px 1fr;min-height:100vh}
-    aside{background:#fff;border-right:1px solid var(--line);padding:16px;overflow:auto}main{padding:16px;min-width:0}
-    h1{font-size:20px;margin:0 0 6px}h2{font-size:16px;margin:14px 0 8px}h3{font-size:14px;margin:0}
-    .boss-home{position:fixed;right:18px;bottom:18px;z-index:50;display:inline-flex;align-items:center;min-height:42px;padding:0 16px;border-radius:999px;background:#111827;color:#fff;font-weight:700;text-decoration:none;box-shadow:0 10px 28px rgba(15,23,42,.24)}
-    .hint,.desc{font-size:12px;color:var(--muted);line-height:1.5}.desc{margin:4px 0 10px}
-    .tabs{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin:14px 0}.tabs button{background:#e8eef5;color:#263238}.tabs button.active{background:var(--brand);color:#fff}
-    .panel{display:none}.panel.active{display:block}.section{border-top:1px solid var(--line);padding-top:12px;margin-top:12px}.section.soft{background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:12px}
-    .section-title{display:flex;justify-content:space-between;gap:10px;align-items:flex-end;margin-bottom:8px}.section-title span{font-size:12px;color:var(--muted)}
-    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
-    label{display:block;font-size:12px;margin:8px 0 4px;color:#4f5b67}input,select{width:100%;padding:8px;border:1px solid #c8d0d8;border-radius:6px;background:#fff}
-    button{padding:8px 10px;border:0;border-radius:6px;background:var(--brand);color:#fff;cursor:pointer}button.secondary{background:#5f6368}button.danger{background:var(--bad)}button.ghost{background:#eef2f6;color:#263238}
-    .row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}.scheme-card{border:1px solid var(--line);border-radius:8px;background:#fff;padding:12px}.scheme-card b{display:block;margin-bottom:6px}
-    .route-summary,.connection-library,.step-flow,.model-library{display:grid;gap:8px}.route-item,.connection-card,.step-card,.model-group{border:1px solid var(--line);border-radius:8px;background:#fff;padding:10px;font-size:12px}.route-item b,.connection-card b,.step-card b,.model-group b{display:block;margin-bottom:4px}.route-item span,.connection-card span,.step-card span,.model-group span{display:block;color:var(--muted);word-break:break-all}
-    .connection-card.active{border-color:var(--brand);box-shadow:0 0 0 2px rgba(23,105,170,.12)}.connection-head{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}.badge{display:inline-flex;align-items:center;min-height:20px;padding:0 7px;border-radius:999px;background:#eef2f6;color:#334155;font-weight:700;font-size:11px}.badge.ok{background:#ecfdf3;color:#027a48}.badge.bad{background:#fff1f2;color:#b3261e}
-    .model-chip,.candidate-chip{display:block;border:1px solid #cfd7df;border-radius:8px;background:#f8fafc;padding:8px;margin-top:6px;cursor:grab}.model-chip:active,.candidate-chip:active{cursor:grabbing}.candidate-list{min-height:44px;border:1px dashed #b8c3ce;border-radius:8px;background:#fbfdff;padding:6px;margin-top:8px}.candidate-list.drag-over{border-color:var(--brand);background:#eef7ff}.candidate-chip{background:#fff}.candidate-chip .row{margin-top:6px}.empty-drop{color:var(--muted);font-size:12px;padding:7px}
-    dialog{border:0;border-radius:8px;padding:0;width:min(560px,calc(100vw - 28px));box-shadow:0 24px 80px rgba(15,23,42,.28)}dialog::backdrop{background:rgba(15,23,42,.36)}.dialog-body{padding:16px}.dialog-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;border-bottom:1px solid var(--line);padding:14px 16px}.dialog-head h3{margin:0}.xbtn{background:#eef2f6;color:#263238;border-radius:999px;min-width:34px}
-    .status{font-size:13px;color:var(--brand);margin:8px 0;word-break:break-all}.ok{color:var(--ok);font-weight:700}.missing{color:var(--bad);font-weight:700}
-    pre{white-space:pre-wrap;background:#111827;color:#e5e7eb;border-radius:8px;padding:14px;min-height:72vh;overflow:auto}.cmd{font-size:12px;color:var(--muted);word-break:break-all}
-    @media(max-width:900px){.shell{grid-template-columns:1fr}.grid2,.grid3{grid-template-columns:1fr}aside{border-right:0;border-bottom:1px solid var(--line)}}
-  </style>
-</head>
-<body>
-<a class="boss-home" href="/">返回控制台首页</a>
-<div class="shell">
-  <aside>
-    <h1>大模型连接库</h1>
-    <p class="hint">不再人工选择整套大模型方案；这里按模型类别维护连接库，任务启动时会自动从每类可用连接中组合执行。网页与日志不回显明文 Key。</p>
-
-    <section id="panelModel" class="panel active">
-      <div class="section soft">
-        <div class="section-title"><h3>连接库操作</h3><span id="model_library_status">读取中</span></div>
-        <div class="row"><button onclick="openConnectionDialog()">添加连接</button><button class="secondary" onclick="applyModelConfigToAllProjects()">一键应用到所有项目并检测</button><button class="secondary" onclick="testAllModels()">一键测试及修复</button><button class="ghost" onclick="loadSettings()">刷新连接库</button></div>
-      </div>
-      <div class="section">
-        <div class="section-title"><h3>自动组合摘要</h3><span id="route_profile_name">未选择</span></div>
-        <div class="route-summary" id="model_route_summary"></div>
-        <div class="row"><button class="ghost" onclick="testModel('openai')">测 GPT</button><button class="ghost" onclick="testModel('gpt_pro')">测 GPT-Pro</button><button class="ghost" onclick="testModel('deepseek')">测 DeepSeek 润色</button><button class="ghost" onclick="testModel('image')">测 gpt-image-2</button><button class="ghost" onclick="testModel('minimax')">测 MiniMax</button></div>
-      </div>
-      <div class="section">
-        <div class="section-title"><h3>步骤流程</h3><span>把右侧模型拖到步骤里作为候选</span></div>
-        <div class="step-flow" id="model_step_flow"></div>
-      </div>
-    </section>
-
-
-  </aside>
-  <main>
-    <div class="status" id="status">等待操作</div>
-    <div class="section-title"><h3>模型库</h3><span>按供应商和模型名称分类，可拖动到左侧步骤</span></div>
-    <div class="model-library" id="model_connection_library"></div>
-    <pre id="log">暂无日志</pre>
-  </main>
-</div>
-<dialog id="connection_dialog">
-  <div class="dialog-head"><div><h3>添加大模型连接</h3><p class="desc">填写连接参数和模型名，保存后会加入相应模型类别作为备选方案。</p></div><button class="xbtn" onclick="closeConnectionDialog()">×</button></div>
-  <div class="dialog-body">
-    <div class="grid2">
-      <div><label>模型类别</label><select id="conn_role"><option value="text">GPT / 文本</option><option value="gpt_pro">GPT-Pro / 备用文本</option><option value="polish">DeepSeek / 润色</option><option value="image">gpt-image-2 / 生图</option><option value="minimax">MiniMax / 配音 BGM</option></select></div>
-      <div><label>连接名称</label><input id="conn_name" placeholder="例如 DST 文本 / FHL 生图"></div>
-      <div><label>Base URL</label><input id="conn_base_url" placeholder="https://example.com/v1"></div>
-      <div><label>模型名</label><input id="conn_model" placeholder="gpt-5.5 / deepseek-chat / gpt-image-2"></div>
-    </div>
-    <label>Key（可选，保存后清空且不回显）</label><input id="conn_api_key" type="password" autocomplete="off" placeholder="粘贴这个连接对应的 Key">
-    <div class="row"><button onclick="saveModelConnection()">保存到连接库</button><button class="secondary" onclick="closeConnectionDialog()">取消</button></div>
-  </div>
-</dialog>
-<script>
-let currentJob="";
-const defaultForeignBaseUrl="https://api.dstopology.com/v1";
-const defaultDeepseekBaseUrl="https://api.deepseek.com";
-const defaultMiniMaxBaseUrl="https://api.53hk.cn";
-let modelProfiles={active_profile:"",profiles:[]};
-let modelConnectionLibrary={roles:{},active_connections:{},connections:[],grouped:{}};
-let editingConnectionId="";
-function byId(id){return document.getElementById(id)}
-function cap(s){return s[0].toUpperCase()+s.slice(1)}
-function escapeHtml(s){return String(s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
-function escapeAttr(s){return escapeHtml(s)}
-function setStatus(message){const el=byId("status");if(el)el.textContent=message}
-function appendLogLine(message){const el=byId("log");if(!el)return;const now=new Date().toLocaleTimeString();const current=el.textContent==="暂无日志"?"":el.textContent;el.textContent=(current+"["+now+"] "+message+"\\n").split("\\n").slice(-1000).join("\\n");el.scrollTop=el.scrollHeight}
-function clearLog(){const el=byId("log");if(el)el.textContent=""}
-function showPanel(name){for(const n of ["culture","research","clip","model","more"]){const p=byId("panel"+cap(n)),t=byId("tab"+cap(n));if(p)p.classList.toggle("active",n===name);if(t)t.classList.toggle("active",n===name)}}
-function fieldValue(id){const el=byId(id);return el?String(el.value||""):""}
-function setField(id,value){const el=byId(id);if(el)el.value=value||""}
-function selectedProfileId(){return ""}
-function clearSecretInputs(){for(const id of ["openai_api_key","image_api_key","gpt_pro_api_key","deepseek_api_key","minimax_api_key","smtp_password"]){setField(id,"")}}
-function syncModelMirrorFields(){
-  const gpt=fieldValue("gpt_base_url")||defaultForeignBaseUrl;
-  const deepseek=fieldValue("deepseek_base_url")||defaultDeepseekBaseUrl;
-  const img=fieldValue("gpt_image_base_url")||gpt;
-  if(!fieldValue("text_engine"))setField("text_engine",fieldValue("culture_text_model")||"gpt-5.5");
-  if(!fieldValue("polish_engine"))setField("polish_engine",fieldValue("culture_polish_model")||"gpt-5.5");
-  if(!fieldValue("image_engine"))setField("image_engine",fieldValue("culture_image_model")||"gpt-image-2");
-  return {
-    foreign_base_url:gpt,deepseek_base_url:deepseek,gpt_base_url:gpt,gpt_pro_base_url:fieldValue("gpt_pro_base_url"),gpt_image_base_url:img,
-    culture_text_base_url:gpt,culture_polish_base_url:deepseek,culture_image_base_url:img,
-    research_text_base_url:gpt,research_polish_base_url:deepseek,research_image_base_url:img,
-    text_engine:fieldValue("text_engine")||fieldValue("culture_text_model")||"gpt-5.5",
-    polish_engine:fieldValue("polish_engine")||fieldValue("culture_polish_model")||"gpt-5.5",
-    image_engine:fieldValue("image_engine")||fieldValue("culture_image_model")||"gpt-image-2"
-  };
-}
-function collect(){const ids=["culture_book","culture_out_dir","culture_continue_folder","culture_text_provider","culture_text_model","culture_polish_provider","culture_polish_model","culture_image_provider","culture_image_model","research_out_dir","research_days","research_max_articles","research_journals","research_article_list","text_engine","polish_engine","image_engine","gpt_base_url","gpt_pro_base_url","gpt_image_base_url","deepseek_base_url","minimax_base_url","minimax_tts_model","minimax_bgm_model","minimax_voice_id","minimax_bgm_prompt","openai_api_key","gpt_pro_api_key","image_api_key","deepseek_api_key","minimax_api_key","smtp_password","auto_clip_image_dir","auto_clip_lrc_dir","auto_clip_output_dir","auto_clip_bgm","email_recipient","smtp_host","smtp_port","smtp_user","smtp_sender"];const p={};for(const id of ids){if(byId(id))p[id]=fieldValue(id)}return {...p,...syncModelMirrorFields()}}
-function profileLabel(p){return (p&&p.name)||((p&&p.id)||"")}
-function keyText(profile,key){return profile&&profile.keys&&profile.keys[key]?"已存":"未存"}
-function activeConnection(role){const id=(modelConnectionLibrary.active_connections||{})[role]||"";return (modelConnectionLibrary.connections||[]).find(x=>x.id===id)||((modelConnectionLibrary.grouped||{})[role]||[])[0]||{}}
-function connectionById(id){return (modelConnectionLibrary.connections||[]).find(x=>x.id===id)||{}}
-function latencyText(item){return item&&item.latency_ms?item.latency_ms+" ms":(item&&item.last_tested_at?"未统计":"未测试")}
-function bestCandidate(ids){return (ids||[]).map(connectionById).filter(x=>x&&x.id).sort((a,b)=>{const at=a.last_test_ok?0:1,bt=b.last_test_ok?0:1;if(at!==bt)return at-bt;const al=a.latency_ms||999999,bl=b.latency_ms||999999;if(al!==bl)return al-bl;return (a.priority||100)-(b.priority||100)})[0]||{}}
-function renderConnectionLibrary(data){
-  modelConnectionLibrary=data||{roles:{},active_connections:{},connections:[],grouped:{}};
-  const box=byId("model_connection_library");if(!box)return;
-  const groups=(modelConnectionLibrary.by_provider_model||[]).sort((a,b)=>(a.provider+a.model).localeCompare(b.provider+b.model));
-  box.innerHTML=groups.map(group=>{
-    const items=(group.connections||[]);
-    const cards=items.map(item=>{
-      const status=item.last_tested_at?(item.last_test_ok?"已测通":"测试失败"):"未测试";
-      const badge='<span class="badge '+(item.last_tested_at?(item.last_test_ok?"ok":"bad"):'')+'">'+status+'</span>';
-      const keyBadge='<span class="badge '+(item.key_configured?"ok":"bad")+'">Key '+(item.key_configured?"已存":"未存")+'</span>';
-      return '<div class="model-chip" draggable="true" data-connection-id="'+escapeAttr(item.id)+'"><div class="connection-head"><b>'+escapeHtml(item.name||item.id)+'</b><div>'+badge+' '+keyBadge+'</div></div><span>步骤类别：'+escapeHtml((modelConnectionLibrary.roles[item.role]||{}).label||item.role)+'</span><span>URL：'+escapeHtml(item.base_url||"未设置")+'</span><span>延迟：'+escapeHtml(latencyText(item))+'</span><span>最近结果：'+escapeHtml(item.last_test_message||"")+'</span><div class="row"><button class="ghost" onclick="openConnectionDialog(\\''+escapeAttr(item.role)+'\\',\\''+escapeAttr(item.id)+'\\')">编辑</button><button class="ghost" onclick="testConnection(\\''+escapeAttr(item.id)+'\\')">测试</button><button class="danger" onclick="deleteConnection(\\''+escapeAttr(item.id)+'\\')">删除</button></div></div>';
-    }).join("");
-    return '<div class="model-group"><div class="section-title"><h3>'+escapeHtml(group.provider||"供应商")+'</h3><span>'+escapeHtml(group.model||"模型")+' ｜ '+items.length+' 个连接</span></div>'+cards+'</div>';
-  }).join("");
-  const count=(modelConnectionLibrary.connections||[]).length;
-  if(byId("model_library_status"))byId("model_library_status").textContent="已读取 "+count+" 个连接";
-  renderStepFlow();
-  bindDragSources();
-  renderRouteSummary({});
-}
-function renderStepFlow(){
-  const box=byId("model_step_flow");if(!box)return;
-  const steps=modelConnectionLibrary.steps||{}, routes=modelConnectionLibrary.step_routes||{};
-  const order=["script_text","research_text","polish_text","image_generation","gpt_pro_backup","voice_bgm"];
-  box.innerHTML=order.map(step=>{
-    const meta=steps[step]||{}, ids=(routes[step]||[]);
-    const best=bestCandidate(ids);
-    const chips=ids.length?ids.map(id=>{
-      const item=connectionById(id); if(!item.id)return "";
-      return '<div class="candidate-chip" draggable="true" data-connection-id="'+escapeAttr(item.id)+'"><b>'+escapeHtml(item.provider)+' ｜ '+escapeHtml(item.model)+'</b><span>'+escapeHtml(item.name||item.id)+'</span><span>'+escapeHtml(item.base_url||"")+'</span><span>延迟：'+escapeHtml(latencyText(item))+'</span><div class="row"><button class="ghost" onclick="testConnection(\\''+escapeAttr(item.id)+'\\')">测试</button><button class="danger" onclick="removeStepCandidate(\\''+escapeAttr(step)+'\\',\\''+escapeAttr(item.id)+'\\')">移除</button></div></div>';
-    }).join(""):'<div class="empty-drop">拖入模型连接作为候选</div>';
-    const roleLabel=(meta.roles||[meta.role||"text"]).map(r=>(modelConnectionLibrary.roles[r]||{}).label||r).join(" / ");
-    return '<div class="step-card"><div class="connection-head"><b>'+escapeHtml(meta.label||step)+'</b><span class="badge">'+escapeHtml(roleLabel)+'</span></div><span>当前会选：'+escapeHtml(best.id?((best.provider||"")+" ｜ "+(best.model||"")+" ｜ "+latencyText(best)):"暂无候选")+'</span><div class="candidate-list" data-step="'+escapeAttr(step)+'" data-role="'+escapeAttr(meta.role||"text")+'">'+chips+'</div></div>';
-  }).join("");
-  bindDropTargets();
-}
-function renderRouteSummary(profile){
-  const box=byId("model_route_summary");if(!box)return;
-  byId("route_profile_name").textContent="连接库自动组合";
-  const models=(profile&&profile.models)||{};
-  const textConn=activeConnection("text"), proConn=activeConnection("gpt_pro"), polishConn=activeConnection("polish"), imageConn=activeConnection("image"), minimaxConn=activeConnection("minimax");
-  const rows=[
-    ["GPT",textConn.base_url||models.gpt_base_url||fieldValue("gpt_base_url"),textConn.model||models.culture_text_model||fieldValue("culture_text_model"),textConn.key_configured?"已存":"未存"],
-    ["GPT-Pro",proConn.base_url||models.gpt_pro_base_url||fieldValue("gpt_pro_base_url"),proConn.model||models.culture_text_model||fieldValue("culture_text_model")||"gpt-5.5",proConn.key_configured?"已存":"未存"],
-    ["润色文本",polishConn.base_url||models.culture_polish_base_url||models.deepseek_base_url||fieldValue("gpt_base_url"),polishConn.model||models.culture_polish_model||fieldValue("culture_polish_model")||"gpt-5.5",polishConn.key_configured?"已存":"未存"],
-    ["gpt-image-2",imageConn.base_url||models.gpt_image_base_url||fieldValue("gpt_image_base_url"),imageConn.model||models.culture_image_model||fieldValue("culture_image_model"),imageConn.key_configured?"已存":"未存"],
-    ["MiniMax",minimaxConn.base_url||fieldValue("minimax_base_url")||defaultMiniMaxBaseUrl,minimaxConn.model||fieldValue("minimax_tts_model")||"speech-2.8-hd",minimaxConn.key_configured?"已存":"未存"]
-  ];
-  box.innerHTML=rows.map(([name,url,model,key])=>'<div class="route-item"><b>'+name+'</b><span>URL：'+(url||"未设置")+'</span><span>模型：'+(model||"未设置")+'</span><span>Key：'+key+'</span></div>').join("");
-}
-function renderModelProfiles(data){modelProfiles=data||{active_profile:"",profiles:[]}}
-async function loadSettings(){
-  const r=await fetch("/api/settings");const data=await r.json();const merged={...(data.settings||{}),...(data.models||{})};
-  for(const [k,v] of Object.entries(merged)){setField(k,v)}
-  setField("gpt_base_url",merged.gpt_base_url||merged.culture_text_base_url||merged.foreign_base_url||defaultForeignBaseUrl);
-  setField("gpt_pro_base_url",merged.gpt_pro_base_url||"");
-  setField("deepseek_base_url",merged.deepseek_base_url||merged.culture_polish_base_url||defaultDeepseekBaseUrl);
-  setField("gpt_image_base_url",merged.gpt_image_base_url||merged.culture_image_base_url||merged.foreign_base_url||defaultForeignBaseUrl);
-  setField("minimax_base_url",merged.minimax_base_url||defaultMiniMaxBaseUrl);
-  renderConnectionLibrary(data.model_connection_library||{});
-  renderModelProfiles(data.model_profiles||{});
-}
-async function saveSettings(){const r=await fetch("/api/settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(collect())});const data=await r.json();clearSecretInputs();if(data.model_connection_library)renderConnectionLibrary(data.model_connection_library);if(data.model_profiles)renderModelProfiles(data.model_profiles);setStatus(data.ok?"设置已保存；会同步到子项目":"保存失败");return data}
-function modelTestLines(result){
-  const ok=result&&result.ok;
-  return [
-    "【"+((result&&result.label)||"接口")+"】"+(ok?"通过":"失败"),
-    "  provider: "+((result&&result.provider)||""),
-    "  model: "+((result&&result.model)||"未设置"),
-    "  url: "+((result&&result.endpoint)||"未设置"),
-    "  mode: "+((result&&result.test_mode)||""),
-    "  elapsed: "+((result&&result.elapsed_seconds)!=null?result.elapsed_seconds+"s":"未统计"),
-    "  message: "+((result&&result.message)||""),
-    result&&result.suggestion?("  suggestion: "+result.suggestion):""
-  ].filter(Boolean);
-}
-function logModelTestResult(result){for(const line of modelTestLines(result)){appendLogLine(line)}}
-async function testModel(provider){
-  setStatus("正在测试接口："+provider);
-  const payload={...collect(),provider,profile_id:selectedProfileId()};
-  const r=await fetch("/api/test_model",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
-  const data=await r.json();
-  clearSecretInputs();
-  if(data.model_profiles)renderModelProfiles(data.model_profiles);
-  logModelTestResult(data.result||{provider,message:"无结果",ok:false});
-  setStatus((data.result&&data.result.ok)?"接口测试通过":"接口测试失败，详情见右侧日志");
-  return data.result||{};
-}
-function openConnectionDialog(role,id){const dlg=byId("connection_dialog");const item=(modelConnectionLibrary.connections||[]).find(x=>x.id===id)||{};editingConnectionId=item.id||"";setField("conn_role",item.role||role||"text");setField("conn_name",item.name||"");setField("conn_base_url",item.base_url||"");setField("conn_model",item.model||"");setField("conn_api_key","");if(dlg&&dlg.showModal)dlg.showModal();else if(dlg)dlg.setAttribute("open","open")}
-function closeConnectionDialog(){const dlg=byId("connection_dialog");if(dlg&&dlg.close)dlg.close();else if(dlg)dlg.removeAttribute("open")}
-async function saveModelConnection(){
-  const payload={action:"save",connection_id:editingConnectionId,role:fieldValue("conn_role"),name:fieldValue("conn_name"),base_url:fieldValue("conn_base_url"),model:fieldValue("conn_model"),api_key:fieldValue("conn_api_key")};
-  if(!payload.base_url||!payload.model){setStatus("请填写 Base URL 和模型名");return}
-  const r=await fetch("/api/model_connection",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
-  const data=await r.json();setField("conn_api_key","");
-  if(data.ok){closeConnectionDialog();renderConnectionLibrary(data.model_connection_library||{});if(data.models){for(const [k,v] of Object.entries(data.models)){setField(k,v)}}setStatus("连接已加入连接库，并设为该类别优先备选")}else setStatus("保存连接失败："+(data.error||"unknown"));
-}
-async function activateConnection(role,id){
-  const r=await fetch("/api/model_connection",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"activate",role,connection_id:id})});
-  const data=await r.json();
-  if(data.ok){renderConnectionLibrary(data.model_connection_library||{});if(data.models){for(const [k,v] of Object.entries(data.models)){setField(k,v)}}setStatus("已设为该模型类别的优先连接")}else setStatus("切换连接失败："+(data.error||"unknown"));
-}
-function bindDragSources(){
-  document.querySelectorAll(".model-chip,.candidate-chip").forEach(el=>{
-    el.addEventListener("dragstart",ev=>{ev.dataTransfer.setData("text/plain",el.getAttribute("data-connection-id")||"")});
-  });
-}
-function bindDropTargets(){
-  document.querySelectorAll(".candidate-list").forEach(el=>{
-    el.addEventListener("dragover",ev=>{ev.preventDefault();el.classList.add("drag-over")});
-    el.addEventListener("dragleave",()=>el.classList.remove("drag-over"));
-    el.addEventListener("drop",ev=>{
-      ev.preventDefault();el.classList.remove("drag-over");
-      const id=ev.dataTransfer.getData("text/plain");
-      const step=el.getAttribute("data-step")||"";
-      addStepCandidate(step,id);
-    });
-  });
-}
-async function saveStepRoute(step,ids){
-  const r=await fetch("/api/model_connection",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"route",step,connection_ids:ids})});
-  const data=await r.json();
-  if(data.ok){renderConnectionLibrary(data.model_connection_library||{});setStatus("步骤候选已保存")}else setStatus("步骤候选保存失败："+(data.error||"unknown"));
-}
-function addStepCandidate(step,id){
-  const item=connectionById(id), meta=(modelConnectionLibrary.steps||{})[step]||{};
-  if(!item.id)return;
-  const allowed=meta.roles||[meta.role];
-  if(!allowed.includes(item.role)){setStatus("这个模型类别不能放入该步骤");return}
-  const routes=modelConnectionLibrary.step_routes||{};
-  const ids=(routes[step]||[]).filter(x=>x!==id);
-  ids.push(id);
-  saveStepRoute(step,ids);
-}
-function removeStepCandidate(step,id){
-  const routes=modelConnectionLibrary.step_routes||{};
-  const ids=(routes[step]||[]).filter(x=>x!==id);
-  saveStepRoute(step,ids);
-}
-async function testConnection(id){
-  const item=(modelConnectionLibrary.connections||[]).find(x=>x.id===id)||{};
-  setStatus("正在测试连接："+(item.name||id));
-  const r=await fetch("/api/test_model",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({connection_id:id,provider:item.provider||""})});
-  const data=await r.json();
-  if(data.model_connection_library)renderConnectionLibrary(data.model_connection_library);
-  logModelTestResult(data.result||{provider:item.provider,message:"无结果",ok:false});
-  setStatus((data.result&&data.result.ok)?"连接测试通过":"连接测试失败，详情见右侧日志");
-}
-async function deleteConnection(id){
-  const item=(modelConnectionLibrary.connections||[]).find(x=>x.id===id)||{};
-  if(!confirm("删除连接："+(item.name||id)+"？"))return;
-  const r=await fetch("/api/model_connection",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"delete",connection_id:id})});
-  const data=await r.json();
-  if(data.ok){renderConnectionLibrary(data.model_connection_library||{});setStatus("连接已删除")}else setStatus("删除连接失败："+(data.error||"unknown"));
-}
-async function testAllModels(){
-  clearLog();
-  setStatus("正在按步骤测试候选模型，失败时会自动核对飞书文档...");
-  appendLogLine("==== 开始按步骤测试及修复候选模型 ====");
-  const r=await fetch("/api/test_step_routes_repair",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({})});
-  const data=await r.json();
-  clearSecretInputs();
-  if(data.model_connection_library)renderConnectionLibrary(data.model_connection_library);
-  if(data.model_profiles)renderModelProfiles(data.model_profiles);
-  const repair=data.repair||{};
-  if(repair.attempted){
-    appendLogLine("发现失败步骤，正在调用全澜小猪理核对飞书模型文档");
-    if(repair.error){
-      appendLogLine("自动修复未完成 ｜ "+String(repair.error).replace(/\\s+/g," ").slice(0,240));
-    }else{
-      appendLogLine("飞书核对完成 ｜ 新增连接 "+(repair.added_count||0)+" ｜ 补入步骤候选 "+(repair.route_count||0));
-      if(repair.retested)appendLogLine("已补入候选并完成复测");
-    }
-  }
-  const summary=data.summary||[];
-  let okSteps=0;
-  for(const item of summary){
-    if(item&&item.ok)okSteps++;
-    const state=item.ok?"通过":"未通过";
-    const model=item.ok?((item.passed_provider||"")+" / "+(item.passed_model||"")+" / "+(item.latency_ms||0)+" ms"):"无可用模型";
-    appendLogLine((item.step_label||item.step||"步骤")+" ｜ "+state+" ｜ 通过 "+(item.passed_count||0)+"/"+(item.candidate_count||0)+" ｜ 尝试 "+(item.tested_count||0)+" ｜ "+model);
-  }
-  appendLogLine("==== 步骤候选测试及修复完成 ｜ 步骤通过 "+okSteps+"/"+summary.length+" ====");
-  setStatus(okSteps===summary.length?"每个步骤至少 1 个模型通过":"自动修复后仍有步骤没有通过模型，详情见右侧日志");
-  return summary;
-}
-async function applyModelConfigToAllProjects(){
-  clearLog();
-  setStatus("正在把当前大模型连接库应用到所有项目，并逐项检测...");
-  appendLogLine("==== 开始应用公共大模型配置到所有项目 ====");
-  const r=await fetch("/api/model_connection",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"apply_all"})});
-  const data=await r.json();
-  clearSecretInputs();
-  if(data.model_connection_library)renderConnectionLibrary(data.model_connection_library);
-  if(data.model_profiles)renderModelProfiles(data.model_profiles);
-  if(data.models){for(const [k,v] of Object.entries(data.models)){setField(k,v)}}
-  for(const line of data.apply_log||[]){appendLogLine(line)}
-  for(const item of data.sync_report||[]){
-    const state=item.ok?"通过":"未通过";
-    const detail=(item.mismatches&&item.mismatches.length)?(" ｜ "+item.mismatches.join("；")):"";
-    appendLogLine((item.name||item.id)+" 配置写入检测："+state+detail);
-  }
-  appendLogLine("==== 公共大模型配置应用完成 ====");
-  setStatus(data.apply_ok?"所有需要项目已更新并通过检测":"有项目未通过配置检测，详情见右侧日志");
-  loadSettings();
-  return data;
-}
-async function start(payload){const saved=await saveSettings();if(saved&&!saved.ok)return;const r=await fetch("/api/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});const data=await r.json();currentJob=data.job_id||"";byId("cmd").textContent="";setStatus(data.message||"任务已开始处理");poll()}
-function startCulture(test){start({...collect(),mode:"culture",stage:fieldValue("culture_stage"),test_b_image_limit:test?1:Number(fieldValue("culture_test_b")||0)})}
-function startResearch(action){start({...collect(),mode:"research",action})}
-function startClip(){start({...collect(),mode:"auto_clip"})}
-function startBgm(){start({...collect(),mode:"bgm"})}
-function startTool(action){start({...collect(),mode:"tool",action})}
-function openXiaozhuli(){window.open("/xiaozhuli/","_blank")}
-async function stopJob(){if(!currentJob){setStatus("当前没有正在运行的任务");return}await fetch("/api/stop?id="+encodeURIComponent(currentJob),{method:"POST"});setStatus("停止请求已发送");poll()}
-async function poll(){if(!currentJob)return;const r=await fetch("/api/job?id="+encodeURIComponent(currentJob));const data=await r.json();byId("status").textContent=jobStatusText(data);byId("log").textContent=(data.lines||[]).join("")||"暂无日志";if(["running","starting","stopping"].includes(data.status))setTimeout(poll,1000);else refreshBgmLibrary()}
-for(const id of ["gpt_base_url","gpt_image_base_url","deepseek_base_url","minimax_base_url","culture_text_model","culture_polish_model","culture_image_model","text_engine","polish_engine","image_engine"]){document.addEventListener("input",e=>{if(e.target&&e.target.id===id)renderRouteSummary((modelProfiles.profiles||[]).find(x=>x.id===selectedProfileId())||{})})}
-loadSettings().then(()=>showPanel("model"));
-</script>
-</body>
-</html>""".encode("utf-8")
-
+const modes=["culture","research","science","local"],modeLabels={culture:"文史解读",research:"每日研究速递",science:"科学经典",local:"自优化"},emailKeyByMode={culture:"culture",research:"daily_research_digest",science:"science",local:"local"},emailProfileLabels={culture:"文史解读",daily_research_digest:"每日研究速递",science:"科学经典",local:"自优化"};
+const jobsStorageKey="quanlan_automedia_jobs_v4";let jobsById=JSON.parse(localStorage.getItem(jobsStorageKey)||"{}"),selectedJobId="",currentMode="culture",uiLogs={culture:[],research:[],science:[],local:[]},pollHandles={},modelSnapshot={},connectionLibrary={},activeEmailProfileKey="culture",emailProfiles={culture:{email_enabled:false,email_recipient:""},daily_research_digest:{email_enabled:false,email_recipient:""},science:{email_enabled:false,email_recipient:""},local:{email_enabled:false,email_recipient:""}};
+function byId(id){return document.getElementById(id)}function fieldValue(id){const el=byId(id);return el?String(el.value||""):""}function setField(id,v){const el=byId(id);if(el)el.value=v||""}function setStatus(s){byId("status").textContent=s}function cap(s){return s[0].toUpperCase()+s.slice(1)}function htmlEsc(s){return String(s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}function jsStr(s){return String(s||"").replace(/\\/g,"\\\\").replace(/'/g,"\\'")}
+function appendLog(msg,kind){const k=kind||currentMode;if(!uiLogs[k])uiLogs[k]=[];uiLogs[k].push("["+new Date().toLocaleTimeString()+"] "+msg);uiLogs[k]=uiLogs[k].slice(-300);renderLog()}function renderLog(lines){byId("log").textContent=[(uiLogs[currentMode]||[]).join("\n"),(lines||[]).join("")].filter(Boolean).join("\n")||"暂无日志";byId("log").scrollTop=byId("log").scrollHeight}function scrollLogBottom(){byId("log").scrollTop=byId("log").scrollHeight}async function copyLog(){await navigator.clipboard.writeText(byId("log").textContent||"")}function clearLog(){uiLogs[currentMode]=[];renderLog()}
+function normalizeEmailProfiles(raw){const out={};for(const key of Object.keys(emailProfileLabels)){const src=raw&&raw[key]||{};out[key]={email_enabled:!!(src.email_enabled||src.enabled),email_recipient:String(src.email_recipient||src.recipient||"").trim()}}return out}function saveCurrentEmailProfile(){const key=activeEmailProfileKey;emailProfiles[key]={email_enabled:!!byId("email_enabled").checked,email_recipient:fieldValue("email_recipient").trim()};updateEmailStatus()}function loadModeEmail(){activeEmailProfileKey=emailKeyByMode[currentMode]||"culture";const p=emailProfiles[activeEmailProfileKey]||{};byId("email_enabled").checked=!!p.email_enabled;setField("email_recipient",p.email_recipient||"");updateEmailStatus()}function updateEmailStatus(){const p=emailProfiles[activeEmailProfileKey]||{};byId("email_profile_status").textContent=modeLabels[currentMode]+"：邮件"+(p.email_enabled?"开启":"关闭")+"；收件人"+(p.email_recipient?"已填写":"未填写")+"。";const d=emailProfiles.daily_research_digest||{};byId("digest_email_hint").textContent="每日研究速递邮件："+(d.email_enabled?(d.email_recipient?"已开启，收件人 "+d.email_recipient:"已开启但未填收件人"):"未开启")+"。";renderWorkspace()}
+function collect(){saveCurrentEmailProfile();const ids=["culture_book","culture_out_dir","culture_continue_folder","research_out_dir","research_days","research_max_articles","research_issue_count","research_journals","research_article_list","smtp_password","smtp_host","smtp_port","smtp_user","smtp_sender","science_pdf_path","science_out_dir","minimax_base_url","minimax_api_key","minimax_tts_model","minimax_bgm_model","minimax_voice_id","minimax_bgm_prompt"];for(const m of modes){ids.push(m+"_clip_image_dir",m+"_clip_lrc_dir",m+"_clip_output_dir",m+"_clip_bgm")}const p={};for(const id of ids){if(byId(id))p[id]=fieldValue(id)}p.email_profiles=emailProfiles;const d=emailProfiles.daily_research_digest||{};p.email_enabled=!!d.email_enabled;p.email_recipient=d.email_recipient||"";p.research_skip_medical_related=!!byId("research_skip_medical_related").checked;return p}
+async function loadSettings(){appendLog("正在读取当前设置");const r=await fetch("/api/settings"),data=await r.json();modelSnapshot=data.models||{};connectionLibrary=data.model_connection_library||{};const merged={...(data.models||{}),...(data.settings||{})};emailProfiles=normalizeEmailProfiles(merged.email_profiles||{});if(!emailProfiles.daily_research_digest.email_recipient&&merged.email_recipient)emailProfiles.daily_research_digest={email_enabled:String(merged.email_enabled).toLowerCase()==="true",email_recipient:String(merged.email_recipient||"").trim()};for(const [k,v] of Object.entries(merged)){if(k==="email_profiles"||k==="email_enabled"||k==="email_recipient")continue;if(k==="research_skip_medical_related")byId(k).checked=String(v).toLowerCase()==="true";else setField(k,v)}loadModeEmail();appendLog("当前设置已读取")}async function saveSettings(){appendLog("正在保存当前设置");const r=await fetch("/api/settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(collect())}),data=await r.json();setField("smtp_password","");setField("minimax_api_key","");setStatus(data.ok?"设置已保存":"保存失败");appendLog(data.ok?"设置已保存":"保存失败");return data}
+function baseLabel(base){const map={"culture:test_b":"文史解读 / 快速测试 1 张 B 图","research:test_b":"每日研究速递 / 快速测试 1 张 B 图","research:digest":"每日研究速递 / 开始创作","research:article_list":"每日研究速递 / 补文献清单","research:continue_list":"每日研究速递 / 清单续做","research:resume":"每日研究速递 / 续做档期","science:run":"科学经典 / 开始创作","science:test_b":"科学经典 / 快速测试 1 张 B 图","local:self_optimizer_once":"自优化 / 跑一次自优化","local:self_optimizer_daemon":"自优化 / 持续自优化","local:release_deploy":"自优化 / 升级发布版"};if((base||"").endsWith(":clip"))return modeLabels[(base||"").split(":")[0]]+" / 剪辑";if((base||"").endsWith(":bgm"))return modeLabels[(base||"").split(":")[0]]+" / BGM";return map[base]||base||"任务"}function kindForBase(base){const k=String(base||"").split(":")[0];return modes.includes(k)?k:"culture"}
+async function start(payload,base){const kind=kindForBase(base);showMode(kind,false);appendLog("准备启动："+baseLabel(base),kind);const saved=await saveSettings();if(saved&&!saved.ok)return;const r=await fetch("/api/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}),data=await r.json();if(!r.ok||data.ok===false){appendLog("启动失败："+(data.error||"unknown"),kind);return}rememberJob(data.job_id,base,payload,data);setStatus("任务已创建："+baseLabel(base));poll(data.job_id)}
+function clipPayload(mode){const p=collect();return {...p,mode:"auto_clip",auto_clip_image_dir:p[mode+"_clip_image_dir"]||"",auto_clip_lrc_dir:p[mode+"_clip_lrc_dir"]||"",auto_clip_output_dir:p[mode+"_clip_output_dir"]||"",auto_clip_bgm:p[mode+"_clip_bgm"]||""}}function startModeClip(mode){start(clipPayload(mode),mode+":clip")}function startBgm(mode){const p=clipPayload(mode);p.mode="bgm";start(p,mode+":bgm")}function startCulture(test){const stage=fieldValue("culture_stage")||"outline";start({...collect(),mode:"culture",stage,test_b_image_limit:test?1:Number(fieldValue("culture_test_b")||0)},test?"culture:test_b":"culture:"+stage)}function startResearch(action){const p=collect(),d=emailProfiles.daily_research_digest||{};if(d.email_enabled&&!d.email_recipient){setStatus("请先填写每日研究速递收件邮箱，或关闭该模块邮件发送");showMode("research");return}start({...p,mode:"research",action},"research:"+action)}function startResearchQuickTest(){const p=collect(),d=emailProfiles.daily_research_digest||{};if(d.email_enabled&&!d.email_recipient){setStatus("请先填写每日研究速递收件邮箱，或关闭该模块邮件发送");showMode("research");return}appendLog("快速测试：每日研究速递只取 1 篇、1 期，并只调用图片模型生成 1 张机制/B图。","research");start({...p,mode:"research",action:"digest",research_max_articles:"1",research_issue_count:"1",research_test_b_image_limit:"1"},"research:test_b")}function startScience(test){start({...collect(),mode:"tool",action:test?"science_test_b":"science"},"science:"+(test?"test_b":"run"))}function startLocalTool(action){start({...collect(),mode:"tool",action},"local:"+action)}
+function rememberJob(id,base,payload,data){jobsById[id]={id,label:baseLabel(base),base,kind:kindForBase(base),payload,status:"starting",started_at:Date.now(),cmd:data.cmd||[]};selectedJobId=id;saveJobs();renderJobs()}function saveJobs(){localStorage.setItem(jobsStorageKey,JSON.stringify(jobsById))}function isLive(s){return["running","starting","stopping"].includes(String(s||""))}async function poll(id){const r=await fetch("/api/job?id="+encodeURIComponent(id)),data=await r.json(),job=jobsById[id]||{};job.status=data.status;job.exit_code=data.exit_code;jobsById[id]=job;saveJobs();renderJobs();if(job.kind)currentMode=job.kind;renderLog(data.lines||[]);if(isLive(data.status))pollHandles[id]=setTimeout(()=>poll(id),1200)}async function viewJob(id){selectedJobId=id;const job=jobsById[id];if(job)showMode(job.kind||"culture",false);poll(id)}function visibleJobs(){return Object.values(jobsById).filter(j=>(j.kind||"culture")===currentMode).sort((a,b)=>(b.started_at||0)-(a.started_at||0))}function currentStopJobId(){if(selectedJobId&&jobsById[selectedJobId]&&(jobsById[selectedJobId].kind||"culture")===currentMode&&isLive(jobsById[selectedJobId].status))return selectedJobId;const live=visibleJobs().filter(j=>isLive(j.status));return live.length?live[0].id:""}async function stopJob(id){const target=id||currentStopJobId();if(!target){appendLog("当前模式没有正在运行的任务可停止",currentMode);setStatus("没有正在运行的任务");return}selectedJobId=target;const job=jobsById[target]||{};appendLog("正在停止任务："+(job.label||target),job.kind||currentMode);const r=await fetch("/api/stop?id="+encodeURIComponent(target),{method:"POST"}),data=await r.json().catch(()=>({ok:false,message:"停止接口没有返回 JSON"}));if(!data.ok){appendLog("停止失败："+(data.message||data.error||"unknown"),job.kind||currentMode);setStatus("停止失败");return}if(jobsById[target]){jobsById[target].status=data.status||"stopping";jobsById[target].updated_at=Date.now()}saveJobs();renderJobs();setStatus("停止请求已发送："+(job.label||target));poll(target)}async function deleteJob(id,skipConfirm){if(!skipConfirm&&!confirm("确认删除这条任务记录？"))return;await fetch("/api/job_delete?id="+encodeURIComponent(id),{method:"POST"});delete jobsById[id];if(selectedJobId===id)selectedJobId="";saveJobs();renderJobs()}function selectedJobIds(){return Array.from(document.querySelectorAll("[data-job-check]:checked")).map(x=>x.getAttribute("data-job-check"))}function selectAllJobs(flag){document.querySelectorAll("[data-job-check]").forEach(x=>x.checked=!!flag)}async function deleteSelectedJobs(){const ids=selectedJobIds();if(!ids.length)return;if(!confirm("确认批量删除 "+ids.length+" 条任务记录？"))return;for(const id of ids)await deleteJob(id,true)}async function refreshAllJobs(){const r=await fetch("/api/jobs"),data=await r.json();for(const j of data.jobs||[]){const id=j.id||j.job_id;jobsById[id]={...(jobsById[id]||{}),...j,id,label:j.label||baseLabel(j.base_key||j.mode),kind:kindForBase(j.base_key||j.mode)}}saveJobs();renderJobs();return data.jobs||[]}
+function renderJobs(){const items=visibleJobs(),box=byId("jobs_list");byId("task_mode_label").textContent=modeLabels[currentMode];const stopId=currentStopJobId();byId("task_hint").textContent=stopId?("可停止："+((jobsById[stopId]&&jobsById[stopId].label)||stopId)):"当前模式没有正在运行的任务。";if(!items.length){box.textContent=modeLabels[currentMode]+"暂无运行任务";refreshLogSelect();return}box.innerHTML=items.map(j=>{const live=isLive(j.status),id=htmlEsc(j.id),safeId=jsStr(j.id);return '<div class="job"><input type="checkbox" data-job-check="'+id+'"><div onclick="viewJob(\''+safeId+'\')"><b>'+htmlEsc(j.label)+' | '+htmlEsc(j.status||"")+'</b><span>'+id+'</span></div><div><button class="secondary" onclick="viewJob(\''+safeId+'\')">查看</button>'+(live?'<button class="danger" onclick="stopJob(\''+safeId+'\')">停止</button>':'')+'<button class="danger" onclick="deleteJob(\''+safeId+'\')">删除</button></div></div>'}).join("");refreshLogSelect()}function refreshLogSelect(){byId("log_job_select").innerHTML='<option value="">当前模式日志</option>'+visibleJobs().map(j=>'<option value="'+htmlEsc(j.id)+'">'+htmlEsc(j.label)+' ｜ '+htmlEsc(j.status||"")+'</option>').join("")}async function selectLogJob(id){if(id)await viewJob(id)}async function testEmail(){await saveSettings();const r=await fetch("/api/test_email",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(collect())}),data=await r.json();appendLog((data.result&&data.result.ok?"SMTP 测试通过：":"SMTP 测试失败：")+((data.result&&data.result.message)||""),currentMode)}async function openOutputFolder(kind){const p={culture:fieldValue("culture_out_dir"),research:fieldValue("research_out_dir")||"D:/Quanlan/全澜脑科学视频号/科研速递",science:fieldValue("science_out_dir"),local:fieldValue("local_clip_output_dir")||fieldValue("local_clip_image_dir")}[kind]||"";await fetch("/api/open_output_folder",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:p})})}
+function modelText(keys){for(const k of keys){if(modelSnapshot[k])return modelSnapshot[k]}return "未从总控台读到"}
+function connTextForStep(step){const lib=connectionLibrary||{},steps=lib.steps||{},business=(modelSnapshot.business_steps||{}),selected=(business[step]&&business[step].selected)||{};if(selected.model){const ok=selected.last_test_ok===true?"检测通过":(selected.last_test_ok===false?"未通过/未检测":"未检测");return ((business[step]&&business[step].label)||(steps[step]&&steps[step].label)||step)+"："+(selected.provider||"")+" / "+selected.model+" @ "+(selected.base_url||"未填 URL")+" ｜ "+ok}const active=lib.active_connections||{},connections=lib.connections||[],routeId=active[step]||active[(steps[step]||{}).role]||"",c=connections.find(x=>x.id===routeId)||{};if(c.model){const ok=c.last_test_ok===true?"检测通过":(c.last_test_ok===false?"未通过/未检测":"未检测");return (steps[step]&&steps[step].label?steps[step].label:step)+"："+(c.provider||"")+" / "+c.model+" @ "+(c.base_url||"未填 URL")+" ｜ "+ok}const fallback={script_text:modelText(["text_engine","culture_text_model"]),research_text:modelText(["text_engine","research_text_model"]),polish_text:modelText(["polish_engine","culture_polish_model","research_polish_model"]),image_generation:modelText(["image_engine","culture_image_model","research_image_model"]),voice_bgm:modelText(["minimax_tts_model"])}[step]||"未从总控台读到";return ((steps[step]||{}).label||step)+"："+fallback}
+function modeSteps(){return {culture:[["script_text","拆书/脚本"],["polish_text","中文润色"],["image_generation","封面/B 图"],["voice_bgm","配音/BGM/剪辑"]],research:[["research_text","文献解读/脚本"],["polish_text","中文润色"],["image_generation","卡片/图片"],["voice_bgm","配音/BGM/剪辑"]],science:[["script_text","经典内容生成"],["polish_text","中文润色"],["image_generation","B 图/公共元素"],["voice_bgm","配音/BGM/剪辑"]],local:[["script_text","自优化文本任务"],["polish_text","自优化润色任务"],["image_generation","试验图片任务"],["voice_bgm","试验配音/BGM"]]}[currentMode]||[]}
+function modelFlow(){return modeSteps().map(x=>x[1]+"｜"+connTextForStep(x[0]))}
+function renderModelFlows(){const html=modelFlow().map(x=>'<div>'+x+'</div>').join("");const a=byId("model_flow"),b=byId("left_model_flow");if(a)a.innerHTML=html;if(b)b.innerHTML=html}
+async function refreshModelConfig(){appendLog("正在从总控台刷新模型配置");const r=await fetch("/api/settings"),data=await r.json();modelSnapshot=data.models||{};connectionLibrary=data.model_connection_library||{};renderModelFlows();appendLog("模型配置已刷新：按总控台最新连接展示")}
+function openProductionCard(){window.location.assign("/#production-assistant")}
+async function deployReleaseWhenIdle(){const jobs=await refreshAllJobs();const running=jobs.filter(j=>isLive(j.status));if(running.length){appendLog("还有 "+running.length+" 个任务没结束，先停止或等待结束后再升级发布版","local");setStatus("仍有任务运行，不能升级发布版");showMode("local");return}if(!confirm("确认把当前开发版打包并升级发布版？升级完成后，总控台上线区的自媒体小猪理（发布版）卡片会打开发布版入口。"))return;showMode("local");appendLog("正在升级发布版：先打包，再应用到发布目录。","local");const r=await fetch("/api/audience",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({project:"assistant",mode:"release_deploy"})});const data=await r.json();if(!data.ok){appendLog("升级发布版启动失败："+(data.error||"unknown"),"local");setStatus("升级发布版启动失败");return}const id=data.job_id;jobsById[id]={id,label:baseLabel("local:release_deploy"),base:"local:release_deploy",kind:"local",status:"starting",started_at:Date.now(),cmd:data.cmd||[]};selectedJobId=id;saveJobs();renderJobs();setStatus("升级发布版任务已启动");poll(id)}
+function kvRows(rows){return rows.map(x=>'<b>'+x[0]+'</b><div>'+String(x[1]||"未设置")+'</div>').join("")}
+function renderWorkspace(){const ep=emailProfiles[emailKeyByMode[currentMode]]||{},clip=[fieldValue(currentMode+"_clip_image_dir"),fieldValue(currentMode+"_clip_output_dir")].filter(Boolean).join(" -> ")||"未设置",rows={culture:[["书籍",fieldValue("culture_book")],["输出",fieldValue("culture_out_dir")],["阶段",fieldValue("culture_stage")],["剪辑",clip],["邮箱",ep.email_enabled?(ep.email_recipient||"开启但未填"):"关闭"]],research:[["输出",fieldValue("research_out_dir")||"默认科研速递目录"],["文献清单",fieldValue("research_article_list")],["每天期数",fieldValue("research_issue_count")],["剪辑",clip],["邮箱",ep.email_enabled?(ep.email_recipient||"开启但未填"):"关闭"]],science:[["PDF",fieldValue("science_pdf_path")],["输出",fieldValue("science_out_dir")],["剪辑",clip],["邮箱",ep.email_enabled?(ep.email_recipient||"开启但未填"):"关闭"]],local:[["用途","自优化 / 调试 / 试验剪辑"],["剪辑",clip],["邮箱",ep.email_enabled?(ep.email_recipient||"开启但未填"):"关闭"]]}[currentMode];byId("workspace_title").textContent=modeLabels[currentMode];byId("workspace_kv").innerHTML=kvRows(rows);renderModelFlows()}
+function showMode(mode,loadEmail=true){currentMode=modes.includes(mode)?mode:"culture";for(const m of modes){byId("page"+cap(m)).classList.toggle("active",m===currentMode);byId("tab"+cap(m)).classList.toggle("active",m===currentMode)}if(loadEmail)loadModeEmail();renderWorkspace();renderJobs();renderLog()}document.addEventListener("input",()=>renderWorkspace());loadSettings().then(()=>{showMode("culture");refreshAllJobs()});
+</script></body></html>""".encode("utf-8")
 
 def _json(handler: BaseHTTPRequestHandler, data: Any, status: int = 200) -> None:
     body = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -3608,11 +4605,11 @@ def _json(handler: BaseHTTPRequestHandler, data: Any, status: int = 200) -> None
 
 
 def _daily_research_progress_path(article_list_path: Path) -> Path:
-    return article_list_path.with_name(article_list_path.stem + "_续做进度.json")
+    return article_list_path.with_name(article_list_path.stem + "_缁仛杩涘害.json")
 
 
 def _candidate_article_list_files(root: Path) -> list[Path]:
-    names = ("00_文献信息.json", "00_候选文献清单.json", "article_list.json", "articles.json")
+    names = ("00_鏂囩尞淇℃伅.json", "00_鍊欓€夋枃鐚竻鍗?json", "article_list.json", "articles.json")
     candidates: list[Path] = []
     if root.is_dir():
         for name in names:
@@ -3620,7 +4617,7 @@ def _candidate_article_list_files(root: Path) -> list[Path]:
             if path.exists():
                 candidates.append(path)
         try:
-            candidates.extend(p for p in root.glob("文献清单*.json") if "续做进度" not in p.name)
+            candidates.extend(p for p in root.glob("鏂囩尞娓呭崟*.json") if "缁仛杩涘害" not in p.name)
         except Exception:
             pass
     return sorted(candidates, key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
@@ -3648,7 +4645,7 @@ def _resolve_research_article_list_path(value: str = "") -> Path | None:
     if DAILY_RESEARCH_DEFAULT_ROOT.exists():
         candidates.extend(_candidate_article_list_files(DAILY_RESEARCH_DEFAULT_ROOT))
     for path in candidates:
-        if path.exists() and path.is_file() and "续做进度" not in path.name:
+        if path.exists() and path.is_file() and "缁仛杩涘害" not in path.name:
             return path.resolve()
     return None
 
@@ -3775,6 +4772,161 @@ def _url_reachable(url: str, timeout: float = 1.2) -> bool:
         return False
 
 
+def _is_local_url(url: str) -> bool:
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception:
+        return False
+    host = (parsed.hostname or "").lower()
+    return host in {"127.0.0.1", "localhost", "::1", ""}
+
+
+def _remote_control_env_key(app_id: str, action: str) -> str:
+    cleaned_app = re.sub(r"[^A-Za-z0-9]+", "_", app_id or "").upper().strip("_")
+    cleaned_action = re.sub(r"[^A-Za-z0-9]+", "_", action or "").upper().strip("_")
+    return f"QUANLAN_PROD_{cleaned_app}_{cleaned_action}_CMD"
+
+
+def _production_control_status(app_id: str, production_url: str) -> dict[str, Any]:
+    if app_id == "xiaozhuli":
+        return {
+            "production_control_kind": "http-api",
+            "production_control_configured": True,
+            "production_control_note": "线上小猪理服务可由总控台直接启停。",
+        }
+    if _is_local_url(production_url):
+        return {
+            "production_control_kind": "local",
+            "production_control_configured": True,
+            "production_control_note": "本机正式服务，可由总控台直接启停。",
+        }
+    configured = any(os.environ.get(_remote_control_env_key(app_id, action), "").strip() for action in ("START", "STOP", "RESTART"))
+    return {
+        "production_control_kind": "remote",
+        "production_control_configured": configured,
+        "production_control_note": "远程正式服务启停已配置。" if configured else "远程正式服务还没有配置启停命令；只能检测状态和打开入口。",
+    }
+
+
+def _run_xiaozhuli_production_control(action: str) -> None:
+    mapped_action = "restart" if action in {"restart", "sync"} else action
+    if mapped_action not in {"start", "stop", "restart"}:
+        raise ValueError(f"不支持的线上小猪理操作：{action}")
+    api_url = XIAOZHULI_PRODUCTION_URL.rstrip("/") + "/api/service"
+    data = json.dumps({"name": "all", "action": mapped_action}).encode("utf-8")
+    req = urllib.request.Request(
+        api_url,
+        data=data,
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=PRODUCTION_CONTROL_TIMEOUT) as resp:
+            if resp.status >= 400:
+                body = resp.read().decode("utf-8", errors="replace")
+                raise RuntimeError(f"线上小猪理控制失败 {resp.status}: {body[:300]}")
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"线上小猪理控制失败 {exc.code}: {body[:300]}") from exc
+
+
+
+def _assistant_release_pids() -> list[int]:
+    pids = set(_pids_on_port(ASSISTANT_RELEASE_PORT))
+    if os.name == "nt":
+        try:
+            result = subprocess.run(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    "Get-CimInstance Win32_Process -Filter \"name='python.exe'\" | "
+                    "Where-Object { $_.CommandLine -match 'quanlan_dual_assistant.web_app' -and $_.CommandLine -match ' 8766 ' } | "
+                    "ForEach-Object { $_.ProcessId }",
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=8,
+            )
+            for line in result.stdout.splitlines():
+                line = line.strip()
+                if line.isdigit():
+                    pids.add(int(line))
+        except Exception:
+            pass
+    current = os.getpid()
+    return [pid for pid in pids if pid != current]
+
+
+def _assistant_release_online() -> bool:
+    return _url_reachable(ASSISTANT_PRODUCTION_URL, timeout=1.2)
+
+
+def _stop_assistant_release(takeover: bool = True) -> dict[str, Any]:
+    global ASSISTANT_RELEASE_PROCESS
+    _stop_process(ASSISTANT_RELEASE_PROCESS)
+    ASSISTANT_RELEASE_PROCESS = None
+    if takeover:
+        for pid in _assistant_release_pids():
+            try:
+                subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, text=True, timeout=5)
+            except Exception:
+                pass
+    time.sleep(0.4)
+    return _app_statuses()
+
+
+def _ensure_assistant_release(takeover: bool = True) -> dict[str, Any]:
+    global ASSISTANT_RELEASE_PROCESS
+    if _assistant_release_online():
+        return _app_statuses()
+    if takeover:
+        for pid in _assistant_release_pids():
+            try:
+                subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, text=True, timeout=5)
+            except Exception:
+                pass
+    if not ASSISTANT_RELEASE_ROOT.exists():
+        raise ValueError(f"本机发布版目录不存在：{ASSISTANT_RELEASE_ROOT}。请先在开发版执行升级发布版。")
+    env = os.environ.copy()
+    env.setdefault("PYTHONUTF8", "1")
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    ASSISTANT_RELEASE_PROCESS = subprocess.Popen(
+        [sys.executable, "-X", "utf8", "-m", "quanlan_dual_assistant.web_app", str(ASSISTANT_RELEASE_PORT), "assistant-release"],
+        cwd=str(ASSISTANT_RELEASE_ROOT),
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    time.sleep(1.2)
+    return _app_statuses()
+
+
+def _restart_assistant_release(takeover: bool = True) -> dict[str, Any]:
+    _stop_assistant_release(takeover=takeover)
+    return _ensure_assistant_release(takeover=takeover)
+
+def _run_remote_production_control(app_id: str, action: str) -> None:
+    if app_id == "xiaozhuli":
+        _run_xiaozhuli_production_control(action)
+        return
+    env_key = _remote_control_env_key(app_id, action)
+    command = os.environ.get(env_key, "").strip()
+    if not command and action == "restart":
+        stop_command = os.environ.get(_remote_control_env_key(app_id, "stop"), "").strip()
+        start_command = os.environ.get(_remote_control_env_key(app_id, "start"), "").strip()
+        if stop_command and start_command:
+            for cmd in (stop_command, start_command):
+                subprocess.run(shlex.split(cmd), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=PRODUCTION_CONTROL_TIMEOUT, check=True)
+            return
+    if not command:
+        raise ValueError(f"远程正式服务未配置启停控制：请设置环境变量 {env_key}，或把该服务配置为本机地址后再由总控台接管。")
+    subprocess.run(shlex.split(command), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=PRODUCTION_CONTROL_TIMEOUT, check=True)
+
+
 def _process_running(process: subprocess.Popen[str] | None) -> bool:
     return bool(process and process.poll() is None)
 
@@ -3811,6 +4963,75 @@ def _kill_pids(pids: list[int]) -> None:
             pass
 
 
+def _windows_node_pids_by_scripts(scripts: tuple[str, ...]) -> dict[str, list[int]]:
+    if os.name != "nt":
+        return {script: [] for script in scripts}
+    patterns = {script: re.compile(re.escape(script), re.IGNORECASE) for script in scripts}
+    ps = (
+        "Get-CimInstance Win32_Process | "
+        "Where-Object { $_.Name -eq 'node.exe' } | "
+        "Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress"
+    )
+    try:
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-Command", ps],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=5,
+        )
+        raw = (result.stdout or "").strip()
+        items = json.loads(raw) if raw else []
+    except Exception:
+        items = []
+    if isinstance(items, dict):
+        items = [items]
+    found = {script: [] for script in scripts}
+    for item in items if isinstance(items, list) else []:
+        cmd = str(item.get("CommandLine") or "")
+        try:
+            pid = int(item.get("ProcessId") or 0)
+        except Exception:
+            pid = 0
+        if not pid:
+            continue
+        for script, pattern in patterns.items():
+            if pattern.search(cmd):
+                found[script].append(pid)
+    return found
+
+
+def _xiaozhuli_worker_pids() -> dict[str, list[int]]:
+    return _windows_node_pids_by_scripts((*XIAOZHULI_WORKER_SCRIPTS, "wecom-callback.mjs", "xiaozhuli-dashboard.mjs"))
+
+
+def _xiaozhuli_workers_running() -> bool:
+    pids = _xiaozhuli_worker_pids()
+    return any(pids.get(script) for script in XIAOZHULI_WORKER_SCRIPTS)
+
+
+def _stop_xiaozhuli_workers() -> None:
+    pids = _xiaozhuli_worker_pids()
+    for script in XIAOZHULI_STOP_SCRIPT_ORDER:
+        _kill_pids(pids.get(script, []))
+
+
+def _start_xiaozhuli_worker(script: str, env: dict[str, str]) -> None:
+    node_exe = XIAOZHULI_NODE_EXE if Path(XIAOZHULI_NODE_EXE).exists() else "node"
+    entry = XIAOZHULI_ROOT / script
+    if not entry.exists():
+        return
+    subprocess.Popen(
+        [node_exe, entry.name],
+        cwd=str(XIAOZHULI_ROOT),
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+
+
 def _stop_process(process: subprocess.Popen[str] | None) -> None:
     if not _process_running(process):
         return
@@ -3826,12 +5047,23 @@ def _stop_process(process: subprocess.Popen[str] | None) -> None:
 
 def _app_statuses() -> dict[str, Any]:
     xiaozhuli_online = _url_reachable(f"{XIAOZHULI_TARGET}/", timeout=0.6)
-    eeg_online = _url_reachable(f"{EEG_ANALYSER_TARGET}/", timeout=0.6)
+    assistant_production_online = _assistant_release_online()
+    xiaozhuli_production_online = _url_reachable(XIAOZHULI_PRODUCTION_URL, timeout=0.6)
+    eeg_production_url = EEG_ANALYSER_TARGET + "/"
+    eeg_online = _url_reachable(eeg_production_url, timeout=0.6)
+    eeg_development_online = _url_reachable(EEG_ANALYSER_DEVELOPMENT_URL, timeout=0.6)
     xiaozhuli_managed = _process_running(XIAOZHULI_PROCESS)
+    xiaozhuli_workers_running = _xiaozhuli_workers_running()
     eeg_managed = _process_running(EEG_ANALYSER_PROCESS)
-    xiaozhuli_sync = "待同步" if XIAOZHULI_CONFIG_DIRTY else ("已同步" if xiaozhuli_managed else "外部运行" if xiaozhuli_online else "未启动")
+    xiaozhuli_sync = "待同步" if XIAOZHULI_CONFIG_DIRTY else ("已同步" if xiaozhuli_managed else "后台运行" if xiaozhuli_workers_running else "外部运行" if xiaozhuli_online else "未启动")
     if XIAOZHULI_CONFIG_DIRTY and xiaozhuli_online and not xiaozhuli_managed:
         xiaozhuli_sync = "需接管重启"
+    xiaozhuli_development_online = bool(xiaozhuli_online or xiaozhuli_workers_running)
+    xiaozhuli_development_state = "已同步" if xiaozhuli_managed else ("后台运行" if xiaozhuli_workers_running else "外部运行" if xiaozhuli_online else "未启动")
+    eeg_development_state = "已启动" if eeg_managed else ("外部运行" if eeg_development_online else "未启动")
+    assistant_production_control = _production_control_status("assistant", ASSISTANT_PRODUCTION_URL)
+    xiaozhuli_production_control = _production_control_status("xiaozhuli", XIAOZHULI_PRODUCTION_URL)
+    eeg_production_control = _production_control_status("eeg", eeg_production_url)
     profiles = _profile_public_status()
     active_profile = profiles.get("active_profile") or ""
     key_count = sum(1 for value in _secret_statuses().values() if isinstance(value, bool) and value)
@@ -3848,9 +5080,19 @@ def _app_statuses() -> dict[str, Any]:
                 "name": "自媒体小猪理",
                 "route": "/assistant/",
                 "target": "总控台内置",
-                "online": True,
+                "production_url": ASSISTANT_PRODUCTION_URL,
+                "production_target": ASSISTANT_PRODUCTION_URL,
+                "production_note": "本机发布版入口；运行在独立目录和端口，不受开发版代码修改影响。",
+                "production_online": assistant_production_online,
+                "production_state": "本机发布版在线" if assistant_production_online else "本机发布版未启动",
+                **assistant_production_control,
+                "development_url": "/assistant/",
+                "development_target": "http://127.0.0.1:8765/assistant/",
+                "online": assistant_production_online,
                 "managed": True,
-                "sync_state": "已同步",
+                "sync_state": "本机发布版在线" if assistant_production_online else "本机发布版未启动",
+                "development_online": True,
+                "development_state": "总控台运行中",
                 "config_scope": "模型、Key、SMTP 在总控台维护；任务页只保留业务参数。",
             },
             {
@@ -3858,9 +5100,19 @@ def _app_statuses() -> dict[str, Any]:
                 "name": "全澜小猪理",
                 "route": "/xiaozhuli/",
                 "target": XIAOZHULI_TARGET,
-                "online": xiaozhuli_online,
+                "production_url": XIAOZHULI_PRODUCTION_URL,
+                "production_target": XIAOZHULI_PRODUCTION_URL,
+                "production_note": "正式服务入口。",
+                "production_online": xiaozhuli_production_online,
+                "production_state": "远程在线" if xiaozhuli_production_online else "未启动或不可达",
+                **xiaozhuli_production_control,
+                "development_url": "/xiaozhuli/",
+                "development_target": XIAOZHULI_TARGET,
+                "online": xiaozhuli_production_online,
                 "managed": xiaozhuli_managed,
-                "sync_state": xiaozhuli_sync,
+                "sync_state": "远程在线" if xiaozhuli_production_online else "未启动或不可达",
+                "development_online": xiaozhuli_development_online,
+                "development_state": xiaozhuli_development_state,
                 "port": XIAOZHULI_PORT,
                 "config_scope": "由总控台启动时注入模型 URL、模型名和 Key；内部模型配置入口隐藏。",
             },
@@ -3869,16 +5121,24 @@ def _app_statuses() -> dict[str, Any]:
                 "name": "脑电分析平台",
                 "route": "/eeg/",
                 "target": EEG_ANALYSER_TARGET,
+                "production_url": eeg_production_url,
+                "production_target": eeg_production_url,
+                "production_note": "正式服务入口。",
+                "production_online": eeg_online,
+                "production_state": "远程在线" if eeg_online else "未启动或不可达",
+                **eeg_production_control,
+                "development_url": EEG_ANALYSER_DEVELOPMENT_URL,
+                "development_target": EEG_ANALYSER_DEVELOPMENT_URL,
                 "online": eeg_online,
                 "managed": eeg_managed,
                 "sync_state": "流程平台",
+                "development_online": eeg_development_online,
+                "development_state": eeg_development_state,
                 "port": EEG_ANALYSER_PORT,
                 "config_scope": "入口在总控台；平台内部只展示脑电分析流程，不展示通用模型/工具配置。",
             },
         ],
     }
-
-
 def _eeg_analyser_web_root() -> Path:
     explicit = os.environ.get("EEG_ANALYSER_WEB_ROOT", "").strip()
     candidates = [
@@ -3895,7 +5155,7 @@ def _eeg_analyser_web_root() -> Path:
 
 def _ensure_eeg_analyser() -> None:
     global EEG_ANALYSER_PROCESS
-    if _url_reachable(f"{EEG_ANALYSER_TARGET}/"):
+    if _url_reachable(EEG_ANALYSER_DEVELOPMENT_URL):
         return
     if EEG_ANALYSER_PROCESS and EEG_ANALYSER_PROCESS.poll() is None:
         return
@@ -3920,6 +5180,15 @@ def _restart_eeg_analyser(*, takeover: bool = False) -> dict[str, Any]:
     return _app_statuses()
 
 
+def _stop_eeg_analyser(*, takeover: bool = False) -> dict[str, Any]:
+    global EEG_ANALYSER_PROCESS
+    _stop_process(EEG_ANALYSER_PROCESS)
+    EEG_ANALYSER_PROCESS = None
+    if takeover:
+        _kill_pids(_pids_on_port(EEG_ANALYSER_PORT))
+    return _app_statuses()
+
+
 def _proxy_eeg_analyser(handler: BaseHTTPRequestHandler) -> None:
     _ensure_eeg_analyser()
     parsed = urllib.parse.urlparse(handler.path)
@@ -3941,8 +5210,15 @@ def _proxy_eeg_analyser(handler: BaseHTTPRequestHandler) -> None:
             content_type = resp.headers.get("Content-Type", "application/octet-stream")
             if content_type.startswith("text/html") or content_type.startswith("text/javascript"):
                 text = body.decode("utf-8", errors="replace")
+                try:
+                    import ftfy  # type: ignore
+                    text = ftfy.fix_text(text)
+                except Exception:
+                    pass
                 text = text.replace("http://127.0.0.1:8765/", "/")
                 body = text.encode("utf-8")
+                if "charset=" not in content_type.lower():
+                    content_type = content_type.split(";", 1)[0] + "; charset=utf-8"
             _send_bytes(handler, body, content_type, resp.status)
     except urllib.error.HTTPError as exc:
         _send_bytes(handler, exc.read(), exc.headers.get("Content-Type", "text/plain; charset=utf-8"), exc.code)
@@ -3952,29 +5228,32 @@ def _proxy_eeg_analyser(handler: BaseHTTPRequestHandler) -> None:
 
 def _ensure_xiaozhuli_dashboard() -> None:
     global XIAOZHULI_PROCESS, XIAOZHULI_CONFIG_DIRTY
-    if XIAOZHULI_PROCESS and XIAOZHULI_PROCESS.poll() is None and not XIAOZHULI_CONFIG_DIRTY:
-        return
     if XIAOZHULI_PROCESS and XIAOZHULI_PROCESS.poll() is None and XIAOZHULI_CONFIG_DIRTY:
         _stop_process(XIAOZHULI_PROCESS)
         XIAOZHULI_PROCESS = None
-    if _url_reachable(f"{XIAOZHULI_TARGET}/"):
-        return
-    entry = XIAOZHULI_ROOT / "xiaozhuli-dashboard.mjs"
-    if not entry.exists():
-        raise FileNotFoundError(f"Xiaozhuli dashboard not found: {entry}")
     env = os.environ.copy()
     _apply_shared_config_env(env)
     env.setdefault("XIAOZHULI_DASHBOARD_HOST", "127.0.0.1")
     env.setdefault("XIAOZHULI_DASHBOARD_PORT", str(XIAOZHULI_PORT))
-    XIAOZHULI_PROCESS = subprocess.Popen(["node", entry.name], cwd=str(XIAOZHULI_ROOT), env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True)
+    pids = _xiaozhuli_worker_pids()
+    for script in XIAOZHULI_WORKER_SCRIPTS:
+        if not pids.get(script):
+            _start_xiaozhuli_worker(script, env)
+    if not _url_reachable(f"{XIAOZHULI_TARGET}/"):
+        entry = XIAOZHULI_ROOT / "xiaozhuli-dashboard.mjs"
+        if not entry.exists():
+            raise FileNotFoundError(f"Xiaozhuli dashboard not found: {entry}")
+        node_exe = XIAOZHULI_NODE_EXE if Path(XIAOZHULI_NODE_EXE).exists() else "node"
+        XIAOZHULI_PROCESS = subprocess.Popen([node_exe, entry.name], cwd=str(XIAOZHULI_ROOT), env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True)
     XIAOZHULI_CONFIG_DIRTY = False
-    time.sleep(0.6)
+    time.sleep(0.8)
 
 
 def _restart_xiaozhuli_dashboard(*, takeover: bool = False) -> dict[str, Any]:
     global XIAOZHULI_PROCESS, XIAOZHULI_CONFIG_DIRTY
     _stop_process(XIAOZHULI_PROCESS)
     XIAOZHULI_PROCESS = None
+    _stop_xiaozhuli_workers()
     if takeover:
         _kill_pids(_pids_on_port(XIAOZHULI_PORT))
     XIAOZHULI_CONFIG_DIRTY = True
@@ -3982,26 +5261,66 @@ def _restart_xiaozhuli_dashboard(*, takeover: bool = False) -> dict[str, Any]:
     return _app_statuses()
 
 
+def _stop_xiaozhuli_dashboard(*, takeover: bool = False) -> dict[str, Any]:
+    global XIAOZHULI_PROCESS, XIAOZHULI_CONFIG_DIRTY
+    _stop_process(XIAOZHULI_PROCESS)
+    XIAOZHULI_PROCESS = None
+    _stop_xiaozhuli_workers()
+    if takeover:
+        _kill_pids(_pids_on_port(XIAOZHULI_PORT))
+    XIAOZHULI_CONFIG_DIRTY = False
+    return _app_statuses()
+
+
 def _control_app(payload: dict[str, Any]) -> dict[str, Any]:
     app_id = str(payload.get("app") or "").strip()
     action = str(payload.get("action") or "").strip()
+    scope = str(payload.get("scope") or "development").strip().lower()
     takeover = bool(payload.get("takeover", True))
     if action == "status":
         return _app_statuses()
+    if scope == "production":
+        production_urls = {
+            "assistant": ASSISTANT_PRODUCTION_URL,
+            "xiaozhuli": XIAOZHULI_PRODUCTION_URL,
+            "eeg": EEG_ANALYSER_TARGET + "/",
+        }
+        production_url = production_urls.get(app_id, "")
+        if not production_url:
+            raise ValueError("unknown production app")
+        if app_id == "assistant":
+            if action in {"ensure", "start"}:
+                return _ensure_assistant_release(takeover=takeover)
+            if action == "restart":
+                return _restart_assistant_release(takeover=takeover)
+            if action == "stop":
+                return _stop_assistant_release(takeover=takeover)
+        if not _is_local_url(production_url):
+            _run_remote_production_control(app_id, action)
+            time.sleep(0.6)
+            return _app_statuses()
+        scope = "development"
     if app_id == "xiaozhuli":
         if action in {"ensure", "start"}:
             _ensure_xiaozhuli_dashboard()
             return _app_statuses()
         if action in {"restart", "sync"}:
             return _restart_xiaozhuli_dashboard(takeover=takeover)
+        if action == "stop":
+            return _stop_xiaozhuli_dashboard(takeover=takeover)
     if app_id == "eeg":
         if action in {"ensure", "start"}:
             _ensure_eeg_analyser()
             return _app_statuses()
         if action == "restart":
             return _restart_eeg_analyser(takeover=takeover)
-    if app_id == "assistant" and action in {"ensure", "start"}:
-        return _app_statuses()
+        if action == "stop":
+            return _stop_eeg_analyser(takeover=takeover)
+    if app_id == "assistant":
+        if action in {"ensure", "start"}:
+            return _app_statuses()
+        if action == "stop":
+            raise ValueError("总控台自身不能从页面里停止")
     raise ValueError("unknown app action")
 
 
@@ -4055,26 +5374,50 @@ def _add(args: list[str], flag: str, value: Any) -> None:
 
 def _daily_text_engine_arg(value: Any) -> str:
     text = str(value or "").strip()
+    lowered = text.lower()
+    if "deepseek chat" in lowered:
+        return "DeepSeek Chat（官方润色）"
+    if "deepseek reasoner" in lowered:
+        return "DeepSeek Reasoner（官方）"
     aliases = {
         "gpt-5.5": "GPT-5.5",
         "gpt-5.4": "GPT-5.4",
         "gpt-5.4-mini": "GPT-5.4 mini（快速）",
+        "gpt-5.4 mini": "GPT-5.4 mini（快速）",
         "gpt-5.4-nano": "GPT-5.4 nano（最低成本）",
+        "gpt-5.4 nano": "GPT-5.4 nano（最低成本）",
         "deepseek-chat": "DeepSeek Chat（官方润色）",
+        "deepseek chat": "DeepSeek Chat（官方润色）",
+        "deepseek-chat（官方润色）": "DeepSeek Chat（官方润色）",
+        "deepseek chat（官方润色）": "DeepSeek Chat（官方润色）",
+        "deepseek chat锛堝畼鏂规鼎鑹诧級": "DeepSeek Chat（官方润色）",
         "deepseek-reasoner": "DeepSeek Reasoner（官方）",
+        "deepseek reasoner": "DeepSeek Reasoner（官方）",
+        "deepseek reasoner锛堝畼鏂癸級": "DeepSeek Reasoner（官方）",
     }
-    return aliases.get(text.lower(), text)
+    return aliases.get(lowered, text)
 
 
 def _daily_image_engine_arg(value: Any) -> str:
     text = str(value or "").strip()
+    lowered = text.lower()
+    if "gpt image 2" in lowered or "gpt-image-2" in lowered:
+        return "生图专用｜GPT Image 2"
+    if "gemini 3 pro image" in lowered or "gemini-3-pro-image" in lowered:
+        return "生图专用｜Gemini 3 Pro Image Preview"
+    if "gemini 3.1 flash image" in lowered or "gemini-3.1-flash-image" in lowered:
+        return "生图专用｜Gemini 3.1 Flash Image Preview"
     aliases = {
         "gpt-image-2": "生图专用｜GPT Image 2",
         "gpt image 2": "生图专用｜GPT Image 2",
+        "生图专用｜gpt image 2": "生图专用｜GPT Image 2",
+        "鐢熷浘涓撶敤锝淕pt image 2": "生图专用｜GPT Image 2",
         "gemini-3-pro-image-preview": "生图专用｜Gemini 3 Pro Image Preview",
+        "gemini 3 pro image preview": "生图专用｜Gemini 3 Pro Image Preview",
         "gemini-3.1-flash-image-preview": "生图专用｜Gemini 3.1 Flash Image Preview",
+        "gemini 3.1 flash image preview": "生图专用｜Gemini 3.1 Flash Image Preview",
     }
-    return aliases.get(text.lower(), text)
+    return aliases.get(lowered, text)
 
 
 def _default_output_dir(payload: dict[str, Any]) -> str:
@@ -4095,14 +5438,20 @@ def _default_output_dir(payload: dict[str, Any]) -> str:
 
 def _extract_output_dir_from_line(line: str) -> str:
     text = str(line or "").strip()
-    patterns = (
-        r"(?:素材已生成|输出目录|作品目录|已生成|已保存)[：:]\s*([A-Za-z]:\\[^\r\n]+)",
-        r"(?:素材已生成|输出目录|作品目录|已生成|已保存)[：:]\s*(/[^\r\n]+)",
-    )
-    for pattern in patterns:
-        match = re.search(pattern, text)
-        if match:
-            return match.group(1).strip().strip('"')
+    if not text:
+        return ""
+    markers = ("素材已生成", "输出目录", "作品目录", "已生成", "已保存")
+    if not any(marker in text for marker in markers):
+        return ""
+    tail = text
+    for sep in ("：", ":"):
+        if sep in tail:
+            tail = tail.split(sep, 1)[1]
+            break
+    tail = tail.strip().strip('"')
+    match = re.search(r"([A-Za-z]:\\[^\r\n]+|/[^\r\n]+)", tail)
+    if match:
+        return match.group(1).strip().strip('"')
     return ""
 
 
@@ -4131,6 +5480,7 @@ def _open_folder_path(value: str) -> tuple[bool, str]:
 
 
 def _build_command(payload: dict[str, Any]) -> tuple[list[str], Path]:
+    payload = {**payload, **_apply_business_steps_to_models(_model_settings())}
     mode_key = str(payload.get("mode") or "culture")
     if mode_key == "auto_clip":
         cmd = [sys.executable, "-m", "quanlan_dual_assistant.auto_video_editor"]
@@ -4167,6 +5517,10 @@ def _build_command(payload: dict[str, Any]) -> tuple[list[str], Path]:
             return [sys.executable, "self_optimizer.py", "once", "--force"], PROJECT_ROOT
         if action == "self_optimizer_daemon":
             return [sys.executable, "self_optimizer.py", "daemon"], PROJECT_ROOT
+        if action == "release_package_update":
+            return [sys.executable, "tools/channel_manager.py", "--channel", "release", "package-update", "--note", "web release package"], PROJECT_ROOT
+        if action == "release_init":
+            return [sys.executable, "tools/channel_manager.py", "--channel", "release", "init-release"], PROJECT_ROOT
         if action == "package_update":
             return [sys.executable, "tools/channel_manager.py", "--channel", "test", "package-update", "--note", "web test update"], PROJECT_ROOT
         if action == "init_release":
@@ -4192,7 +5546,7 @@ def _build_command(payload: dict[str, Any]) -> tuple[list[str], Path]:
     mode = get_mode(mode_key)
     args: list[str] = []
     if mode.key == "culture":
-        models = _models_with_url_defaults(_model_settings())
+        models = _models_with_url_defaults(_apply_business_steps_to_models(_model_settings()))
 
         def model_value(field: str, default: str = "") -> str:
             return str(payload.get(field) or models.get(field) or default).strip()
@@ -4247,6 +5601,9 @@ def _build_command(payload: dict[str, Any]) -> tuple[list[str], Path]:
         _add(args, "--daily-days", payload.get("research_days"))
         _add(args, "--daily-max-articles", payload.get("research_max_articles"))
         _add(args, "--daily-issue-count", payload.get("research_issue_count"))
+        _add(args, "--daily-test-b-image-limit", payload.get("research_test_b_image_limit"))
+        # The current daily digest CLI does not always expose this option.
+        # Keep the UI setting for future use, but do not pass an unsupported flag.
         _add(args, "--daily-journals", payload.get("research_journals"))
         _add(args, "--daily-article-list", article_list_value)
         _add(args, "--daily-text-engine", _daily_text_engine_arg(payload.get("text_engine")))
@@ -4254,10 +5611,11 @@ def _build_command(payload: dict[str, Any]) -> tuple[list[str], Path]:
         _add(args, "--daily-image-engine", _daily_image_engine_arg(payload.get("image_engine")))
         if str(payload.get("research_skip_medical_related") or "").lower() in {"1", "true", "yes", "on"}:
             args.append("--daily-skip-medical-related")
-        if payload.get("email_enabled") and payload.get("email_recipient"):
+        email_profile = _email_profile_for_payload(payload, "daily_research_digest")
+        if email_profile.get("email_enabled") and email_profile.get("email_recipient"):
             args.append("--daily-email")
-            _add(args, "--daily-email-recipient", payload.get("email_recipient"))
-    return _python_command(mode, gui=False, extra_args=args), mode.path
+            _add(args, "--daily-email-recipient", email_profile.get("email_recipient"))
+    return _python_command(mode, extra_args=args), mode.path
 
 
 def _build_optimizer_command(project: str, mode: str) -> tuple[str, list[str], Path]:
@@ -4311,7 +5669,7 @@ def _build_audience_command(project: str, mode: str = "once") -> tuple[str, list
 
 def _audience_mode_label(mode: str) -> str:
     if mode == "dev_upgrade":
-        return "一键升级开发版本"
+        return "一键升级开发区"
     if mode == "release_deploy":
         return "一键部署发布版本"
     return "虚拟用户测试"
@@ -4324,8 +5682,6 @@ def _initial_job_lines(name: str, mode: str, cmd: list[str], cwd: Path) -> list[
         f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 命令：{' '.join(cmd)}\n",
         f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 正在启动进程，请稍候...\n",
     ]
-
-
 def _pending_summary(name: str, mode: str) -> dict[str, list[str]]:
     label = _audience_mode_label(mode)
     return {
@@ -4454,10 +5810,18 @@ def _run_job(job_id: str, cmd: list[str], cwd: Path) -> None:
     env.setdefault("AMP_IMAGE_MAX_RETRIES", "1")
     env.setdefault("OPENAI_IMAGE_RETRY_DELAYS", "0,8")
     env.setdefault("OPENAI_IMAGE_TIMEOUT", "240")
-    models = _apply_connection_library_to_defaults()
+    models = job.get("model_snapshot")
+    if not isinstance(models, dict):
+        models = _apply_business_steps_to_models(_apply_connection_library_to_defaults())
+    else:
+        models = _apply_business_steps_to_models(models)
+    snapshot_path = job.get("model_snapshot_path")
+    if not snapshot_path:
+        snapshot_path = str(_write_job_model_snapshot(job_id, models))
+        job["model_snapshot_path"] = snapshot_path
     _sync_shared_model_config_to_projects(models)
-    env["QUANLAN_MODEL_DEFAULTS_FILE"] = str(MODEL_DEFAULTS_FILE)
-    env["QUANLAN_SHARED_MODEL_CONFIG_FILE"] = str(PROJECT_ROOT / ".env.quanlan-model.local.json")
+    env["QUANLAN_MODEL_DEFAULTS_FILE"] = str(snapshot_path)
+    env["QUANLAN_SHARED_MODEL_CONFIG_FILE"] = str(snapshot_path)
     for key_name, env_names in MODEL_KEY_ENV_NAMES.items():
         value, _ = _read_model_secret(key_name)
         if value:
@@ -4487,20 +5851,27 @@ def _run_job(job_id: str, cmd: list[str], cwd: Path) -> None:
         env["GPT_PRO_BASE_URL"] = str(models.get("gpt_pro_base_url") or models.get("research_polish_base_url") or "")
         if models.get("minimax_base_url"):
             env["MINIMAX_BASE_URL"] = str(models.get("minimax_base_url") or "")
+    snapshot_summary = _model_usage_summary(models if isinstance(models, dict) else None)
     try:
         proc = subprocess.Popen(cmd, cwd=str(cwd), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", bufsize=1)
         job["process"] = proc
         job["status"] = "running"
+        job["updated_at"] = int(time.time() * 1000)
         job["lines"].append(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 任务已开始处理，请保持窗口开启。\n")
+        job["lines"].append(
+            f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 本任务使用启动时模型快照：文案 {snapshot_summary.get('text_model')} ｜ 润色 {snapshot_summary.get('polish_model')} ｜ 图片 {snapshot_summary.get('image_model')}；任务启动后再改总控台配置，不会影响本次已启动子进程。\n"
+        )
         assert proc.stdout is not None
         for line in proc.stdout:
             output_dir = _extract_output_dir_from_line(line)
             if output_dir:
                 job["output_dir"] = output_dir
             job["lines"].append(line)
-            job["lines"] = job["lines"][-1000:]
+            job["lines"] = job["lines"][-5000:]
+            job["updated_at"] = int(time.time() * 1000)
         job["exit_code"] = proc.wait()
         job["status"] = "finished"
+        job["updated_at"] = int(time.time() * 1000)
         if job["exit_code"] == 0:
             job["lines"].append(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 任务已完成。\n")
         else:
@@ -4509,6 +5880,7 @@ def _run_job(job_id: str, cmd: list[str], cwd: Path) -> None:
     except Exception as exc:
         job["status"] = "failed"
         job["exit_code"] = -1
+        job["updated_at"] = int(time.time() * 1000)
         job["lines"].append(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 任务失败：{type(exc).__name__}: {exc}\n")
         job["summary"] = _summary_from_job(job)
 
@@ -4551,7 +5923,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         if path.path == "/assistant/":
-            body = _automedia_html_v2()
+            body = _assistant_workbench_html()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
@@ -4565,7 +5937,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         if path.path == "/model/":
-            body = _assistant_html_v2()
+            body = _model_connection_html()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
@@ -4640,8 +6012,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path.path == "/api/job":
             job_id = urllib.parse.parse_qs(path.query).get("id", [""])[0]
-            job = JOBS.get(job_id)
-            _json(self, {k: v for k, v in (job or {"status": "missing", "lines": []}).items() if k != "process"})
+            _json(self, _public_job(JOBS.get(job_id)))
+            return
+        if path.path == "/api/jobs":
+            _json(self, {"ok": True, "jobs": _public_jobs()})
             return
         _json(self, {"error": "not found"}, 404)
 
@@ -4656,7 +6030,10 @@ class Handler(BaseHTTPRequestHandler):
         if path.path == "/api/settings":
             length = int(self.headers.get("Content-Length", "0") or 0)
             payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
-            _json(self, {"ok": True, **_save_public_settings(payload)})
+            try:
+                _json(self, {"ok": True, **_save_public_settings(payload)})
+            except Exception as exc:
+                _json(self, {"ok": False, "error": _safe_error(exc)}, 400)
             return
         if path.path == "/api/apps":
             length = int(self.headers.get("Content-Length", "0") or 0)
@@ -4673,7 +6050,7 @@ class Handler(BaseHTTPRequestHandler):
             extra: dict[str, Any] = {}
             if payload.get("connection_id"):
                 extra["model_connection_library"] = _record_connection_test_result(str(payload.get("connection_id") or ""), result)
-            _json(self, {"ok": True, "result": result, **extra, **_public_settings()})
+            _json(self, {"ok": True, **_public_settings(), "result": result, **extra})
             return
         if path.path == "/api/test_all_models":
             length = int(self.headers.get("Content-Length", "0") or 0)
@@ -4741,6 +6118,13 @@ class Handler(BaseHTTPRequestHandler):
                     _json(self, {"ok": True, "model_connection_library": _delete_model_connection(payload), **_public_settings()})
                 elif action == "apply_all":
                     _json(self, {"ok": True, **_apply_model_config_to_all_projects()})
+                elif action == "test_library":
+                    _json(self, {"ok": True, **_test_model_library_connections(), **_public_settings()})
+                elif action == "dedupe":
+                    _json(self, {"ok": True, "model_connection_library": _dedupe_model_connection_library(), **_public_settings()})
+                elif action == "repair_keys":
+                    report = _repair_missing_connection_keys_from_feishu()
+                    _json(self, {"ok": bool(report.get("ok")), "key_repair_report": report, **_public_settings()})
                 else:
                     _json(self, {"ok": False, "error": "unknown action"}, 400)
             except Exception as exc:
@@ -4774,13 +6158,24 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0") or 0)
             payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
             try:
-                _apply_connection_library_to_defaults(mark_changed=True)
+                models = _models_with_url_defaults(_apply_business_steps_to_models(_apply_connection_library_to_defaults(mark_changed=True)))
                 cmd, cwd = _build_command(payload)
             except Exception as exc:
                 _json(self, {"ok": False, "error": _safe_error(exc)}, 400)
                 return
             job_id = _new_job_id()
-            JOBS[job_id] = {"job_id": job_id, "status": "starting", "cmd": cmd, "cwd": str(cwd), "lines": [], "exit_code": None, "output_dir": _default_output_dir(payload)}
+            snapshot_path = _write_job_model_snapshot(job_id, models)
+            mode_key = str(payload.get("mode") or "")
+            action_key = str(payload.get("action") or payload.get("stage") or "")
+            base_key = f"{mode_key}:{action_key}" if mode_key in {"research", "culture"} and action_key else mode_key
+            if mode_key == "auto_clip":
+                base_key = "clip"
+            elif mode_key == "bgm":
+                base_key = "bgm"
+            elif mode_key == "tool":
+                base_key = f"tool:{action_key}" if action_key else "tool"
+            now_ms = int(time.time() * 1000)
+            JOBS[job_id] = {"job_id": job_id, "id": job_id, "label": base_key or "任务", "base_key": base_key, "kind": mode_key, "mode": mode_key, "action": action_key, "payload": _safe_job_payload(payload), "status": "starting", "cmd": cmd, "cwd": str(cwd), "lines": [], "exit_code": None, "output_dir": _default_output_dir(payload), "started_at": now_ms, "updated_at": now_ms, "model_snapshot": models, "model_snapshot_path": str(snapshot_path)}
             threading.Thread(target=_run_job, args=(job_id, cmd, cwd), daemon=True).start()
             _json(self, {"job_id": job_id, "message": "已启动网页任务", "cmd": cmd})
             return
@@ -4810,11 +6205,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path.path == "/api/stop":
             job_id = urllib.parse.parse_qs(path.query).get("id", [""])[0]
-            proc = JOBS.get(job_id, {}).get("process")
-            if proc and proc.poll() is None:
-                proc.terminate()
-                JOBS[job_id]["status"] = "stopping"
-            _json(self, {"ok": True})
+            result = _stop_job_record(job_id)
+            _json(self, result, 200 if result.get("ok") else 404)
+            return
+        if path.path == "/api/job_delete":
+            job_id = urllib.parse.parse_qs(path.query).get("id", [""])[0]
+            _json(self, _delete_job_record(job_id))
             return
         _json(self, {"error": "not found"}, 404)
 
@@ -4823,45 +6219,16 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main(argv: list[str] | None = None) -> None:
-    port = int((argv or sys.argv[1:] or ["8765"])[0])
+    args = argv or sys.argv[1:] or ["8765"]
+    port = int(args[0])
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     url = f"http://127.0.0.1:{port}/"
     print(f"XGN Assistant Web: {url}", flush=True)
-    webbrowser.open(url)
+    if len(args) <= 1:
+        webbrowser.open(url)
     server.serve_forever()
 
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
