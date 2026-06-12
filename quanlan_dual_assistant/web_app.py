@@ -48,6 +48,7 @@ BGM_LIBRARY_DIR = PROJECT_ROOT / "bgm_library"
 JOB_MODEL_SNAPSHOT_DIR = PROJECT_ROOT / ".workbench_runtime" / "job_model_snapshots"
 CLOUD_MONITOR_STATE_FILE = PROJECT_ROOT / ".workbench_runtime" / "cloud_monitor_state.json"
 CLOUD_METRICS_FILE = PROJECT_ROOT / ".workbench_runtime" / "cloud_metrics.json"
+CLOUD_SSH_KEY_FILE = Path(os.environ.get("QUANLAN_CLOUD_SSH_KEY", str(Path.home() / ".ssh" / "xiaozhuli_aliyun")))
 AUDIO_LIBRARY_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".flac"}
 LEGACY_FOREIGN_BASE_URLS: set[str] = set()
 PER_MODEL_BASE_URL_FIELDS = {
@@ -176,6 +177,8 @@ CLOUD_MONITOR_DEFAULT_SERVERS = (
         "host": "39.97.248.225",
         "root_url": "http://39.97.248.225/",
         "health_url": "http://39.97.248.225/health",
+        "ssh_user": "root",
+        "ssh_key": str(CLOUD_SSH_KEY_FILE),
         "services": ("eeg", "xiaozhuli"),
     },
 )
@@ -4416,7 +4419,7 @@ def _cloud_monitor_html() -> bytes:
     a.home{display:inline-flex;align-items:center;min-height:38px;padding:0 13px;border-radius:8px;background:#111827;color:#fff;text-decoration:none;font-weight:800}.layout{display:grid;grid-template-columns:1fr 420px;gap:14px}.card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:14px;box-shadow:0 8px 22px rgba(15,23,42,.05)}.title{font-size:17px;font-weight:900;margin-bottom:8px}
     .toolbar,.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.toolbar{margin-bottom:12px}button{border:0;border-radius:7px;background:var(--brand);color:#fff;padding:8px 10px;cursor:pointer;font-weight:800}button.secondary{background:#475569}button.danger{background:var(--bad)}button.ghost{background:#eef2f6;color:#263238}button:disabled{opacity:.65;cursor:wait}.pill{display:inline-flex;align-items:center;min-height:24px;padding:0 8px;border-radius:999px;background:#eef2f6;color:#334155;font-size:12px;font-weight:800}.pill.ok{background:#ecfdf3;color:var(--ok)}.pill.warn{background:#fff7ed;color:var(--warn)}
     .server{display:grid;gap:12px}.server-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.meta{color:var(--muted);font-size:12px;line-height:1.5;overflow-wrap:anywhere}.metrics{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}.metric{border:1px solid var(--line);border-radius:8px;background:#f8fafc;padding:10px;min-height:72px}.metric b{display:block;font-size:12px;color:#334155}.metric span{display:block;margin-top:8px;font-size:15px;font-weight:900}.metric small{display:block;color:var(--muted);margin-top:4px}
-    .services{display:grid;gap:8px}.service{border:1px solid var(--line);border-radius:8px;padding:10px;background:#fff}.service-top{display:flex;justify-content:space-between;gap:8px;align-items:center}.status{font-size:13px;color:var(--brand);margin:0 0 10px;word-break:break-all}pre{white-space:pre-wrap;background:#111827;color:#e5e7eb;border-radius:8px;padding:12px;max-height:52vh;overflow:auto;margin:0}.note{font-size:12px;color:var(--muted);line-height:1.55;margin-top:10px}
+    .services{display:grid;gap:8px}.service{border:1px solid var(--line);border-radius:8px;padding:10px;background:#fff}.service-top{display:flex;justify-content:space-between;gap:8px;align-items:center}.resource-line{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:8px}.resource-line span,.process-row{border:1px solid #e5e7eb;border-radius:7px;background:#f8fafc;padding:6px;font-size:12px;color:#334155;overflow-wrap:anywhere}.processes{display:grid;gap:6px;margin-top:10px}.process-row{display:grid;grid-template-columns:70px 70px 80px 1fr;gap:8px;align-items:center}.status{font-size:13px;color:var(--brand);margin:0 0 10px;word-break:break-all}pre{white-space:pre-wrap;background:#111827;color:#e5e7eb;border-radius:8px;padding:12px;max-height:52vh;overflow:auto;margin:0}.note{font-size:12px;color:var(--muted);line-height:1.55;margin-top:10px}
     @media(max-width:980px){.layout{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.top{flex-direction:column}}
   </style>
 </head>
@@ -4447,9 +4450,10 @@ let cloudState={enabled:true,servers:[],logs:[]};
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\\\"":"&quot;","'":"&#39;"}[c]))}
 function pill(ok,text){return '<span class="pill '+(ok?'ok':'warn')+'">'+esc(text)+'</span>'}
 function metric(label,m){m=m||{};const text=m.label||"待接入";return '<div class="metric"><b>'+esc(label)+'</b><span>'+esc(text)+'</span><small>'+esc(m.status==="unknown"?"等待采集器写入":(m.unit||""))+'</small></div>'}
-function renderCloud(data){cloudState=data||cloudState;document.getElementById("toggle_monitor").textContent=cloudState.enabled?"暂停监控":"恢复监控";document.getElementById("cloud_status").textContent=(cloudState.enabled?"监控中":"已暂停")+" ｜ "+(cloudState.updated_at||"");document.getElementById("cloud_log").textContent=(cloudState.logs||[]).slice(-40).join("\\n")||"暂无日志";document.getElementById("metrics_note").textContent=(cloudState.metrics_connected?"已接入指标文件：":"尚未接入 CPU/内存/硬盘采集器；预留文件：")+(cloudState.metrics_source||"");
-  document.getElementById("server_list").innerHTML=(cloudState.servers||[]).map(s=>'<article class="card"><div class="server-head"><div><div class="title">'+esc(s.name)+'</div><div class="meta">'+esc(s.provider)+' ｜ '+esc(s.host)+' ｜ '+esc(s.root_url)+'</div></div><div>'+pill(!!s.online,s.online?"在线":"不可达")+'</div></div><div class="row"><span class="pill">延迟 '+esc(s.latency_ms==null?"待测":s.latency_ms+"ms")+'</span><span class="pill">健康接口 '+esc((s.health_probe&&s.health_probe.message)||"待测")+'</span><span class="pill">首页 '+esc((s.root_probe&&s.root_probe.message)||"待测")+'</span></div><div class="metrics">'+metric("CPU",s.metrics&&s.metrics.cpu)+metric("内存",s.metrics&&s.metrics.memory)+metric("硬盘",s.metrics&&s.metrics.disk)+metric("负载",s.metrics&&s.metrics.load)+metric("网络",s.metrics&&s.metrics.network)+'</div><div class="services">'+(s.services||[]).map(serviceHtml).join("")+'</div></article>').join("")}
-function serviceHtml(app){return '<div class="service"><div class="service-top"><div><b>'+esc(app.name||app.id)+'</b><div class="meta">'+esc(app.production_target||app.production_url||"")+'</div></div>'+pill(!!app.production_online,app.production_online?"在线":"离线")+'</div><div class="row"><button onclick="controlService(event,\\''+esc(app.id)+'\\',\\'start\\')">启动</button><button class="secondary" onclick="controlService(event,\\''+esc(app.id)+'\\',\\'restart\\')">重启</button><button class="danger" onclick="controlService(event,\\''+esc(app.id)+'\\',\\'stop\\')">停止</button><button class="ghost" onclick="window.open(\\''+esc(app.production_url||app.route||"/")+'\\',\\'_blank\\')">打开</button></div></div>'}
+function renderCloud(data){cloudState=data||cloudState;document.getElementById("toggle_monitor").textContent=cloudState.enabled?"暂停监控":"恢复监控";document.getElementById("cloud_status").textContent=(cloudState.enabled?"监控中":"已暂停")+" ｜ "+(cloudState.updated_at||"");document.getElementById("cloud_log").textContent=(cloudState.logs||[]).slice(-40).join("\\n")||"暂无日志";document.getElementById("metrics_note").textContent=(cloudState.servers||[]).some(s=>s.remote_metrics&&s.remote_metrics.ok)?"已接入 SSH 只读采集：整体资源和服务进程占用来自云服务器。":((cloudState.metrics_connected?"已接入指标文件：":"尚未接入 CPU/内存/硬盘采集器；预留文件：")+(cloudState.metrics_source||""));
+  document.getElementById("server_list").innerHTML=(cloudState.servers||[]).map(s=>'<article class="card"><div class="server-head"><div><div class="title">'+esc(s.name)+'</div><div class="meta">'+esc(s.provider)+' ｜ '+esc(s.host)+' ｜ '+esc(s.root_url)+'</div><div class="meta">采集主机：'+esc((s.remote_metrics&&s.remote_metrics.host)||"待接入")+' ｜ '+esc((s.remote_metrics&&s.remote_metrics.collected_at)||"")+'</div></div><div>'+pill(!!s.online,s.online?"在线":"不可达")+'</div></div><div class="row"><span class="pill">延迟 '+esc(s.latency_ms==null?"待测":s.latency_ms+"ms")+'</span><span class="pill">健康接口 '+esc((s.health_probe&&s.health_probe.message)||"待测")+'</span><span class="pill">首页 '+esc((s.root_probe&&s.root_probe.message)||"待测")+'</span><span class="pill">'+esc((s.remote_metrics&&s.remote_metrics.ok)?"资源已采集":((s.remote_metrics&&s.remote_metrics.error)||"资源待接入"))+'</span></div><div class="metrics">'+metric("CPU",s.metrics&&s.metrics.cpu)+metric("内存",s.metrics&&s.metrics.memory)+metric("硬盘",s.metrics&&s.metrics.disk)+metric("负载",s.metrics&&s.metrics.load)+metric("网络",s.metrics&&s.metrics.network)+'</div><div class="services">'+(s.services||[]).map(serviceHtml).join("")+'</div>'+processHtml(s.top_processes||[])+'</article>').join("")}
+function serviceHtml(app){const r=app.resource||{};return '<div class="service"><div class="service-top"><div><b>'+esc(app.name||app.id)+'</b><div class="meta">'+esc(app.production_target||app.production_url||"")+'</div></div>'+pill(!!app.production_online,app.production_online?"在线":"离线")+'</div><div class="resource-line"><span>systemd '+esc(r.systemd||"未知")+'</span><span>进程 '+esc(r.process_count??"0")+'</span><span>CPU '+esc((r.cpu_percent??0)+"%")+'</span><span>内存 '+esc(r.rss_label||"0B")+'</span></div><div class="row"><button onclick="controlService(event,\\''+esc(app.id)+'\\',\\'start\\')">启动</button><button class="secondary" onclick="controlService(event,\\''+esc(app.id)+'\\',\\'restart\\')">重启</button><button class="danger" onclick="controlService(event,\\''+esc(app.id)+'\\',\\'stop\\')">停止</button><button class="ghost" onclick="window.open(\\''+esc(app.production_url||app.route||"/")+'\\',\\'_blank\\')">打开</button></div></div>'}
+function processHtml(rows){rows=(rows||[]).slice(0,8);if(!rows.length)return "";return '<div class="processes"><div class="title">占用最高进程</div>'+rows.map(p=>'<div class="process-row"><b>PID '+esc(p.pid)+'</b><span>CPU '+esc(p.cpu_percent)+'%</span><span>内存 '+esc(p.mem_percent)+'%</span><span>'+esc(p.command)+' ｜ '+esc(p.args||"")+'</span></div>').join("")+'</div>'}
 async function refreshCloud(btn){if(btn)btn.disabled=true;try{const r=await fetch("/api/cloud_servers");renderCloud(await r.json())}catch(err){document.getElementById("cloud_status").textContent="刷新失败："+(err&&err.message?err.message:"network error")}finally{if(btn)btn.disabled=false}}
 async function postCloud(action,btn){if(btn)btn.disabled=true;try{const r=await fetch("/api/cloud_servers",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action})});renderCloud(await r.json())}finally{if(btn)btn.disabled=false}}
 function toggleMonitor(btn){postCloud(cloudState.enabled?"pause":"resume",btn)}
@@ -5085,6 +5089,230 @@ def _external_cloud_metrics() -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _format_bytes(value: Any) -> str:
+    try:
+        num = float(value)
+    except Exception:
+        return "未知"
+    units = ["B", "KB", "MB", "GB", "TB"]
+    idx = 0
+    while num >= 1024 and idx < len(units) - 1:
+        num /= 1024
+        idx += 1
+    return f"{num:.1f}{units[idx]}" if idx else f"{int(num)}B"
+
+
+def _percent_label(value: Any) -> str:
+    try:
+        return f"{float(value):.1f}%"
+    except Exception:
+        return "未知"
+
+
+def _remote_metric_status(percent: Any, warn: float, bad: float) -> str:
+    try:
+        value = float(percent)
+    except Exception:
+        return "unknown"
+    if value >= bad:
+        return "bad"
+    if value >= warn:
+        return "warn"
+    return "ok"
+
+
+def _cloud_ssh_command(cfg: dict[str, Any], remote_script: str) -> list[str] | None:
+    key_path = Path(str(cfg.get("ssh_key") or CLOUD_SSH_KEY_FILE)).expanduser()
+    user = str(cfg.get("ssh_user") or "root").strip() or "root"
+    host = str(cfg.get("host") or "").strip()
+    if not host or not key_path.exists():
+        return None
+    return [
+        "ssh",
+        "-i",
+        str(key_path),
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "StrictHostKeyChecking=accept-new",
+        "-o",
+        "ConnectTimeout=6",
+        f"{user}@{host}",
+        remote_script,
+    ]
+
+
+REMOTE_CLOUD_METRICS_SCRIPT = r"""python3 - <<'PY'
+import json, os, re, shutil, subprocess, time
+
+def read(path, default=''):
+    try:
+        return open(path, encoding='utf-8', errors='replace').read().strip()
+    except Exception:
+        return default
+
+def cpu_percent():
+    def snap():
+        vals = [int(x) for x in read('/proc/stat').splitlines()[0].split()[1:]]
+        idle = vals[3] + (vals[4] if len(vals) > 4 else 0)
+        return sum(vals), idle
+    total1, idle1 = snap()
+    time.sleep(0.15)
+    total2, idle2 = snap()
+    total = max(1, total2 - total1)
+    idle = max(0, idle2 - idle1)
+    return round((total - idle) * 100 / total, 1)
+
+def mem_info():
+    data = {}
+    for line in read('/proc/meminfo').splitlines():
+        if ':' in line:
+            key, val = line.split(':', 1)
+            nums = re.findall(r'\d+', val)
+            if nums:
+                data[key] = int(nums[0]) * 1024
+    total = data.get('MemTotal', 0)
+    avail = data.get('MemAvailable', 0)
+    used = max(0, total - avail)
+    pct = round(used * 100 / total, 1) if total else None
+    return {'total': total, 'used': used, 'available': avail, 'percent': pct}
+
+def disk_info(path='/'):
+    usage = shutil.disk_usage(path)
+    pct = round(usage.used * 100 / usage.total, 1) if usage.total else None
+    return {'path': path, 'total': usage.total, 'used': usage.used, 'free': usage.free, 'percent': pct}
+
+def net_bytes():
+    rows = []
+    for line in read('/proc/net/dev').splitlines()[2:]:
+        if ':' not in line:
+            continue
+        iface, rest = line.split(':', 1)
+        iface = iface.strip()
+        if iface == 'lo':
+            continue
+        nums = [int(x) for x in rest.split()]
+        if len(nums) >= 16:
+            rows.append({'iface': iface, 'rx_bytes': nums[0], 'tx_bytes': nums[8]})
+    return rows
+
+def systemctl(name):
+    try:
+        r = subprocess.run(['systemctl', 'is-active', name], capture_output=True, text=True, timeout=2)
+        return (r.stdout or r.stderr or '').strip() or 'unknown'
+    except Exception as exc:
+        return 'unknown'
+
+def ps_rows():
+    r = subprocess.run(['ps', '-eo', 'pid,comm,pcpu,pmem,rss,args', '--sort=-pcpu'], capture_output=True, text=True, timeout=4)
+    lines = (r.stdout or '').splitlines()[1:80]
+    rows = []
+    targets = [
+        ('qlanalyser', ['qlanalyser', 'uvicorn service.qlanalyser']),
+        ('xiaozhuli', ['feishu-', 'xiaozhuli', 'ollama', 'llama-server']),
+        ('nginx', ['nginx']),
+    ]
+    for line in lines:
+        parts = line.split(None, 5)
+        if len(parts) < 6:
+            continue
+        pid, comm, pcpu, pmem, rss, args = parts
+        item = {'pid': int(pid), 'command': comm, 'cpu_percent': float(pcpu), 'mem_percent': float(pmem), 'rss_kb': int(rss), 'args': args[:180]}
+        lower = (comm + ' ' + args).lower()
+        if 'python3 -' in lower or 'ps -eo pid,comm,pcpu,pmem,rss,args' in lower:
+            continue
+        item['service_id'] = ''
+        for sid, needles in targets:
+            if any(n in lower for n in needles):
+                item['service_id'] = sid
+                break
+        rows.append(item)
+    return rows
+
+payload = {
+    'ok': True,
+    'host': os.uname().nodename,
+    'uptime': read('/proc/uptime').split()[0] if read('/proc/uptime') else '',
+    'load': os.getloadavg(),
+    'cpu_percent': cpu_percent(),
+    'memory': mem_info(),
+    'disk': disk_info('/'),
+    'network': net_bytes(),
+    'services': {name: systemctl(name) for name in ['qlanalyser', 'nginx', 'xiaozhuli']},
+    'processes': ps_rows(),
+    'collected_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+}
+print(json.dumps(payload, ensure_ascii=False))
+PY"""
+
+
+def _collect_remote_cloud_metrics(cfg: dict[str, Any]) -> dict[str, Any]:
+    cmd = _cloud_ssh_command(cfg, REMOTE_CLOUD_METRICS_SCRIPT)
+    if not cmd:
+        return {"ok": False, "error": "未配置 SSH 只读采集；请设置 QUANLAN_CLOUD_SSH_KEY 或放置 ~/.ssh/xiaozhuli_aliyun。"}
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=14)
+    except Exception as exc:
+        return {"ok": False, "error": _safe_error(exc)}
+    if proc.returncode != 0:
+        return {"ok": False, "error": _safe_error(RuntimeError((proc.stderr or proc.stdout or "SSH 采集失败")[-500:]))}
+    try:
+        data = json.loads((proc.stdout or "").strip().splitlines()[-1])
+        data["ssh_enabled"] = True
+        return data if isinstance(data, dict) else {"ok": False, "error": "SSH 采集返回格式异常"}
+    except Exception as exc:
+        return {"ok": False, "error": _safe_error(exc)}
+
+
+def _remote_metrics_to_cards(remote: dict[str, Any], file_metrics: dict[str, Any], server_id: str) -> dict[str, Any]:
+    if not remote.get("ok"):
+        return {
+            "cpu": _metric_value(file_metrics, server_id, "cpu"),
+            "memory": _metric_value(file_metrics, server_id, "memory"),
+            "disk": _metric_value(file_metrics, server_id, "disk"),
+            "load": _metric_value(file_metrics, server_id, "load"),
+            "network": _metric_value(file_metrics, server_id, "network"),
+        }
+    memory = remote.get("memory") if isinstance(remote.get("memory"), dict) else {}
+    disk = remote.get("disk") if isinstance(remote.get("disk"), dict) else {}
+    load = remote.get("load") if isinstance(remote.get("load"), list) else []
+    network = remote.get("network") if isinstance(remote.get("network"), list) else []
+    rx = sum(int(x.get("rx_bytes") or 0) for x in network if isinstance(x, dict))
+    tx = sum(int(x.get("tx_bytes") or 0) for x in network if isinstance(x, dict))
+    cpu_pct = remote.get("cpu_percent")
+    mem_pct = memory.get("percent")
+    disk_pct = disk.get("percent")
+    return {
+        "cpu": {"label": _percent_label(cpu_pct), "value": cpu_pct, "unit": "CPU 使用率", "status": _remote_metric_status(cpu_pct, 75, 90)},
+        "memory": {"label": _percent_label(mem_pct), "value": mem_pct, "unit": f"{_format_bytes(memory.get('used'))} / {_format_bytes(memory.get('total'))}", "status": _remote_metric_status(mem_pct, 80, 92)},
+        "disk": {"label": _percent_label(disk_pct), "value": disk_pct, "unit": f"{_format_bytes(disk.get('used'))} / {_format_bytes(disk.get('total'))}", "status": _remote_metric_status(disk_pct, 75, 90)},
+        "load": {"label": ", ".join(f"{float(x):.2f}" for x in load[:3]) if load else "未知", "value": load[0] if load else None, "unit": "1 / 5 / 15 分钟", "status": "ok"},
+        "network": {"label": f"入 {_format_bytes(rx)} / 出 {_format_bytes(tx)}", "value": {"rx_bytes": rx, "tx_bytes": tx}, "unit": "累计流量", "status": "ok"},
+    }
+
+
+def _service_resource_summary(remote: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
+    service_names = {"eeg": "qlanalyser", "xiaozhuli": "xiaozhuli"}
+    processes = remote.get("processes") if isinstance(remote.get("processes"), list) else []
+    systemd = remote.get("services") if isinstance(remote.get("services"), dict) else {}
+    for app_id, service_name in service_names.items():
+        rows = [x for x in processes if isinstance(x, dict) and x.get("service_id") == service_name]
+        cpu = sum(float(x.get("cpu_percent") or 0) for x in rows)
+        mem = sum(float(x.get("mem_percent") or 0) for x in rows)
+        rss = sum(int(x.get("rss_kb") or 0) for x in rows) * 1024
+        result[app_id] = {
+            "systemd": systemd.get(service_name) or "unknown",
+            "process_count": len(rows),
+            "cpu_percent": round(cpu, 1),
+            "mem_percent": round(mem, 1),
+            "rss": rss,
+            "rss_label": _format_bytes(rss),
+            "top_processes": sorted(rows, key=lambda x: float(x.get("cpu_percent") or 0), reverse=True)[:6],
+        }
+    return result
+
+
 def _metric_value(metrics: dict[str, Any], server_id: str, key: str) -> dict[str, Any]:
     server_metrics = metrics.get(server_id) if isinstance(metrics, dict) else {}
     value = server_metrics.get(key) if isinstance(server_metrics, dict) else None
@@ -5103,8 +5331,16 @@ def _cloud_server_statuses(*, force: bool = False) -> dict[str, Any]:
     for cfg in CLOUD_MONITOR_DEFAULT_SERVERS:
         root_probe = _http_probe(str(cfg.get("root_url") or ""), timeout=2.2) if enabled else {"ok": False, "latency_ms": None, "message": "监控已暂停"}
         health_probe = _http_probe(str(cfg.get("health_url") or ""), timeout=2.2) if enabled else {"ok": False, "latency_ms": None, "message": "监控已暂停"}
+        remote_metrics = _collect_remote_cloud_metrics(cfg) if enabled else {"ok": False, "error": "监控已暂停"}
+        resource_by_app = _service_resource_summary(remote_metrics)
         ok = bool(root_probe.get("ok") or health_probe.get("ok"))
         latency_values = [x.get("latency_ms") for x in (root_probe, health_probe) if isinstance(x.get("latency_ms"), (int, float))]
+        apps = []
+        for app in _app_statuses().get("apps", []):
+            if app.get("id") in set(cfg.get("services") or ()):
+                app = dict(app)
+                app["resource"] = resource_by_app.get(str(app.get("id") or ""), {})
+                apps.append(app)
         servers.append({
             "id": cfg["id"],
             "name": cfg["name"],
@@ -5117,14 +5353,16 @@ def _cloud_server_statuses(*, force: bool = False) -> dict[str, Any]:
             "latency_ms": min(latency_values) if latency_values else None,
             "root_probe": root_probe,
             "health_probe": health_probe,
-            "metrics": {
-                "cpu": _metric_value(metrics, str(cfg["id"]), "cpu"),
-                "memory": _metric_value(metrics, str(cfg["id"]), "memory"),
-                "disk": _metric_value(metrics, str(cfg["id"]), "disk"),
-                "load": _metric_value(metrics, str(cfg["id"]), "load"),
-                "network": _metric_value(metrics, str(cfg["id"]), "network"),
+            "remote_metrics": {
+                "ok": bool(remote_metrics.get("ok")),
+                "error": str(remote_metrics.get("error") or ""),
+                "host": str(remote_metrics.get("host") or ""),
+                "collected_at": str(remote_metrics.get("collected_at") or ""),
+                "ssh_enabled": bool(remote_metrics.get("ssh_enabled")),
             },
-            "services": [app for app in _app_statuses().get("apps", []) if app.get("id") in set(cfg.get("services") or ())],
+            "metrics": _remote_metrics_to_cards(remote_metrics, metrics, str(cfg["id"])),
+            "services": apps,
+            "top_processes": (remote_metrics.get("processes") or [])[:10] if isinstance(remote_metrics.get("processes"), list) else [],
         })
     if force:
         _cloud_log("已手动刷新云服务器健康状态。")
