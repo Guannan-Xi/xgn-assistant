@@ -113,7 +113,7 @@ MODEL_CONNECTION_ROLE_ORDER = ("text", "gpt_pro", "polish", "image", "minimax")
 MODEL_STEP_ROUTES = {
     "script_text": {"label": "脚本/文案生成", "role": "text", "roles": ("text",)},
     "research_text": {"label": "科研速递文本", "role": "text", "roles": ("text",)},
-    "polish_text": {"label": "最终文案润色", "role": "polish", "roles": ("polish", "text")},
+    "polish_text": {"label": "最终文案润色", "role": "polish", "roles": ("polish",)},
     "image_generation": {"label": "图片生成", "role": "image", "roles": ("image",)},
     "voice_bgm": {"label": "配音/BGM", "role": "minimax", "roles": ("minimax",)},
 }
@@ -1197,9 +1197,69 @@ def _repair_active_model_connections(data: dict[str, Any]) -> bool:
     return changed
 
 
+def _sync_step_routes_from_active(data: dict[str, Any]) -> bool:
+    changed = False
+    active = data.get("active_connections") if isinstance(data.get("active_connections"), dict) else {}
+    routes = data.get("step_routes") if isinstance(data.get("step_routes"), dict) else {}
+    for step, meta in MODEL_STEP_ROUTES.items():
+        role = str(meta.get("role") or "text")
+        ids: list[str] = []
+        for raw in (active.get(step), active.get(role)):
+            cid = _connection_id(str(raw or ""))
+            item = _connection_by_id(data, cid)
+            if item and bool(item.get("enabled", True)):
+                real = _connection_public_id_value(item)
+                if real and real not in ids:
+                    ids.append(real)
+        if ids and routes.get(step) != ids:
+            routes[step] = ids
+            changed = True
+    data["step_routes"] = routes
+    return changed
+
+
 def _force_current_model_routes(data: dict[str, Any]) -> bool:
     changed = False
     connections = data.get("connections") if isinstance(data.get("connections"), list) else []
+
+    preferred_specs = [
+        ("text", DEFAULT_FOREIGN_BASE_URL, "gpt-5.5", "DST tested", 10),
+        ("polish", DEFAULT_DEEPSEEK_BASE_URL, "deepseek-chat", "DeepSeek polish", 20),
+        ("image", DEFAULT_FOREIGN_BASE_URL, "gpt-image-2", "DST image", 30),
+        ("minimax", DEFAULT_MINIMAX_BASE_URL, "speech-2.8-hd", "MiniMax 53hk", 40),
+        ("gpt_pro", DEFAULT_GPT_PRO_BASE_URL, "gpt-5.5", "GPT-Pro backup", 90),
+    ]
+    by_key: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for item in connections:
+        if isinstance(item, dict):
+            by_key[(
+                _model_connection_role(str(item.get("role") or "")),
+                str(item.get("base_url") or "").strip().rstrip("/"),
+                str(item.get("model") or "").strip(),
+            )] = item
+    for role, base_url, model, name, priority in preferred_specs:
+        key = (role, base_url.rstrip("/"), model)
+        item = by_key.get(key)
+        if not item:
+            item = {
+                "id": _connection_id(f"{role}-{name}-{base_url}-{model}"),
+                "role": role,
+                "name": name,
+                "provider": _provider_for_connection_role(role),
+                "base_url": base_url.rstrip("/"),
+                "model": model,
+                "key_name": _key_for_connection_role(role),
+                "enabled": True,
+            }
+            connections.append(item)
+            by_key[key] = item
+            changed = True
+        updates = {"priority": priority, "locked": True, "enabled": True}
+        for k, v in updates.items():
+            if item.get(k) != v:
+                item[k] = v
+                changed = True
+    data["connections"] = connections
 
     def find(role: str, base_url: str, model: str) -> str:
         for item in connections:
@@ -1215,6 +1275,7 @@ def _force_current_model_routes(data: dict[str, Any]) -> bool:
         return ""
 
     text_id = find("text", DEFAULT_FOREIGN_BASE_URL, "gpt-5.5")
+    polish_id = find("polish", DEFAULT_DEEPSEEK_BASE_URL, "deepseek-chat")
     image_id = find("image", DEFAULT_FOREIGN_BASE_URL, "gpt-image-2")
     minimax_id = find("minimax", DEFAULT_MINIMAX_BASE_URL, "speech-2.8-hd")
     gpt_pro_id = find("gpt_pro", DEFAULT_GPT_PRO_BASE_URL, "gpt-5.5")
@@ -1223,8 +1284,8 @@ def _force_current_model_routes(data: dict[str, Any]) -> bool:
         "text": text_id,
         "script_text": text_id,
         "research_text": text_id,
-        "polish": text_id,
-        "polish_text": text_id,
+        "polish": polish_id,
+        "polish_text": polish_id,
         "image": image_id,
         "image_generation": image_id,
         "minimax": minimax_id,
@@ -1240,7 +1301,7 @@ def _force_current_model_routes(data: dict[str, Any]) -> bool:
     for step, ids in {
         "script_text": [text_id, gpt_pro_id],
         "research_text": [text_id, gpt_pro_id],
-        "polish_text": [text_id, gpt_pro_id],
+        "polish_text": [polish_id],
         "image_generation": [image_id],
         "voice_bgm": [minimax_id],
     }.items():
@@ -1259,6 +1320,12 @@ def _best_connection_for_step(step: str, data: dict[str, Any] | None = None) -> 
     if not meta:
         return None
     allowed_roles = {str(x) for x in (meta.get("roles") or (meta.get("role") or "text",))}
+    active = data.get("active_connections") if isinstance(data.get("active_connections"), dict) else {}
+    role = str(meta.get("role") or "text")
+    for raw in (active.get(step), active.get(role)):
+        item = _connection_by_id(data, str(raw or ""))
+        if item and bool(item.get("enabled", True)) and _model_connection_role(str(item.get("role") or "")) in allowed_roles:
+            return item
     routes = data.get("step_routes") if isinstance(data.get("step_routes"), dict) else {}
     candidate_ids = [str(x or "") for x in routes.get(step, []) if str(x or "")]
     candidates: list[dict[str, Any]] = []
@@ -1309,6 +1376,8 @@ def _best_connection_for_role(role: str, data: dict[str, Any] | None = None) -> 
 def _models_from_connection_library(models: dict[str, Any] | None = None) -> dict[str, Any]:
     result = dict(models or _model_settings())
     data = _read_model_connection_library()
+    if _sync_step_routes_from_active(data):
+        _write_json(MODEL_CONNECTION_LIBRARY_FILE, data)
     selected: dict[str, str] = {}
     for step in MODEL_STEP_ORDER:
         meta = MODEL_STEP_ROUTES[step]
@@ -1370,6 +1439,7 @@ def _models_from_connection_library(models: dict[str, Any] | None = None) -> dic
         if key_value and key_name in MODEL_KEY_FILES:
             _write_secret(MODEL_KEY_FILES[key_name], key_value)
     data["active_connections"] = {**(data.get("active_connections") if isinstance(data.get("active_connections"), dict) else {}), **selected}
+    _sync_step_routes_from_active(data)
     _write_json(MODEL_CONNECTION_LIBRARY_FILE, data)
     return result
 
@@ -2785,7 +2855,18 @@ def _record_connection_test_result(connection_id: str, result: dict[str, Any]) -
             item.update(status_payload)
             changed = True
     data["connections"] = connections
+    if status_payload.get("last_test_ok") is True and tested_role:
+        active = data.get("active_connections") if isinstance(data.get("active_connections"), dict) else {}
+        active[tested_role] = cid
+        for step, meta in MODEL_STEP_ROUTES.items():
+            allowed = {str(x) for x in (meta.get("roles") or (meta.get("role") or "text",))}
+            if tested_role in allowed:
+                active[step] = cid
+        data["active_connections"] = active
+        _sync_step_routes_from_active(data)
     _write_json(MODEL_CONNECTION_LIBRARY_FILE, data)
+    if status_payload.get("last_test_ok") is True:
+        _apply_connection_library_to_defaults(mark_changed=True)
     return _public_model_connection_library(_read_model_connection_library())
 
 
@@ -4406,6 +4487,114 @@ loadApps();
     return _clean_console_html(body.encode("utf-8"))
 
 
+def _audience_lab_html() -> bytes:
+    initial_apps = _app_statuses().get("apps", [])
+    project_buttons = "".join(
+        (
+            f'<button class="project-btn" data-project="{escape(str(app.get("id") or ""), quote=True)}">'
+            f'<b>{escape(str(app.get("name") or app.get("id") or ""))}</b>'
+            f'<span>{"在线" if app.get("online") else "离线"} ｜ {escape(str(app.get("sync_state") or ""))}</span>'
+            "</button>"
+        )
+        for app in initial_apps
+    ) or '<button class="project-btn" data-project="assistant"><b>自媒体小猪理</b><span>等待项目列表</span></button>'
+    body = f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>虚拟用户测试</title>
+  <style>
+    :root{{font-family:Arial,"Microsoft YaHei",sans-serif;color:#17202a;background:#f6f8fb;--brand:#0f766e;--brand2:#2563eb;--ink:#102033;--line:#d8e0e7;--muted:#64748b;--card:#fff;--shadow:0 16px 36px rgba(15,23,42,.10);--good:#027a48;--warn:#b54708;--bad:#b3261e}}
+    *{{box-sizing:border-box}}body{{margin:0;min-height:100vh;background:radial-gradient(circle at 12% 0%,#d9f99d 0,#f8fafc 27%,transparent 48%),linear-gradient(145deg,#eef7f4 0%,#f7f2ea 52%,#eef4ff 100%)}}.wrap{{max-width:1320px;margin:0 auto;padding:24px 18px 36px}}
+    .top{{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:14px}}.eyebrow{{display:inline-flex;align-items:center;gap:8px;min-height:26px;padding:0 10px;border-radius:999px;background:#102033;color:#fff;font-size:12px;font-weight:900}}.eyebrow:before{{content:"";width:8px;height:8px;border-radius:50%;background:#22c55e;box-shadow:0 0 0 0 rgba(34,197,94,.55);animation:pulse 1.8s infinite}}h1{{font-size:28px;margin:10px 0 7px;letter-spacing:0}}.hint{{color:#415267;font-size:13px;line-height:1.65;margin:0;max-width:820px}}.home{{display:inline-flex;align-items:center;min-height:38px;padding:0 13px;border-radius:8px;background:#111827;color:#fff;text-decoration:none;font-weight:800;white-space:nowrap}}
+    .layout{{display:grid;grid-template-columns:360px minmax(0,1fr);gap:14px}}.panel,.card{{background:rgba(255,255,255,.88);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow)}}.panel{{padding:14px}}.panel h2{{font-size:16px;margin:0 0 10px}}.stack{{display:grid;gap:10px}}.project-btn,.mode-btn,.persona{{width:100%;text-align:left;border:1px solid #dbe4ea;background:#fff;color:#17202a;border-radius:8px;padding:10px;cursor:pointer;transition:transform .15s ease,border-color .15s ease,box-shadow .15s ease}}.project-btn:hover,.mode-btn:hover,.persona:hover{{transform:translateY(-1px);border-color:#14b8a6}}.project-btn.active,.mode-btn.active,.persona.active{{border-color:#0f766e;box-shadow:0 0 0 3px rgba(20,184,166,.16)}}.project-btn b,.mode-btn b{{display:block;font-size:14px}}.project-btn span,.mode-btn span,.persona span{{display:block;margin-top:4px;font-size:12px;color:var(--muted);line-height:1.45}}
+    .modes{{display:grid;grid-template-columns:1fr 1fr;gap:8px}}.personas{{display:grid;grid-template-columns:1fr;gap:7px;max-height:260px;overflow:auto;padding-right:2px}}.persona{{font-size:12px;font-weight:800;padding:8px}}.persona span{{font-weight:400}}.row{{display:flex;gap:8px;flex-wrap:wrap}}button{{border:0;border-radius:7px;background:var(--brand);color:#fff;padding:9px 11px;cursor:pointer;font-weight:800}}button.secondary{{background:#475569}}button.ghost{{background:#eef2f6;color:#263238}}button.danger{{background:var(--bad)}}button:disabled{{opacity:.55;cursor:not-allowed}}button[data-busy="true"]{{opacity:.70;cursor:wait}}
+    .work{{display:grid;gap:14px}}.toolbar{{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:start;padding:14px}}.status{{font-size:13px;color:#0f766e;font-weight:900;line-height:1.55;overflow-wrap:anywhere}}.mini{{font-size:12px;color:var(--muted);line-height:1.5}}.score-grid{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}}.score{{padding:12px;border:1px solid #dbe4ea;border-radius:8px;background:#fff}}.score b{{font-size:22px;display:block}}.score span{{font-size:12px;color:var(--muted)}}.result-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}}.result-box{{border:1px solid #dbe4ea;border-radius:8px;background:#fff;padding:12px;min-width:0}}.result-box h3{{font-size:14px;margin:0 0 8px}}.result-box ul{{margin:0;padding-left:18px;color:#334155;font-size:13px;line-height:1.62}}.result-box li+li{{margin-top:4px}}.wide{{grid-column:1/-1}}textarea{{width:100%;min-height:98px;border:1px solid #cbd5e1;border-radius:8px;padding:10px;font:13px/1.5 Arial,"Microsoft YaHei",sans-serif;resize:vertical}}pre{{white-space:pre-wrap;background:#111827;color:#e5e7eb;border-radius:8px;padding:12px;height:300px;overflow:auto;margin:0;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}}.log-head{{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}}.log-head h3{{margin:0;font-size:14px}}.pill{{display:inline-flex;align-items:center;min-height:24px;padding:0 8px;border-radius:999px;background:#eef2f6;color:#334155;font-size:12px;font-weight:800}}.pill.ok{{background:#ecfdf3;color:#027a48}}.pill.warn{{background:#fff7ed;color:#b54708}}.pill.bad{{background:#fee4e2;color:#b3261e}}
+    @keyframes pulse{{0%{{box-shadow:0 0 0 0 rgba(34,197,94,.55)}}70%{{box-shadow:0 0 0 8px rgba(34,197,94,0)}}100%{{box-shadow:0 0 0 0 rgba(34,197,94,0)}}}}@media(max-width:980px){{.layout{{grid-template-columns:1fr}}.toolbar{{grid-template-columns:1fr}}.score-grid,.result-grid{{grid-template-columns:1fr}}}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div><div class="eyebrow">VIRTUAL PANEL ONLINE</div><h1>虚拟用户测试</h1><p class="hint">把作品和产品丢给一组挑剔的虚拟评委：普通用户、专家、竞品销售、疲惫的一线操作者、预算敏感客户和审美评委。这里是模型模拟，不替代真实用户调研，但专门用来提前抓误解、劝退点和上线风险。</p></div>
+    <a class="home" href="/">返回首页</a>
+  </div>
+  <div class="layout">
+    <aside class="stack">
+      <section class="panel"><h2>项目</h2><div class="stack" id="project_list">{project_buttons}</div></section>
+      <section class="panel"><h2>评审强度</h2><div class="modes" id="mode_list">
+        <button class="mode-btn active" data-mode="quick"><b>快速体检</b><span>少量素材，先抓明显问题</span></button>
+        <button class="mode-btn" data-mode="standard"><b>标准评审</b><span>公开信号 + 本地素材</span></button>
+        <button class="mode-btn" data-mode="deep"><b>深度压力测试</b><span>更像“拿出去溜溜”</span></button>
+        <button class="mode-btn" data-mode="preflight"><b>上线前复核</b><span>重点看风险和发布稳定性</span></button>
+      </div></section>
+      <section class="panel"><h2>虚拟评委</h2><div class="personas" id="persona_list">
+        <button class="persona active" data-persona="normal">普通用户<span>第一眼能不能看懂、愿不愿意继续</span></button>
+        <button class="persona active" data-persona="expert">挑剔专家<span>事实、逻辑、证据链和专业感</span></button>
+        <button class="persona active" data-persona="competitor">竞品销售<span>会怎样攻击你的卖点</span></button>
+        <button class="persona active" data-persona="operator">疲惫的一线操作者<span>流程麻烦、按钮不清、信息太挤</span></button>
+        <button class="persona active" data-persona="budget">预算敏感客户<span>值不值、风险大不大、替代品是什么</span></button>
+        <button class="persona active" data-persona="taste">品牌/审美评委<span>画面、文字、质感和可信度</span></button>
+        <button class="persona active" data-persona="safety">安全/合规检查<span>夸大、误导、隐私和高风险表达</span></button>
+      </div></section>
+    </aside>
+    <main class="work">
+      <section class="card toolbar">
+        <div><div class="status" id="status">选择项目和强度后启动评审。</div><div class="mini" id="context_line">当前：自媒体小猪理 / 快速体检</div></div>
+        <div class="row">
+          <button id="start_btn" onclick="startReview()">启动评审</button>
+          <button class="danger" onclick="stopReview()">停止</button>
+          <button class="ghost" onclick="loadReport(true)">读取最新报告</button>
+          <button class="secondary" onclick="submitFeedback()">写入优化建议</button>
+          <button class="ghost" onclick="clearPageLog()">清空本页日志</button>
+        </div>
+      </section>
+      <section class="score-grid">
+        <div class="score"><b id="score_overall">--</b><span>综合判断</span></div>
+        <div class="score"><b id="score_positive">--</b><span>正向评价</span></div>
+        <div class="score"><b id="score_negative">--</b><span>反对意见</span></div>
+        <div class="score"><b id="score_status">待测</b><span>联动状态</span></div>
+      </section>
+      <section class="result-grid">
+        <div class="result-box"><h3>正向评价</h3><ul id="overview"><li>等待评审。</li></ul></div>
+        <div class="result-box"><h3>主要反对意见</h3><ul id="objections"><li>等待评审。</li></ul></div>
+        <div class="result-box"><h3>建议改动</h3><ul id="suggestions"><li>等待评审。</li></ul></div>
+        <div class="result-box"><h3>仍需真人确认</h3><ul id="human"><li>真实观众数据、业务风险和专业事实仍需人工确认。</li></ul></div>
+        <div class="result-box wide"><h3>人工观察写入</h3><textarea id="feedback_text" placeholder="例如：开头不要问虚的问题，要直接切中全文科学问题；目录页信息太挤；客户看不懂按钮含义。"></textarea></div>
+        <div class="result-box wide"><div class="log-head"><h3>运行日志</h3><span class="pill" id="job_pill">未运行</span></div><pre id="log">暂无日志</pre></div>
+      </section>
+    </main>
+  </div>
+</div>
+<script>
+const projectNames={{assistant:"自媒体小猪理",xiaozhuli:"全澜小猪理",eeg:"脑电分析平台"}};
+let selectedProject=localStorage.getItem("audience_lab_project")||"assistant";
+let selectedMode=localStorage.getItem("audience_lab_mode")||"quick";
+let currentJob=localStorage.getItem("audience_lab_job")||"";
+const logKey="audience_lab_page_log";
+function esc(s){{return String(s||"").replace(/[&<>"']/g,c=>({{"&":"&amp;","<":"&lt;",">":"&gt;","\\\"":"&quot;","'":"&#39;"}}[c]))}}
+function setStatus(text){{document.getElementById("status").textContent=text;appendPageLog(text)}}
+function appendPageLog(text){{const line="["+new Date().toLocaleTimeString()+"] "+text+"\\n";let old="";try{{old=localStorage.getItem(logKey)||""}}catch(e){{}}const next=(old+line).slice(-16000);try{{localStorage.setItem(logKey,next)}}catch(e){{}}const el=document.getElementById("log");if(el&&(!currentJob||el.textContent==="暂无日志"))el.textContent=next||"暂无日志"}}
+function clearPageLog(){{try{{localStorage.removeItem(logKey)}}catch(e){{}}document.getElementById("log").textContent="本页日志已清空。";setStatus("本页日志已清空")}}
+function activeSync(){{document.querySelectorAll("[data-project]").forEach(b=>b.classList.toggle("active",b.dataset.project===selectedProject));document.querySelectorAll("[data-mode]").forEach(b=>b.classList.toggle("active",b.dataset.mode===selectedMode));document.getElementById("context_line").textContent="当前："+(projectNames[selectedProject]||selectedProject)+" / "+modeName(selectedMode)}}
+function modeName(mode){{return {{quick:"快速体检",standard:"标准评审",deep:"深度压力测试",preflight:"上线前复核"}}[mode]||"标准评审"}}
+function bindControls(){{document.querySelectorAll("[data-project]").forEach(b=>b.addEventListener("click",()=>{{selectedProject=b.dataset.project;localStorage.setItem("audience_lab_project",selectedProject);activeSync();loadReport(false);setStatus("已切换项目："+(projectNames[selectedProject]||selectedProject))}}));document.querySelectorAll("[data-mode]").forEach(b=>b.addEventListener("click",()=>{{selectedMode=b.dataset.mode;localStorage.setItem("audience_lab_mode",selectedMode);activeSync();setStatus("已选择强度："+modeName(selectedMode))}}));document.querySelectorAll("[data-persona]").forEach(b=>b.addEventListener("click",()=>{{b.classList.toggle("active");setStatus("已调整虚拟评委："+b.textContent.trim().replace(/\\s+/g," "))}}))}}
+function personas(){{return Array.from(document.querySelectorAll("[data-persona].active")).map(x=>x.dataset.persona)}}
+function listHtml(items,emptyText){{const arr=Array.isArray(items)?items.filter(Boolean):[];return (arr.length?arr:[emptyText]).slice(0,10).map(x=>"<li>"+esc(x)+"</li>").join("")}}
+function renderSummary(summary,meta){{summary=summary||{{}};document.getElementById("overview").innerHTML=listHtml(summary.overview,"暂无正向评价。");document.getElementById("objections").innerHTML=listHtml(summary.objections||summary.risks,"暂无主要反对意见。");document.getElementById("suggestions").innerHTML=listHtml(summary.suggestions,"暂无建议。");document.getElementById("human").innerHTML=listHtml(summary.needs_human_confirmation||summary.expected_effects,"真实观众数据、业务风险和专业事实仍需人工确认。");const counts=summary.counts||{{}};document.getElementById("score_overall").textContent=counts.overall||"--";document.getElementById("score_positive").textContent=counts.positive||"--";document.getElementById("score_negative").textContent=counts.negative||"--";document.getElementById("score_status").textContent=(meta&&meta.status)||"待测"}}
+async function startReview(){{const btn=document.getElementById("start_btn");btn.dataset.busy="true";btn.disabled=true;try{{setStatus("正在创建评审任务："+(projectNames[selectedProject]||selectedProject)+" / "+modeName(selectedMode));document.getElementById("job_pill").textContent="启动中";document.getElementById("log").textContent="正在创建任务...";const r=await fetch("/api/audience",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify({{project:selectedProject,mode:selectedMode,personas:personas()}})}});const data=await r.json();if(!data.ok){{setStatus("启动失败："+(data.error||"unknown"));document.getElementById("log").textContent=data.error||"启动失败";return}}currentJob=data.job_id;localStorage.setItem("audience_lab_job",currentJob);setStatus("评审已启动："+(data.name||selectedProject)+" / "+modeName(data.mode||selectedMode));pollJob()}}catch(err){{setStatus("启动失败："+(err&&err.message?err.message:"network error"))}}finally{{btn.dataset.busy="";btn.disabled=false}}}}
+async function stopReview(){{if(!currentJob){{setStatus("没有正在运行的评审任务");return}}setStatus("正在发送停止请求...");const r=await fetch("/api/stop?id="+encodeURIComponent(currentJob),{{method:"POST"}});const data=await r.json().catch(()=>({{ok:false,message:"停止接口没有返回 JSON"}}));setStatus(data.ok?"停止请求已发送":"停止失败："+(data.message||data.error||"unknown"));pollJob()}}
+async function pollJob(){{if(!currentJob)return;const r=await fetch("/api/job?id="+encodeURIComponent(currentJob));const data=await r.json();const status=data.status||"missing";document.getElementById("job_pill").textContent=status;document.getElementById("job_pill").className="pill "+(status==="finished"?(data.exit_code===0?"ok":"warn"):(["running","starting","stopping"].includes(status)?"warn":""));document.getElementById("log").textContent=(data.lines||[]).join("")||localStorage.getItem(logKey)||"暂无日志";renderSummary(data.summary,{{status:status==="finished"?(data.exit_code===0?"完成":"未完成"):status}});if(["running","starting","stopping"].includes(status))setTimeout(pollJob,1200);else loadReport(false)}}
+async function loadReport(showStatus){{try{{const r=await fetch("/api/audience_report?project="+encodeURIComponent(selectedProject));const data=await r.json();if(data.ok&&data.summary){{renderSummary(data.summary,{{status:data.report_found?"已读取":"待测"}});if(data.readable_log&&data.readable_log.length&&!currentJob)document.getElementById("log").textContent=data.readable_log.join("\\n");if(showStatus)setStatus(data.report_found?"已读取最新报告："+(data.report_path||""):"还没有找到该项目的评审报告")}}}}catch(err){{if(showStatus)setStatus("读取报告失败："+(err&&err.message?err.message:"network error"))}}}}
+async function submitFeedback(){{const text=document.getElementById("feedback_text").value.trim();if(!text){{setStatus("请先写入人工观察");return}}setStatus("正在写入人工观察...");const r=await fetch("/api/audience_feedback",{{method:"POST",headers:{{"Content-Type":"application/json"}},body:JSON.stringify({{project:selectedProject,text}})}});const data=await r.json();if(!data.ok){{setStatus("写入失败："+(data.error||"unknown"));return}}document.getElementById("feedback_text").value="";setStatus("人工观察已写入："+(data.name||selectedProject));renderSummary({{overview:["已收到人工观察，下一轮评审会把它当作必须复测的问题。"],objections:[text],suggestions:["把这条观察转成下一轮可验证的修复项。"],needs_human_confirmation:["请在真实产物和真实用户反馈中复核这条观察。"],counts:{{overall:"记录",positive:"1",negative:"1"}}}},{{status:"已写入"}})}}
+bindControls();activeSync();document.getElementById("log").textContent=localStorage.getItem(logKey)||"暂无日志";if(currentJob)pollJob();loadReport(false);
+</script>
+</body>
+</html>"""
+    return _clean_console_html(body.encode("utf-8"))
+
+
 def _cloud_monitor_html() -> bytes:
     body = """<!doctype html>
 <html lang="zh-CN">
@@ -4414,19 +4603,21 @@ def _cloud_monitor_html() -> bytes:
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>云服务器健康舱</title>
   <style>
-    :root{font-family:Arial,"Microsoft YaHei",sans-serif;color:#17202a;background:#f5f7fb;--brand:#0f766e;--line:#d7dce2;--muted:#667085;--bad:#b3261e;--ok:#027a48;--warn:#b54708}
-    *{box-sizing:border-box}body{margin:0;padding:20px}.wrap{max-width:1280px;margin:0 auto}.top{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:14px}h1{font-size:26px;margin:0 0 8px}.hint{color:var(--muted);font-size:13px;line-height:1.6;margin:0;max-width:820px}
-    a.home{display:inline-flex;align-items:center;min-height:38px;padding:0 13px;border-radius:8px;background:#111827;color:#fff;text-decoration:none;font-weight:800}.layout{display:grid;grid-template-columns:1fr 420px;gap:14px}.card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:14px;box-shadow:0 8px 22px rgba(15,23,42,.05)}.title{font-size:17px;font-weight:900;margin-bottom:8px}
-    .toolbar,.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.toolbar{margin-bottom:12px}button{border:0;border-radius:7px;background:var(--brand);color:#fff;padding:8px 10px;cursor:pointer;font-weight:800}button.secondary{background:#475569}button.danger{background:var(--bad)}button.ghost{background:#eef2f6;color:#263238}button:disabled{opacity:.65;cursor:wait}.pill{display:inline-flex;align-items:center;min-height:24px;padding:0 8px;border-radius:999px;background:#eef2f6;color:#334155;font-size:12px;font-weight:800}.pill.ok{background:#ecfdf3;color:var(--ok)}.pill.warn{background:#fff7ed;color:var(--warn)}
-    .server{display:grid;gap:12px}.server-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.meta{color:var(--muted);font-size:12px;line-height:1.5;overflow-wrap:anywhere}.metrics{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}.metric{border:1px solid var(--line);border-radius:8px;background:#f8fafc;padding:10px;min-height:72px}.metric b{display:block;font-size:12px;color:#334155}.metric span{display:block;margin-top:8px;font-size:15px;font-weight:900}.metric small{display:block;color:var(--muted);margin-top:4px}
-    .services{display:grid;gap:8px}.service{border:1px solid var(--line);border-radius:8px;padding:10px;background:#fff}.service-top{display:flex;justify-content:space-between;gap:8px;align-items:center}.resource-line{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:8px}.resource-line span,.process-row{border:1px solid #e5e7eb;border-radius:7px;background:#f8fafc;padding:6px;font-size:12px;color:#334155;overflow-wrap:anywhere}.processes{display:grid;gap:6px;margin-top:10px}.process-row{display:grid;grid-template-columns:70px 70px 80px 1fr;gap:8px;align-items:center}.status{font-size:13px;color:var(--brand);margin:0 0 10px;word-break:break-all}pre{white-space:pre-wrap;background:#111827;color:#e5e7eb;border-radius:8px;padding:12px;max-height:52vh;overflow:auto;margin:0}.note{font-size:12px;color:var(--muted);line-height:1.55;margin-top:10px}
-    @media(max-width:980px){.layout{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.top{flex-direction:column}}
+    :root{font-family:Arial,"Microsoft YaHei",sans-serif;color:#17202a;background:#eef5f2;--brand:#0f766e;--brand2:#2563eb;--ink:#102033;--line:#d8e0e7;--muted:#64748b;--card:#fff;--bad:#b3261e;--ok:#027a48;--warn:#b54708;--shadow:0 16px 36px rgba(15,23,42,.10);--beam:rgba(250,204,21,.22)}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;padding:20px;background:linear-gradient(145deg,#eef7f4 0%,#f7f2ea 52%,#eef4ff 100%);color:var(--ink)}body:before{content:"";position:fixed;inset:0;pointer-events:none;background:linear-gradient(115deg,transparent 0 42%,var(--beam) 48%,transparent 56%);transform:translateX(-80%);animation:sweep 10s linear infinite;mix-blend-mode:multiply}.wrap{max-width:1280px;margin:0 auto;position:relative}
+    .top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px;border:1px solid rgba(15,118,110,.18);border-radius:8px;background:rgba(255,255,255,.80);box-shadow:var(--shadow);padding:18px;position:relative;overflow:hidden}.top:before{content:"";position:absolute;left:0;right:0;top:0;height:4px;background:linear-gradient(90deg,#14b8a6,#2563eb,#f59e0b)}.top:after{content:"";position:absolute;left:-30%;top:0;width:24%;height:100%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.48),transparent);transform:skewX(-18deg);animation:shine 7s ease-in-out infinite}.top>*{position:relative}.eyebrow{display:inline-flex;align-items:center;gap:8px;min-height:24px;padding:0 10px;border-radius:999px;background:#102033;color:#fff;font-size:12px;font-weight:900}.eyebrow:before{content:"";width:8px;height:8px;border-radius:50%;background:#22c55e;box-shadow:0 0 0 0 rgba(34,197,94,.6);animation:pulseDot 1.8s infinite}
+    h1{font-size:30px;line-height:1.12;margin:10px 0 7px;letter-spacing:0}.hint{color:#415267;font-size:13px;line-height:1.7;margin:0;max-width:850px}a.home{display:inline-flex;align-items:center;min-height:38px;padding:0 13px;border-radius:999px;background:#111827;color:#fff;text-decoration:none;font-weight:900;box-shadow:0 10px 18px rgba(17,24,39,.14);white-space:nowrap}.layout{display:grid;grid-template-columns:1fr 420px;gap:14px}.card{background:rgba(255,255,255,.88);border:1px solid var(--line);border-radius:8px;padding:14px;box-shadow:var(--shadow);position:relative;overflow:hidden}.card:before{content:"";display:block;height:4px;background:linear-gradient(90deg,#14b8a6,#2563eb,#f59e0b);position:absolute;left:0;right:0;top:0}.title{font-size:17px;font-weight:900;margin-bottom:8px;color:#102033}
+    .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;border:1px solid rgba(15,118,110,.16);border-radius:8px;background:rgba(255,255,255,.76);box-shadow:0 10px 22px rgba(15,23,42,.06);padding:10px}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}button{border:0;border-radius:7px;background:linear-gradient(135deg,var(--brand),#14b8a6);color:#fff;padding:8px 10px;cursor:pointer;font-weight:900;transition:transform .18s ease,filter .18s ease,box-shadow .18s ease}button:hover{transform:translateY(-1px);filter:brightness(1.05);box-shadow:0 10px 18px rgba(15,118,110,.18)}button.secondary{background:linear-gradient(135deg,#334155,#64748b)}button.danger{background:linear-gradient(135deg,#b3261e,#f97316)}button.ghost{background:#eef2f6;color:#263238}button:disabled{opacity:.65;cursor:wait;transform:none}.pill{display:inline-flex;align-items:center;min-height:24px;padding:0 8px;border-radius:999px;background:#eef2f6;color:#334155;font-size:12px;font-weight:900}.pill.ok{background:#ecfdf3;color:var(--ok)}.pill.warn{background:#fff7ed;color:var(--warn)}
+    .server{display:grid;gap:12px}.server-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-top:2px}.meta{color:var(--muted);font-size:12px;line-height:1.5;overflow-wrap:anywhere}.metrics{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-top:10px}.metric{border:1px solid var(--line);border-radius:8px;background:#f8fafc;padding:10px;min-height:76px;position:relative;overflow:hidden}.metric:after{content:"";position:absolute;left:0;right:0;bottom:0;height:3px;background:#cbd5e1}.metric.status-ok:after{background:#22c55e}.metric.status-warn:after{background:#f59e0b}.metric.status-bad:after{background:#ef4444}.metric b{display:block;font-size:12px;color:#334155}.metric span{display:block;margin-top:8px;font-size:17px;font-weight:900}.metric small{display:block;color:var(--muted);margin-top:4px;line-height:1.35}
+    .services{display:grid;gap:8px;margin-top:10px}.service{border:1px solid var(--line);border-radius:8px;padding:10px;background:#fff}.service-top{display:flex;justify-content:space-between;gap:8px;align-items:center}.resource-line{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:8px}.resource-line span,.process-row{border:1px solid #e5e7eb;border-radius:7px;background:#f8fafc;padding:6px;font-size:12px;color:#334155;overflow-wrap:anywhere}.processes{display:grid;gap:6px;margin-top:12px}.process-row{display:grid;grid-template-columns:70px 70px 80px minmax(0,1fr);gap:8px;align-items:start}.process-main b{display:inline-block;margin-right:6px}.process-main small{display:block;color:var(--muted);line-height:1.45;margin-top:3px}.status{font-size:13px;color:var(--brand);margin:0 0 10px;word-break:break-all;font-weight:800}pre{white-space:pre-wrap;background:#111827;color:#e5e7eb;border-radius:8px;padding:12px;max-height:52vh;overflow:auto;margin:0;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}.note{font-size:12px;color:var(--muted);line-height:1.55;margin-top:10px}
+    @keyframes sweep{0%{transform:translateX(-80%)}45%,100%{transform:translateX(130%)}}@keyframes shine{0%,55%{left:-30%}75%,100%{left:120%}}@keyframes pulseDot{0%{box-shadow:0 0 0 0 rgba(34,197,94,.55)}70%{box-shadow:0 0 0 8px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
+    @media(max-width:980px){.layout{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.top{flex-direction:column}.resource-line,.process-row{grid-template-columns:1fr 1fr}.process-row span:last-child{grid-column:1/-1}}@media(max-width:560px){body{padding:12px}.metrics,.resource-line,.process-row{grid-template-columns:1fr}h1{font-size:24px}}
   </style>
 </head>
 <body>
 <div class="wrap">
   <div class="top">
-    <div><h1>云服务器健康舱</h1><p class="hint">独立监控正式服务器：先看在线、健康接口、延迟和服务控制状态；CPU、内存、硬盘、负载、网络会读取本机采集文件，未接入时明确显示“待接入”。</p></div>
+    <div><div class="eyebrow">CLOUD WATCH ONLINE</div><h1>云服务器健康舱</h1><p class="hint">正式服务的值班台：看在线、健康接口、延迟、CPU、内存、硬盘、负载、网络和每个服务的资源占用。按钮负责发指令，日志负责交代清楚。</p></div>
     <a class="home" href="/">返回总控台</a>
   </div>
   <div class="toolbar">
@@ -4449,11 +4640,11 @@ def _cloud_monitor_html() -> bytes:
 let cloudState={enabled:true,servers:[],logs:[]};
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\\\"":"&quot;","'":"&#39;"}[c]))}
 function pill(ok,text){return '<span class="pill '+(ok?'ok':'warn')+'">'+esc(text)+'</span>'}
-function metric(label,m){m=m||{};const text=m.label||"待接入";return '<div class="metric"><b>'+esc(label)+'</b><span>'+esc(text)+'</span><small>'+esc(m.status==="unknown"?"等待采集器写入":(m.unit||""))+'</small></div>'}
+function metric(label,m){m=m||{};const text=m.label||"待接入";const cls="status-"+(m.status||"unknown");return '<div class="metric '+esc(cls)+'"><b>'+esc(label)+'</b><span>'+esc(text)+'</span><small>'+esc(m.status==="unknown"?"等待采集器写入":(m.unit||""))+'</small></div>'}
 function renderCloud(data){cloudState=data||cloudState;document.getElementById("toggle_monitor").textContent=cloudState.enabled?"暂停监控":"恢复监控";document.getElementById("cloud_status").textContent=(cloudState.enabled?"监控中":"已暂停")+" ｜ "+(cloudState.updated_at||"");document.getElementById("cloud_log").textContent=(cloudState.logs||[]).slice(-40).join("\\n")||"暂无日志";document.getElementById("metrics_note").textContent=(cloudState.servers||[]).some(s=>s.remote_metrics&&s.remote_metrics.ok)?"已接入 SSH 只读采集：整体资源和服务进程占用来自云服务器。":((cloudState.metrics_connected?"已接入指标文件：":"尚未接入 CPU/内存/硬盘采集器；预留文件：")+(cloudState.metrics_source||""));
   document.getElementById("server_list").innerHTML=(cloudState.servers||[]).map(s=>'<article class="card"><div class="server-head"><div><div class="title">'+esc(s.name)+'</div><div class="meta">'+esc(s.provider)+' ｜ '+esc(s.host)+' ｜ '+esc(s.root_url)+'</div><div class="meta">采集主机：'+esc((s.remote_metrics&&s.remote_metrics.host)||"待接入")+' ｜ '+esc((s.remote_metrics&&s.remote_metrics.collected_at)||"")+'</div></div><div>'+pill(!!s.online,s.online?"在线":"不可达")+'</div></div><div class="row"><span class="pill">延迟 '+esc(s.latency_ms==null?"待测":s.latency_ms+"ms")+'</span><span class="pill">健康接口 '+esc((s.health_probe&&s.health_probe.message)||"待测")+'</span><span class="pill">首页 '+esc((s.root_probe&&s.root_probe.message)||"待测")+'</span><span class="pill">'+esc((s.remote_metrics&&s.remote_metrics.ok)?"资源已采集":((s.remote_metrics&&s.remote_metrics.error)||"资源待接入"))+'</span></div><div class="metrics">'+metric("CPU",s.metrics&&s.metrics.cpu)+metric("内存",s.metrics&&s.metrics.memory)+metric("硬盘",s.metrics&&s.metrics.disk)+metric("负载",s.metrics&&s.metrics.load)+metric("网络",s.metrics&&s.metrics.network)+'</div><div class="services">'+(s.services||[]).map(serviceHtml).join("")+'</div>'+processHtml(s.top_processes||[])+'</article>').join("")}
-function serviceHtml(app){const r=app.resource||{};return '<div class="service"><div class="service-top"><div><b>'+esc(app.name||app.id)+'</b><div class="meta">'+esc(app.production_target||app.production_url||"")+'</div></div>'+pill(!!app.production_online,app.production_online?"在线":"离线")+'</div><div class="resource-line"><span>systemd '+esc(r.systemd||"未知")+'</span><span>进程 '+esc(r.process_count??"0")+'</span><span>CPU '+esc((r.cpu_percent??0)+"%")+'</span><span>内存 '+esc(r.rss_label||"0B")+'</span></div><div class="row"><button onclick="controlService(event,\\''+esc(app.id)+'\\',\\'start\\')">启动</button><button class="secondary" onclick="controlService(event,\\''+esc(app.id)+'\\',\\'restart\\')">重启</button><button class="danger" onclick="controlService(event,\\''+esc(app.id)+'\\',\\'stop\\')">停止</button><button class="ghost" onclick="window.open(\\''+esc(app.production_url||app.route||"/")+'\\',\\'_blank\\')">打开</button></div></div>'}
-function processHtml(rows){rows=(rows||[]).slice(0,8);if(!rows.length)return "";return '<div class="processes"><div class="title">占用最高进程</div>'+rows.map(p=>'<div class="process-row"><b>PID '+esc(p.pid)+'</b><span>CPU '+esc(p.cpu_percent)+'%</span><span>内存 '+esc(p.mem_percent)+'%</span><span>'+esc(p.command)+' ｜ '+esc(p.args||"")+'</span></div>').join("")+'</div>'}
+function serviceHtml(app){const r=app.resource||{};const actions=app.protected?'<div class="row"><span class="pill warn">保护链路：不在这里停用</span><span class="pill">可优化模型/缓存/启动策略</span></div>':'<div class="row"><button onclick="controlService(event,\\''+esc(app.id)+'\\',\\'start\\')">启动</button><button class="secondary" onclick="controlService(event,\\''+esc(app.id)+'\\',\\'restart\\')">重启</button><button class="danger" onclick="controlService(event,\\''+esc(app.id)+'\\',\\'stop\\')">停止</button><button class="ghost" onclick="window.open(\\''+esc(app.production_url||app.route||"/")+'\\',\\'_blank\\')">打开</button></div>';return '<div class="service"><div class="service-top"><div><b>'+esc(app.name||app.id)+'</b><div class="meta">'+esc(app.production_target||app.production_url||"")+'</div><div class="meta">'+esc(app.description||"")+'</div></div>'+pill(!!app.production_online,app.production_online?"在线":"离线")+'</div><div class="resource-line"><span>systemd '+esc(r.systemd||"未知")+'</span><span>进程 '+esc(r.process_count??"0")+'</span><span>CPU '+esc((r.cpu_percent??0)+"%")+'</span><span>内存 '+esc(r.rss_label||"0B")+'</span></div>'+actions+'</div>'}
+function processHtml(rows){rows=(rows||[]).slice(0,8);if(!rows.length)return "";return '<div class="processes"><div class="title">占用最高进程</div>'+rows.map(p=>'<div class="process-row"><b>PID '+esc(p.pid)+'</b><span>CPU '+esc(p.cpu_percent)+'%</span><span>内存 '+esc(p.mem_percent)+'%</span><span class="process-main"><b>'+esc(p.owner||"系统")+'</b>'+esc(p.command)+'<small>'+esc(p.purpose||"用途未识别")+'</small><small>建议：'+esc(p.advice||"观察即可")+'</small><small>'+esc(p.args||"")+'</small></span></div>').join("")+'</div>'}
 async function refreshCloud(btn){if(btn)btn.disabled=true;try{const r=await fetch("/api/cloud_servers");renderCloud(await r.json())}catch(err){document.getElementById("cloud_status").textContent="刷新失败："+(err&&err.message?err.message:"network error")}finally{if(btn)btn.disabled=false}}
 async function postCloud(action,btn){if(btn)btn.disabled=true;try{const r=await fetch("/api/cloud_servers",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action})});renderCloud(await r.json())}finally{if(btn)btn.disabled=false}}
 function toggleMonitor(btn){postCloud(cloudState.enabled?"pause":"resume",btn)}
@@ -4669,16 +4860,16 @@ def _assistant_workbench_html() -> bytes:
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>自媒体小猪理工作台</title>
   <style>
-    :root{font-family:Arial,"Microsoft YaHei",sans-serif;color:#17202a;background:#f6f8fb;--brand:#1769aa;--muted:#667085;--line:#d9e0e7;--soft:#eef4f8;--bad:#b3261e}*{box-sizing:border-box}body{margin:0}.shell{display:grid;grid-template-columns:430px 1fr;min-height:100vh}.side{background:#fff;padding:16px;display:grid;grid-template-rows:minmax(0,1.08fr) minmax(300px,.92fr);gap:12px;height:100vh;overflow:hidden}.mode-scroll{min-height:0;overflow:auto;padding-right:4px}.main{padding:16px;display:grid;grid-template-rows:minmax(320px,.9fr) minmax(320px,1fr);gap:12px;height:100vh}h1{font-size:20px;margin:0 0 6px}h2{font-size:16px;margin:0 0 10px}h3{font-size:13px;margin:14px 0 8px}.hint{font-size:12px;color:var(--muted);line-height:1.55}.tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:14px 0}.tabs button{background:#e8eef5;color:#263238}.tabs button.active{background:var(--brand);color:#fff}.page{display:none}.page.active{display:block}.block{background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:10px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}label{display:block;font-size:12px;margin:8px 0 4px;color:#435160}input,select{width:100%;padding:8px;border:1px solid #c8d0d8;border-radius:6px;background:#fff}.toggle{display:flex;gap:8px;align-items:center}.toggle input{width:auto}button{padding:8px 10px;border:0;border-radius:6px;background:var(--brand);color:#fff;cursor:pointer}button.secondary{background:#5f6368}button.danger{background:var(--bad)}button.ghost{background:#eef2f6;color:#263238}.row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}.status{font-size:13px;color:var(--brand);margin:8px 0;word-break:break-all}.card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px;min-height:0}.task-card{display:flex;flex-direction:column;min-height:0;padding:0;overflow:hidden;background:#fbfcfe;border-color:#d6dee7}.task-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;background:#f1f5f9;border-bottom:1px solid #dbe3ec}.task-head h2{margin:0;font-size:15px}.mode-pill{display:inline-flex;align-items:center;max-width:45%;min-height:24px;padding:3px 9px;border-radius:999px;background:#fff;color:#31546f;font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.task-body{padding:10px 12px;display:grid;grid-template-rows:auto auto minmax(0,1fr);min-height:0;gap:10px;flex:1}.task-body .hint{margin:0}.task-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin:0}.task-actions button{padding:7px 8px;white-space:nowrap}.jobs{display:grid;align-content:start;gap:8px;overflow:auto;min-height:0;padding-right:2px}.job{border:1px solid var(--line);border-radius:8px;padding:8px;background:#fff;display:grid;grid-template-columns:20px 1fr auto;gap:8px;align-items:center}.job b{display:block;font-size:12px}.job span{display:block;font-size:11px;color:var(--muted);word-break:break-all}.workspace-card{display:flex;flex-direction:column;overflow:auto}.workspace-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.kv{display:grid;grid-template-columns:110px 1fr;gap:8px;font-size:13px}.kv b{color:#334155}.flow{display:grid;gap:7px}.flow div{background:#f8fafc;border-radius:6px;padding:8px;font-size:12px;line-height:1.45}.back{display:inline-flex;text-decoration:none;background:#eef2f6;color:#334155;border-radius:6px;padding:7px 10px;font-weight:700;font-size:12px;margin-bottom:8px}pre{white-space:pre-wrap;background:#111827;color:#e5e7eb;border-radius:8px;padding:12px;margin:0;height:100%;min-height:280px;overflow:auto;font-size:12px;line-height:1.55}.log-tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}@media(max-width:980px){.shell{grid-template-columns:1fr}.side,.main{height:auto;display:block}.grid2,.grid3,.workspace-grid{grid-template-columns:1fr}.task-card{margin-top:12px;min-height:300px}.task-body{display:flex;flex-direction:column}}
+    :root{font-family:Arial,"Microsoft YaHei",sans-serif;color:#17202a;background:#f6f8fb;--brand:#1769aa;--muted:#667085;--line:#d9e0e7;--soft:#eef4f8;--bad:#b3261e;--ok:#0f7b55;--warn:#a15c00}*{box-sizing:border-box}body{margin:0}.shell{display:grid;grid-template-columns:410px 1fr;min-height:100vh}.side{background:#fff;padding:14px;display:grid;grid-template-rows:minmax(0,1fr) auto;gap:10px;height:100vh;overflow:hidden}.mode-scroll{min-height:0;overflow:auto;padding-right:4px}.main{padding:14px;display:grid;grid-template-rows:270px minmax(0,1fr);gap:10px;height:100vh}h1{font-size:20px;margin:0 0 6px}h2{font-size:16px;margin:0 0 8px}h3{font-size:13px;margin:10px 0 7px}.hint{font-size:12px;color:var(--muted);line-height:1.42}.tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:12px 0}.tabs button{background:#e8eef5;color:#263238}.tabs button.active{background:var(--brand);color:#fff}.page{display:none}.page.active{display:block}.block{background:#fff;border:1px solid var(--line);border-radius:8px;padding:11px;margin-bottom:9px}.block.lead{border-color:#b8d0e7;background:#fbfdff}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}label{display:block;font-size:12px;margin:7px 0 4px;color:#435160}input,select{width:100%;padding:7px;border:1px solid #c8d0d8;border-radius:6px;background:#fff}.toggle{display:flex;gap:8px;align-items:center}.toggle input{width:auto}button{padding:8px 10px;border:0;border-radius:6px;background:var(--brand);color:#fff;cursor:pointer}button.secondary{background:#5f6368}button.danger{background:var(--bad)}button.ghost{background:#eef2f6;color:#263238}.row{display:flex;gap:7px;margin-top:10px;flex-wrap:wrap}.status{font-size:13px;color:var(--brand);margin:8px 0;word-break:break-all}.card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px;min-height:0}details.block summary{cursor:pointer;font-weight:800;color:#334155}.task-card{display:flex;flex-direction:column;min-height:0;padding:0;overflow:hidden;background:#fbfcfe;border-color:#d6dee7;max-height:44vh}.task-card.compact{max-height:190px}.task-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 11px;background:#f1f5f9;border-bottom:1px solid #dbe3ec}.task-head h2{margin:0;font-size:15px}.mode-pill{display:inline-flex;align-items:center;max-width:52%;min-height:24px;padding:3px 9px;border-radius:999px;background:#fff;color:#31546f;font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.task-body{padding:10px 11px;display:grid;grid-template-rows:auto auto minmax(0,1fr);min-height:0;gap:9px;flex:1}.task-body .hint{margin:0}.task-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin:0}.task-actions button{padding:7px 8px;white-space:nowrap}.jobs{display:grid;align-content:start;gap:8px;overflow:auto;min-height:0;padding-right:2px}.job{border:1px solid var(--line);border-radius:8px;padding:8px;background:#fff;display:grid;grid-template-columns:20px minmax(0,1fr);gap:8px;align-items:start}.job b{display:block;font-size:12px;line-height:1.35}.job span{display:block;font-size:11px;color:var(--muted);word-break:break-all}.job-actions{grid-column:2;display:flex;gap:6px;flex-wrap:wrap}.job-actions button{padding:5px 7px;font-size:12px}.workspace-card{display:flex;flex-direction:column;overflow:hidden}.workspace-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:8px}.workspace-head p{margin:0}.workspace-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:10px;min-height:0}.panel{border:1px solid var(--line);border-radius:8px;padding:9px;background:#fff;min-height:0;overflow:auto}.panel.soft{background:#f8fafc}.kv{display:grid;grid-template-columns:90px 1fr;gap:6px;font-size:13px}.kv b{color:#334155}.flow,.readiness{display:grid;gap:6px}.flow div,.readiness div{background:#f8fafc;border-radius:6px;padding:7px;font-size:12px;line-height:1.35}.flow.compact div{display:none}.flow.compact div.bad,.flow.compact div.warn{display:block}.flow.compact.ok:before{content:"模型连接未发现阻塞项";display:block;background:#eef8f3;color:var(--ok);border-radius:6px;padding:7px;font-size:12px}.badge{display:inline-flex;align-items:center;border-radius:999px;padding:4px 9px;font-size:12px;font-weight:700;background:#eef2f6;color:#334155;white-space:nowrap}.badge.ok{background:#e7f6ef;color:var(--ok)}.badge.warn{background:#fff4df;color:var(--warn)}.badge.bad{background:#fdecec;color:var(--bad)}.back{display:inline-flex;text-decoration:none;background:#eef2f6;color:#334155;border-radius:6px;padding:7px 10px;font-weight:700;font-size:12px;margin-bottom:8px}pre{white-space:pre-wrap;background:#111827;color:#e5e7eb;border-radius:8px;padding:12px;margin:0;height:100%;min-height:240px;overflow:auto;font-size:12px;line-height:1.55}.log-card{display:flex;flex-direction:column}.log-tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}.log-tools select{max-width:360px}@media(max-width:980px){.shell{grid-template-columns:1fr}.side,.main{height:auto;display:block}.grid2,.grid3,.workspace-grid{grid-template-columns:1fr}.task-card,.task-card.compact{margin-top:12px;min-height:280px;max-height:none}.task-body{display:flex;flex-direction:column}}
   </style>
 </head>
 <body><div class="shell"><aside class="side"><div class="mode-scroll"><a class="back" href="/">返回控制台首页</a><h1>自媒体小猪理工作台</h1><p class="hint">每个模式是一张独立控制台：只放本模式要配置的东西、剪辑交付、模型步骤、任务和日志。</p><div class="tabs"><button id="tabCulture" onclick="showMode('culture')">文史解读</button><button id="tabResearch" onclick="showMode('research')">每日速递</button><button id="tabScience" onclick="showMode('science')">科学经典</button><button id="tabLocal" onclick="showMode('local')">自优化</button></div>
-<section id="pageCulture" class="page active"><div class="block"><h2>文史解读</h2><label>书籍 PDF</label><input id="culture_book" placeholder="D:/知识/xxx.pdf"><label>输出目录</label><input id="culture_out_dir" placeholder="D:/输出/文史素材"><label>继续目录</label><input id="culture_continue_folder" placeholder="可留空"><label>开始阶段</label><select id="culture_stage"><option>outline</option><option>split_pdf</option><option>episode_prompt</option><option>script</option><option>polish</option><option>images</option><option>postprocess</option><option>split_assets</option></select><label>测试 B 图数</label><input id="culture_test_b" value="0"><div class="row"><button onclick="startCulture(false)">开始文史生成</button><button class="secondary" onclick="startCulture(true)">快速测试：1 张 B 图</button><button class="secondary" onclick="openOutputFolder('culture')">打开作品文件夹</button></div></div><div class="block"><h3>文史剪辑交付</h3><label>图片目录</label><input id="culture_clip_image_dir"><label>LRC / 音频目录</label><input id="culture_clip_lrc_dir"><label>输出目录</label><input id="culture_clip_output_dir"><label>BGM 文件/目录</label><input id="culture_clip_bgm"><div class="row"><button class="secondary" onclick="startModeClip('culture')">启动文史剪辑</button><button class="secondary" onclick="startBgm('culture')">生成文史 BGM</button></div></div></section>
-<section id="pageResearch" class="page"><div class="block"><h2>每日研究速递</h2><label>输出目录</label><input id="research_out_dir" placeholder="可留空，默认科研速递栏目下新建分集文件夹"><div class="grid3"><div><label>检索天数</label><input id="research_days" value="14"></div><div><label>每期文章数</label><input id="research_max_articles" value="5"></div><div><label>每天期数</label><select id="research_issue_count"><option value="1">1 期</option><option value="2">2 期</option><option value="3">3 期</option></select></div></div><label>期刊列表</label><input id="research_journals" placeholder="Nature, Science, Neuron..."><label>已有文献清单 / 续做目录</label><input id="research_article_list"><label class="toggle"><input id="research_skip_medical_related" type="checkbox"> 微信避险：跳过医学、疾病、临床和生物医学外推相关论文</label><p class="hint" id="digest_email_hint"></p><div class="row"><button onclick="startResearch('digest')">开始创作</button><button class="secondary" onclick="startResearchQuickTest()">快速测试：1 张 B 图</button><button onclick="startResearch('article_list')">补文献清单</button><button onclick="startResearch('continue_list')">清单续做</button><button onclick="startResearch('resume')">续做档期</button><button class="secondary" onclick="openOutputFolder('research')">打开作品文件夹</button></div></div><div class="block"><h3>速递剪辑交付</h3><label>图片目录</label><input id="research_clip_image_dir" placeholder="本期 cards 目录"><label>LRC / 音频目录</label><input id="research_clip_lrc_dir"><label>输出目录</label><input id="research_clip_output_dir"><label>BGM 文件/目录</label><input id="research_clip_bgm"><div class="row"><button class="secondary" onclick="startModeClip('research')">启动速递剪辑</button><button class="secondary" onclick="startBgm('research')">生成速递 BGM</button></div></div></section>
-<section id="pageScience" class="page"><div class="block"><h2>科学经典</h2><label>书籍 PDF</label><input id="science_pdf_path"><label>作品文件夹</label><input id="science_out_dir"><div class="row"><button onclick="startScience(false)">开始创作</button><button class="secondary" onclick="startScience(true)">快速测试：1 张 B 图</button><button class="secondary" onclick="openOutputFolder('science')">打开作品文件夹</button></div></div><div class="block"><h3>科学经典剪辑交付</h3><label>图片目录</label><input id="science_clip_image_dir"><label>LRC / 音频目录</label><input id="science_clip_lrc_dir"><label>输出目录</label><input id="science_clip_output_dir"><label>BGM 文件/目录</label><input id="science_clip_bgm"><div class="row"><button class="secondary" onclick="startModeClip('science')">启动科学经典剪辑</button><button class="secondary" onclick="startBgm('science')">生成科学经典 BGM</button></div></div></section>
-<section id="pageLocal" class="page"><div class="block"><h2>自优化</h2><p class="hint">自优化用于本机工作流维护、调试和持续改进。它不抢占文史、速递、科学经典的任务和日志。</p><div class="row"><button onclick="startLocalTool('self_optimizer_once')">跑一次自优化</button><button class="secondary" onclick="startLocalTool('self_optimizer_daemon')">启动持续自优化</button><button class="secondary" onclick="location.href='/model/'">大模型连接库</button><button class="secondary" onclick="location.href='/optimizer/'">自优化器控制台</button><button class="secondary" onclick="location.href='/audience/'">虚拟用户测试</button></div></div><div class="block"><h3>自优化剪辑试验</h3><label>图片目录</label><input id="local_clip_image_dir"><label>LRC / 音频目录</label><input id="local_clip_lrc_dir"><label>输出目录</label><input id="local_clip_output_dir"><label>BGM 文件/目录</label><input id="local_clip_bgm"><div class="row"><button class="secondary" onclick="startModeClip('local')">启动自优化剪辑</button><button class="secondary" onclick="startBgm('local')">生成自优化 BGM</button></div></div></section>
-<div class="block"><h3>当前模式邮箱</h3><label class="toggle"><input id="email_enabled" type="checkbox" onchange="saveCurrentEmailProfile()"> 当前模式完成后发送邮件</label><label>当前模式收件邮箱</label><input id="email_recipient" oninput="saveCurrentEmailProfile()" placeholder="多个邮箱用逗号分隔"><p class="hint" id="email_profile_status"></p><div class="grid2"><div><label>SMTP 服务器</label><input id="smtp_host"></div><div><label>SMTP 端口</label><input id="smtp_port"></div><div><label>SMTP 账号</label><input id="smtp_user"></div><div><label>发件人</label><input id="smtp_sender"></div></div><label>SMTP 密码 / 授权码</label><input id="smtp_password" type="password" autocomplete="off" placeholder="粘贴新密码或授权码；保存后清空"><div class="row"><button class="secondary" onclick="testEmail()">测试 SMTP</button><button onclick="saveSettings()">保存当前模式配置</button></div></div><div class="block"><h3>模型连接总览</h3><p class="hint">这里只读总控台 /model/ 的当前连接，不显示 key。总控台改完后点刷新即可同步到本页。</p><div class="row"><button class="secondary" onclick="refreshModelConfig()">刷新模型配置</button><button class="ghost" onclick="location.href='/model/'">打开总控台</button></div><div class="flow" id="left_model_flow"></div><div class="grid2"><div><label>Voice ID</label><input id="minimax_voice_id"></div><div><label>BGM Prompt</label><input id="minimax_bgm_prompt"></div></div><input id="minimax_base_url" type="hidden"><input id="minimax_tts_model" type="hidden"><input id="minimax_bgm_model" type="hidden"><input id="minimax_api_key" type="password" autocomplete="off" style="display:none"></div><div class="row"><button class="secondary" onclick="saveSettings()">保存当前设置</button><button class="danger" onclick="stopJob()">停止当前任务</button></div><div class="status" id="status">待命</div><div class="hint" id="cmd"></div></div><section class="card task-card"><div class="task-head"><h2>运行任务</h2><span class="mode-pill" id="task_mode_label"></span></div><div class="task-body"><p class="hint" id="task_hint"></p><div class="task-actions"><button class="secondary" onclick="refreshAllJobs()">刷新</button><button class="danger" onclick="stopJob()">停止任务</button><button onclick="deployReleaseWhenIdle()">升级发布版</button><button class="ghost" onclick="openProductionCard()">上线区卡片</button><button class="ghost" onclick="selectAllJobs(true)">全选</button><button class="danger" onclick="deleteSelectedJobs()">批量删除</button></div><div class="jobs" id="jobs_list">暂无运行任务</div></div></section></aside>
-<main class="main"><section class="card workspace-card"><h2 id="workspace_title">文史解读</h2><p class="hint">这里回答两个问题：这个模式现在配了什么；每个用模型的步骤正在用哪一路。</p><div class="workspace-grid"><div><h3>当前配置</h3><div class="kv" id="workspace_kv"></div></div><div><h3>模型步骤</h3><div class="flow" id="model_flow"></div></div></div></section><section class="card"><div class="log-tools"><select id="log_job_select" onchange="selectLogJob(this.value)"><option value="">当前模式日志</option></select><button class="secondary" onclick="scrollLogBottom()">跳到底部</button><button class="secondary" onclick="copyLog()">复制日志</button><button class="secondary" onclick="clearLog()">清空当前日志</button></div><pre id="log">暂无日志</pre></section></main></div>
+<section id="pageCulture" class="page active"><div class="block lead"><h2>文史解读</h2><p class="hint">把书、史料或章节变成可讲清楚的短视频素材。先确认 PDF、输出目录和起跑阶段，再启动。</p><label>书籍 PDF</label><input id="culture_book" placeholder="D:/知识/xxx.pdf"><label>输出目录</label><input id="culture_out_dir" placeholder="D:/输出/文史素材"><label>继续目录</label><input id="culture_continue_folder" placeholder="可留空"><label>开始阶段</label><select id="culture_stage"><option>outline</option><option>split_pdf</option><option>episode_prompt</option><option>script</option><option>polish</option><option>images</option><option>postprocess</option><option>split_assets</option></select><label>测试 B 图数</label><input id="culture_test_b" value="0"><div class="row"><button onclick="startCulture(false)">开始文史生成</button><button class="secondary" onclick="startCulture(true)">快速测试：1 张 B 图</button><button class="secondary" onclick="openOutputFolder('culture')">打开作品文件夹</button></div></div><div class="block"><h3>本模式剪辑交付</h3><label>图片目录</label><input id="culture_clip_image_dir"><label>LRC / 音频目录</label><input id="culture_clip_lrc_dir"><label>输出目录</label><input id="culture_clip_output_dir"><label>BGM 文件/目录</label><input id="culture_clip_bgm"><div class="row"><button class="secondary" onclick="startModeClip('culture')">启动文史剪辑</button><button class="secondary" onclick="startBgm('culture')">生成文史 BGM</button></div></div></section>
+<section id="pageResearch" class="page"><div class="block lead"><h2>每日研究速递</h2><p class="hint">面向中国读者的论文快报。默认从 PubMed/清单取原文信息，文案失败就停下排障，不用本地模板假装完成。</p><label>输出目录</label><input id="research_out_dir" placeholder="可留空，默认科研速递栏目下新建分集文件夹"><div class="grid3"><div><label>检索天数</label><input id="research_days" value="14"></div><div><label>每期文章数</label><input id="research_max_articles" value="5"></div><div><label>每天期数</label><select id="research_issue_count"><option value="1">1 期</option><option value="2">2 期</option><option value="3">3 期</option></select></div></div><label>期刊列表</label><input id="research_journals" placeholder="Nature, Science, Neuron..."><label>已有文献清单 / 续做目录</label><input id="research_article_list"><label class="toggle"><input id="research_skip_medical_related" type="checkbox"> 微信避险：跳过医学、疾病、临床和生物医学外推相关论文</label><p class="hint" id="digest_email_hint"></p><div class="row"><button onclick="startResearch('digest')">开始创作</button><button class="secondary" onclick="startResearchQuickTest()">快速测试：1 张 B 图</button><button onclick="startResearch('article_list')">补文献清单</button><button onclick="startResearch('continue_list')">清单续做</button><button onclick="startResearch('resume')">续做档期</button><button class="secondary" onclick="openOutputFolder('research')">打开作品文件夹</button></div></div><div class="block"><h3>本模式剪辑交付</h3><label>图片目录</label><input id="research_clip_image_dir" placeholder="本期 cards 目录"><label>LRC / 音频目录</label><input id="research_clip_lrc_dir"><label>输出目录</label><input id="research_clip_output_dir"><label>BGM 文件/目录</label><input id="research_clip_bgm"><div class="row"><button class="secondary" onclick="startModeClip('research')">启动速递剪辑</button><button class="secondary" onclick="startBgm('research')">生成速递 BGM</button></div></div></section>
+<section id="pageScience" class="page"><div class="block lead"><h2>科学经典</h2><p class="hint">把经典神经科学章节拆成口播、字幕和科学插图。B 图只做机制/行为链示意，不做 PPT 式结论卡。</p><label>书籍 PDF</label><input id="science_pdf_path"><label>作品文件夹</label><input id="science_out_dir"><div class="row"><button onclick="startScience(false)">开始创作</button><button class="secondary" onclick="startScience(true)">快速测试：1 张 B 图</button><button class="secondary" onclick="openOutputFolder('science')">打开作品文件夹</button></div></div><div class="block"><h3>本模式剪辑交付</h3><label>图片目录</label><input id="science_clip_image_dir"><label>LRC / 音频目录</label><input id="science_clip_lrc_dir"><label>输出目录</label><input id="science_clip_output_dir"><label>BGM 文件/目录</label><input id="science_clip_bgm"><div class="row"><button class="secondary" onclick="startModeClip('science')">启动科学经典剪辑</button><button class="secondary" onclick="startBgm('science')">生成科学经典 BGM</button></div></div></section>
+<section id="pageLocal" class="page"><div class="block lead"><h2>自优化</h2><p class="hint">用于本机工作流维护、调试和持续改进。它独立记录任务和日志，不抢文史、速递、科学经典的生产现场。</p><div class="row"><button onclick="startLocalTool('self_optimizer_once')">跑一次自优化</button><button class="secondary" onclick="startLocalTool('self_optimizer_daemon')">启动持续自优化</button><button class="secondary" onclick="location.href='/model/'">大模型连接库</button><button class="secondary" onclick="location.href='/optimizer/'">自优化器控制台</button><button class="secondary" onclick="location.href='/audience/'">虚拟用户测试</button></div></div><div class="block"><h3>自优化剪辑试验</h3><label>图片目录</label><input id="local_clip_image_dir"><label>LRC / 音频目录</label><input id="local_clip_lrc_dir"><label>输出目录</label><input id="local_clip_output_dir"><label>BGM 文件/目录</label><input id="local_clip_bgm"><div class="row"><button class="secondary" onclick="startModeClip('local')">启动自优化剪辑</button><button class="secondary" onclick="startBgm('local')">生成自优化 BGM</button></div></div></section>
+<details class="block"><summary>当前模式邮箱</summary><label class="toggle"><input id="email_enabled" type="checkbox" onchange="saveCurrentEmailProfile()"> 完成后发送邮件</label><label>收件邮箱</label><input id="email_recipient" oninput="saveCurrentEmailProfile()" placeholder="多个邮箱用逗号分隔"><p class="hint" id="email_profile_status"></p><div class="grid2"><div><label>SMTP 服务器</label><input id="smtp_host"></div><div><label>SMTP 端口</label><input id="smtp_port"></div><div><label>SMTP 账号</label><input id="smtp_user"></div><div><label>发件人</label><input id="smtp_sender"></div></div><label>SMTP 密码 / 授权码</label><input id="smtp_password" type="password" autocomplete="off" placeholder="粘贴新密码或授权码；保存后清空"><div class="row"><button class="secondary" onclick="testEmail()">测试 SMTP</button><button onclick="saveSettings()">保存</button></div></details><details class="block"><summary>模型与声音</summary><p class="hint">模型只从总控台读取，不显示 key。</p><div class="row"><button class="secondary" onclick="refreshModelConfig()">刷新模型</button><button class="ghost" onclick="location.href='/model/'">打开总控台</button></div><div class="flow compact" id="left_model_flow"></div><div class="grid2"><div><label>Voice ID</label><input id="minimax_voice_id"></div><div><label>BGM Prompt</label><input id="minimax_bgm_prompt"></div></div><input id="minimax_base_url" type="hidden"><input id="minimax_tts_model" type="hidden"><input id="minimax_bgm_model" type="hidden"><input id="minimax_api_key" type="password" autocomplete="off" style="display:none"></details><div class="row"><button class="secondary" onclick="saveSettings()">保存当前设置</button><button class="danger" onclick="stopJob()">停止当前任务</button></div><div class="status" id="status">待命</div><div class="hint" id="cmd"></div></div><section class="card task-card compact" id="task_card"><div class="task-head"><h2>运行任务</h2><span class="mode-pill" id="task_mode_label"></span></div><div class="task-body"><p class="hint" id="task_hint"></p><div class="task-actions"><button class="secondary" onclick="refreshAllJobs()">刷新</button><button class="danger" onclick="stopJob()">停止</button><button class="ghost" onclick="selectAllJobs(true)">全选</button><button class="danger" onclick="deleteSelectedJobs()">删除</button><button onclick="deployReleaseWhenIdle()">发版</button><button class="ghost" onclick="openProductionCard()">上线区</button></div><div class="jobs" id="jobs_list">暂无运行任务</div></div></section></aside>
+<main class="main"><section class="card workspace-card"><div class="workspace-head"><div><h2 id="workspace_title">文史解读</h2><p class="hint" id="workspace_goal">当前模式状态</p></div><span class="badge" id="workspace_badge">待检查</span></div><div class="workspace-grid"><div class="panel"><h3>开工检查</h3><div class="readiness" id="readiness_box"></div><h3>下一步</h3><div class="readiness" id="next_action_box"></div></div><div class="panel soft"><h3>模型检查</h3><div class="flow compact" id="model_flow"></div><div class="row"><button class="secondary" onclick="refreshModelConfig()">刷新模型</button><button class="ghost" onclick="location.href='/model/'">模型库</button></div><h3>当前配置</h3><div class="kv" id="workspace_kv"></div></div></div></section><section class="card log-card"><div class="log-tools"><select id="log_job_select" onchange="selectLogJob(this.value)"><option value="">当前模式日志</option></select><button class="secondary" onclick="scrollLogBottom()">跳到底部</button><button class="secondary" onclick="copyLog()">复制日志</button><button class="secondary" onclick="clearLog()">清空当前日志</button></div><pre id="log">暂无日志</pre></section></main></div>
 <script>
 const modes=["culture","research","science","local"],modeLabels={culture:"文史解读",research:"每日研究速递",science:"科学经典",local:"自优化"},emailKeyByMode={culture:"culture",research:"daily_research_digest",science:"science",local:"local"},emailProfileLabels={culture:"文史解读",daily_research_digest:"每日研究速递",science:"科学经典",local:"自优化"};
 const jobsStorageKey="quanlan_automedia_jobs_v4";let jobsById=JSON.parse(localStorage.getItem(jobsStorageKey)||"{}"),selectedJobId="",currentMode="culture",uiLogs={culture:[],research:[],science:[],local:[]},pollHandles={},modelSnapshot={},connectionLibrary={},activeEmailProfileKey="culture",emailProfiles={culture:{email_enabled:false,email_recipient:""},daily_research_digest:{email_enabled:false,email_recipient:""},science:{email_enabled:false,email_recipient:""},local:{email_enabled:false,email_recipient:""}};
@@ -4691,17 +4882,24 @@ function baseLabel(base){const map={"culture:test_b":"文史解读 / 快速测�
 async function start(payload,base){const kind=kindForBase(base);showMode(kind,false);appendLog("准备启动："+baseLabel(base),kind);const saved=await saveSettings();if(saved&&!saved.ok)return;const r=await fetch("/api/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}),data=await r.json();if(!r.ok||data.ok===false){appendLog("启动失败："+(data.error||"unknown"),kind);return}rememberJob(data.job_id,base,payload,data);setStatus("任务已创建："+baseLabel(base));poll(data.job_id)}
 function clipPayload(mode){const p=collect();return {...p,mode:"auto_clip",auto_clip_image_dir:p[mode+"_clip_image_dir"]||"",auto_clip_lrc_dir:p[mode+"_clip_lrc_dir"]||"",auto_clip_output_dir:p[mode+"_clip_output_dir"]||"",auto_clip_bgm:p[mode+"_clip_bgm"]||""}}function startModeClip(mode){start(clipPayload(mode),mode+":clip")}function startBgm(mode){const p=clipPayload(mode);p.mode="bgm";start(p,mode+":bgm")}function startCulture(test){const stage=fieldValue("culture_stage")||"outline";start({...collect(),mode:"culture",stage,test_b_image_limit:test?1:Number(fieldValue("culture_test_b")||0)},test?"culture:test_b":"culture:"+stage)}function startResearch(action){const p=collect(),d=emailProfiles.daily_research_digest||{};if(d.email_enabled&&!d.email_recipient){setStatus("请先填写每日研究速递收件邮箱，或关闭该模块邮件发送");showMode("research");return}start({...p,mode:"research",action},"research:"+action)}function startResearchQuickTest(){const p=collect(),d=emailProfiles.daily_research_digest||{};if(d.email_enabled&&!d.email_recipient){setStatus("请先填写每日研究速递收件邮箱，或关闭该模块邮件发送");showMode("research");return}appendLog("快速测试：每日研究速递只取 1 篇、1 期，并只调用图片模型生成 1 张机制/B图。","research");start({...p,mode:"research",action:"digest",research_max_articles:"1",research_issue_count:"1",research_test_b_image_limit:"1"},"research:test_b")}function startScience(test){start({...collect(),mode:"tool",action:test?"science_test_b":"science"},"science:"+(test?"test_b":"run"))}function startLocalTool(action){start({...collect(),mode:"tool",action},"local:"+action)}
 function rememberJob(id,base,payload,data){jobsById[id]={id,label:baseLabel(base),base,kind:kindForBase(base),payload,status:"starting",started_at:Date.now(),cmd:data.cmd||[]};selectedJobId=id;saveJobs();renderJobs()}function saveJobs(){localStorage.setItem(jobsStorageKey,JSON.stringify(jobsById))}function isLive(s){return["running","starting","stopping"].includes(String(s||""))}async function poll(id){const r=await fetch("/api/job?id="+encodeURIComponent(id)),data=await r.json(),job=jobsById[id]||{};job.status=data.status;job.exit_code=data.exit_code;jobsById[id]=job;saveJobs();renderJobs();if(job.kind)currentMode=job.kind;renderLog(data.lines||[]);if(isLive(data.status))pollHandles[id]=setTimeout(()=>poll(id),1200)}async function viewJob(id){selectedJobId=id;const job=jobsById[id];if(job)showMode(job.kind||"culture",false);poll(id)}function visibleJobs(){return Object.values(jobsById).filter(j=>(j.kind||"culture")===currentMode).sort((a,b)=>(b.started_at||0)-(a.started_at||0))}function currentStopJobId(){if(selectedJobId&&jobsById[selectedJobId]&&(jobsById[selectedJobId].kind||"culture")===currentMode&&isLive(jobsById[selectedJobId].status))return selectedJobId;const live=visibleJobs().filter(j=>isLive(j.status));return live.length?live[0].id:""}async function stopJob(id){const target=id||currentStopJobId();if(!target){appendLog("当前模式没有正在运行的任务可停止",currentMode);setStatus("没有正在运行的任务");return}selectedJobId=target;const job=jobsById[target]||{};appendLog("正在停止任务："+(job.label||target),job.kind||currentMode);const r=await fetch("/api/stop?id="+encodeURIComponent(target),{method:"POST"}),data=await r.json().catch(()=>({ok:false,message:"停止接口没有返回 JSON"}));if(!data.ok){appendLog("停止失败："+(data.message||data.error||"unknown"),job.kind||currentMode);setStatus("停止失败");return}if(jobsById[target]){jobsById[target].status=data.status||"stopping";jobsById[target].updated_at=Date.now()}saveJobs();renderJobs();setStatus("停止请求已发送："+(job.label||target));poll(target)}async function deleteJob(id,skipConfirm){if(!skipConfirm&&!confirm("确认删除这条任务记录？"))return;await fetch("/api/job_delete?id="+encodeURIComponent(id),{method:"POST"});delete jobsById[id];if(selectedJobId===id)selectedJobId="";saveJobs();renderJobs()}function selectedJobIds(){return Array.from(document.querySelectorAll("[data-job-check]:checked")).map(x=>x.getAttribute("data-job-check"))}function selectAllJobs(flag){document.querySelectorAll("[data-job-check]").forEach(x=>x.checked=!!flag)}async function deleteSelectedJobs(){const ids=selectedJobIds();if(!ids.length)return;if(!confirm("确认批量删除 "+ids.length+" 条任务记录？"))return;for(const id of ids)await deleteJob(id,true)}async function refreshAllJobs(){const r=await fetch("/api/jobs"),data=await r.json();for(const j of data.jobs||[]){const id=j.id||j.job_id;jobsById[id]={...(jobsById[id]||{}),...j,id,label:j.label||baseLabel(j.base_key||j.mode),kind:kindForBase(j.base_key||j.mode)}}saveJobs();renderJobs();return data.jobs||[]}
-function renderJobs(){const items=visibleJobs(),box=byId("jobs_list");byId("task_mode_label").textContent=modeLabels[currentMode];const stopId=currentStopJobId();byId("task_hint").textContent=stopId?("可停止："+((jobsById[stopId]&&jobsById[stopId].label)||stopId)):"当前模式没有正在运行的任务。";if(!items.length){box.textContent=modeLabels[currentMode]+"暂无运行任务";refreshLogSelect();return}box.innerHTML=items.map(j=>{const live=isLive(j.status),id=htmlEsc(j.id),safeId=jsStr(j.id);return '<div class="job"><input type="checkbox" data-job-check="'+id+'"><div onclick="viewJob(\''+safeId+'\')"><b>'+htmlEsc(j.label)+' | '+htmlEsc(j.status||"")+'</b><span>'+id+'</span></div><div><button class="secondary" onclick="viewJob(\''+safeId+'\')">查看</button>'+(live?'<button class="danger" onclick="stopJob(\''+safeId+'\')">停止</button>':'')+'<button class="danger" onclick="deleteJob(\''+safeId+'\')">删除</button></div></div>'}).join("");refreshLogSelect()}function refreshLogSelect(){byId("log_job_select").innerHTML='<option value="">当前模式日志</option>'+visibleJobs().map(j=>'<option value="'+htmlEsc(j.id)+'">'+htmlEsc(j.label)+' ｜ '+htmlEsc(j.status||"")+'</option>').join("")}async function selectLogJob(id){if(id)await viewJob(id)}async function testEmail(){await saveSettings();const r=await fetch("/api/test_email",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(collect())}),data=await r.json();appendLog((data.result&&data.result.ok?"SMTP 测试通过：":"SMTP 测试失败：")+((data.result&&data.result.message)||""),currentMode)}async function openOutputFolder(kind){const p={culture:fieldValue("culture_out_dir"),research:fieldValue("research_out_dir")||"D:/Quanlan/全澜脑科学视频号/科研速递",science:fieldValue("science_out_dir"),local:fieldValue("local_clip_output_dir")||fieldValue("local_clip_image_dir")}[kind]||"";await fetch("/api/open_output_folder",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:p})})}
+function renderJobs(){const items=visibleJobs(),box=byId("jobs_list"),card=byId("task_card");byId("task_mode_label").textContent=modeLabels[currentMode];if(card)card.classList.toggle("compact",!items.length);const stopId=currentStopJobId();byId("task_hint").textContent=stopId?("可停止："+((jobsById[stopId]&&jobsById[stopId].label)||stopId)):"无运行任务";if(!items.length){box.textContent="";refreshLogSelect();return}box.innerHTML=items.map(j=>{const live=isLive(j.status),id=htmlEsc(j.id),safeId=jsStr(j.id);return '<div class="job"><input type="checkbox" data-job-check="'+id+'"><div onclick="viewJob(\''+safeId+'\')"><b>'+htmlEsc(j.label)+' | '+htmlEsc(j.status||"")+'</b><span>'+id+'</span></div><div class="job-actions"><button class="secondary" onclick="viewJob(\''+safeId+'\')">查看</button>'+(live?'<button class="danger" onclick="stopJob(\''+safeId+'\')">停止</button>':'')+'<button class="danger" onclick="deleteJob(\''+safeId+'\')">删除</button></div></div>'}).join("");refreshLogSelect()}function refreshLogSelect(){byId("log_job_select").innerHTML='<option value="">当前模式日志</option>'+visibleJobs().map(j=>'<option value="'+htmlEsc(j.id)+'">'+htmlEsc(j.label)+' ｜ '+htmlEsc(j.status||"")+'</option>').join("")}async function selectLogJob(id){if(id)await viewJob(id)}async function testEmail(){await saveSettings();const r=await fetch("/api/test_email",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(collect())}),data=await r.json();appendLog((data.result&&data.result.ok?"SMTP 测试通过：":"SMTP 测试失败：")+((data.result&&data.result.message)||""),currentMode)}async function openOutputFolder(kind){const p={culture:fieldValue("culture_out_dir"),research:fieldValue("research_out_dir")||"D:/Quanlan/全澜脑科学视频号/科研速递",science:fieldValue("science_out_dir"),local:fieldValue("local_clip_output_dir")||fieldValue("local_clip_image_dir")}[kind]||"";await fetch("/api/open_output_folder",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({path:p})})}
 function modelText(keys){for(const k of keys){if(modelSnapshot[k])return modelSnapshot[k]}return "未从总控台读到"}
-function connTextForStep(step){const lib=connectionLibrary||{},steps=lib.steps||{},business=(modelSnapshot.business_steps||{}),selected=(business[step]&&business[step].selected)||{};if(selected.model){const ok=selected.last_test_ok===true?"检测通过":(selected.last_test_ok===false?"未通过/未检测":"未检测");return ((business[step]&&business[step].label)||(steps[step]&&steps[step].label)||step)+"："+(selected.provider||"")+" / "+selected.model+" @ "+(selected.base_url||"未填 URL")+" ｜ "+ok}const active=lib.active_connections||{},connections=lib.connections||[],routeId=active[step]||active[(steps[step]||{}).role]||"",c=connections.find(x=>x.id===routeId)||{};if(c.model){const ok=c.last_test_ok===true?"检测通过":(c.last_test_ok===false?"未通过/未检测":"未检测");return (steps[step]&&steps[step].label?steps[step].label:step)+"："+(c.provider||"")+" / "+c.model+" @ "+(c.base_url||"未填 URL")+" ｜ "+ok}const fallback={script_text:modelText(["text_engine","culture_text_model"]),research_text:modelText(["text_engine","research_text_model"]),polish_text:modelText(["polish_engine","culture_polish_model","research_polish_model"]),image_generation:modelText(["image_engine","culture_image_model","research_image_model"]),voice_bgm:modelText(["minimax_tts_model"])}[step]||"未从总控台读到";return ((steps[step]||{}).label||step)+"："+fallback}
+function connStateText(c){if(!c||!c.model)return "未配置";if(c.last_test_ok===true)return "检测通过";if(c.last_test_ok===false&&c.last_tested_at)return "检测失败";return c.key_configured?"已配置":"缺 key"}
+function connTextForStep(step){const lib=connectionLibrary||{},steps=lib.steps||{},business=(modelSnapshot.business_steps||{}),selected=(business[step]&&business[step].selected)||{};if(selected.model){return ((business[step]&&business[step].label)||(steps[step]&&steps[step].label)||step)+"："+(selected.provider||"")+" / "+selected.model+" @ "+(selected.base_url||"未填 URL")+" ｜ "+connStateText(selected)}const active=lib.active_connections||{},connections=lib.connections||[],routeId=active[step]||active[(steps[step]||{}).role]||"",c=connections.find(x=>x.id===routeId)||{};if(c.model){return (steps[step]&&steps[step].label?steps[step].label:step)+"："+(c.provider||"")+" / "+c.model+" @ "+(c.base_url||"未填 URL")+" ｜ "+connStateText(c)}const fallback={script_text:modelText(["text_engine","culture_text_model"]),research_text:modelText(["text_engine","research_text_model"]),polish_text:modelText(["polish_engine","culture_polish_model","research_polish_model"]),image_generation:modelText(["image_engine","culture_image_model","research_image_model"]),voice_bgm:modelText(["minimax_tts_model"])}[step]||"未从总控台读到";return ((steps[step]||{}).label||step)+"："+fallback}
 function modeSteps(){return {culture:[["script_text","拆书/脚本"],["polish_text","中文润色"],["image_generation","封面/B 图"],["voice_bgm","配音/BGM/剪辑"]],research:[["research_text","文献解读/脚本"],["polish_text","中文润色"],["image_generation","卡片/图片"],["voice_bgm","配音/BGM/剪辑"]],science:[["script_text","经典内容生成"],["polish_text","中文润色"],["image_generation","B 图/公共元素"],["voice_bgm","配音/BGM/剪辑"]],local:[["script_text","自优化文本任务"],["polish_text","自优化润色任务"],["image_generation","试验图片任务"],["voice_bgm","试验配音/BGM"]]}[currentMode]||[]}
 function modelFlow(){return modeSteps().map(x=>x[1]+"｜"+connTextForStep(x[0]))}
-function renderModelFlows(){const html=modelFlow().map(x=>'<div>'+x+'</div>').join("");const a=byId("model_flow"),b=byId("left_model_flow");if(a)a.innerHTML=html;if(b)b.innerHTML=html}
+function renderModelFlows(){const rows=modelFlow().map(x=>{const cls=x.includes("检测失败")||x.includes("缺 key")||x.includes("未填")||x.includes("未从总控台读到")?"bad":"ok";return '<div class="'+cls+'">'+htmlEsc(x)+'</div>'}).join("");for(const id of ["model_flow","left_model_flow"]){const el=byId(id);if(el){el.innerHTML=rows;el.classList.toggle("ok",!rows.includes('bad'))}}}
 async function refreshModelConfig(){appendLog("正在从总控台刷新模型配置");const r=await fetch("/api/settings"),data=await r.json();modelSnapshot=data.models||{};connectionLibrary=data.model_connection_library||{};renderModelFlows();appendLog("模型配置已刷新：按总控台最新连接展示")}
 function openProductionCard(){window.location.assign("/#production-assistant")}
 async function deployReleaseWhenIdle(){const jobs=await refreshAllJobs();const running=jobs.filter(j=>isLive(j.status));if(running.length){appendLog("还有 "+running.length+" 个任务没结束，先停止或等待结束后再升级发布版","local");setStatus("仍有任务运行，不能升级发布版");showMode("local");return}if(!confirm("确认把当前开发版打包并升级发布版？升级完成后，总控台上线区的自媒体小猪理（发布版）卡片会打开发布版入口。"))return;showMode("local");appendLog("正在升级发布版：先打包，再应用到发布目录。","local");const r=await fetch("/api/audience",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({project:"assistant",mode:"release_deploy"})});const data=await r.json();if(!data.ok){appendLog("升级发布版启动失败："+(data.error||"unknown"),"local");setStatus("升级发布版启动失败");return}const id=data.job_id;jobsById[id]={id,label:baseLabel("local:release_deploy"),base:"local:release_deploy",kind:"local",status:"starting",started_at:Date.now(),cmd:data.cmd||[]};selectedJobId=id;saveJobs();renderJobs();setStatus("升级发布版任务已启动");poll(id)}
-function kvRows(rows){return rows.map(x=>'<b>'+x[0]+'</b><div>'+String(x[1]||"未设置")+'</div>').join("")}
-function renderWorkspace(){const ep=emailProfiles[emailKeyByMode[currentMode]]||{},clip=[fieldValue(currentMode+"_clip_image_dir"),fieldValue(currentMode+"_clip_output_dir")].filter(Boolean).join(" -> ")||"未设置",rows={culture:[["书籍",fieldValue("culture_book")],["输出",fieldValue("culture_out_dir")],["阶段",fieldValue("culture_stage")],["剪辑",clip],["邮箱",ep.email_enabled?(ep.email_recipient||"开启但未填"):"关闭"]],research:[["输出",fieldValue("research_out_dir")||"默认科研速递目录"],["文献清单",fieldValue("research_article_list")],["每天期数",fieldValue("research_issue_count")],["剪辑",clip],["邮箱",ep.email_enabled?(ep.email_recipient||"开启但未填"):"关闭"]],science:[["PDF",fieldValue("science_pdf_path")],["输出",fieldValue("science_out_dir")],["剪辑",clip],["邮箱",ep.email_enabled?(ep.email_recipient||"开启但未填"):"关闭"]],local:[["用途","自优化 / 调试 / 试验剪辑"],["剪辑",clip],["邮箱",ep.email_enabled?(ep.email_recipient||"开启但未填"):"关闭"]]}[currentMode];byId("workspace_title").textContent=modeLabels[currentMode];byId("workspace_kv").innerHTML=kvRows(rows);renderModelFlows()}
+function kvRows(rows){return rows.map(x=>'<b>'+htmlEsc(x[0])+'</b><div>'+htmlEsc(String(x[1]||"未设置"))+'</div>').join("")}
+function mark(ok,text,badText){return {ok:!!ok,text:ok?text:(badText||text)}}
+function modeGoal(){return {culture:"配置素材和起跑阶段",research:"配置论文来源和出片数量",science:"配置经典 PDF 和输出目录",local:"自优化与发布维护"}[currentMode]||""}
+function modeNextAction(checks){const missing=checks.filter(x=>!x.ok).map(x=>x.text);if(missing.length)return ["先补："+missing.slice(0,2).join("、")];const live=visibleJobs().filter(j=>isLive(j.status));if(live.length)return ["任务运行中，看日志；卡住就停止。"];return {culture:["可先快速测试 1 张 B 图。"],research:["可先快速测试 1 张 B 图。"],science:["可先快速测试 1 张 B 图。"],local:["可跑一次自优化；无任务时可发版。"]}[currentMode]||["可以启动。"]}
+function readinessChecks(ep){const clipReady=!!(fieldValue(currentMode+"_clip_image_dir")&&fieldValue(currentMode+"_clip_lrc_dir")&&fieldValue(currentMode+"_clip_output_dir"));return {culture:[mark(fieldValue("culture_book"),"书籍 PDF 已填写","书籍 PDF 未填写"),mark(fieldValue("culture_out_dir"),"输出目录已填写","输出目录未填写"),mark(fieldValue("culture_stage"),"起跑阶段已选择","起跑阶段未选择"),mark(!ep.email_enabled||ep.email_recipient,"邮件配置可用","邮件开启但收件人未填")],research:[mark(fieldValue("research_out_dir")||true,"输出目录会按默认栏目建分集文件夹"),mark(fieldValue("research_article_list")||Number(fieldValue("research_days")||0)>0,"文献来源可用","请填写文献清单或检索天数"),mark(Number(fieldValue("research_max_articles")||0)>0,"每期文章数已设置","每期文章数需要大于 0"),mark(!ep.email_enabled||ep.email_recipient,"邮件配置可用","邮件开启但收件人未填")],science:[mark(fieldValue("science_pdf_path"),"书籍 PDF 已填写","书籍 PDF 未填写"),mark(fieldValue("science_out_dir"),"作品文件夹已填写","作品文件夹未填写"),mark(!ep.email_enabled||ep.email_recipient,"邮件配置可用","邮件开启但收件人未填")],local:[mark(true,"自优化入口可用"),mark(!ep.email_enabled||ep.email_recipient,"邮件配置可用","邮件开启但收件人未填"),mark(clipReady||true,"剪辑试验可按需填写")]}[currentMode]||[]}
+function renderBox(id,items){const el=byId(id);if(el)el.innerHTML=(items||[]).map(x=>'<div>'+htmlEsc(typeof x==="string"?x:x.text)+'</div>').join("")}
+function renderReadiness(checks){byId("readiness_box").innerHTML=checks.map(x=>'<div><span class="badge '+(x.ok?"ok":"bad")+'">'+(x.ok?"就绪":"待补")+'</span> '+htmlEsc(x.text)+'</div>').join("")}
+function renderWorkspace(){const ep=emailProfiles[emailKeyByMode[currentMode]]||{},clip=[fieldValue(currentMode+"_clip_image_dir"),fieldValue(currentMode+"_clip_output_dir")].filter(Boolean).join(" -> ")||"未设置",rows={culture:[["书籍",fieldValue("culture_book")],["输出",fieldValue("culture_out_dir")],["阶段",fieldValue("culture_stage")],["剪辑",clip],["邮箱",ep.email_enabled?(ep.email_recipient||"开启但未填"):"关闭"]],research:[["输出",fieldValue("research_out_dir")||"默认"],["清单",fieldValue("research_article_list")],["期数",fieldValue("research_issue_count")],["文章",fieldValue("research_max_articles")],["剪辑",clip],["邮箱",ep.email_enabled?(ep.email_recipient||"开启但未填"):"关闭"]],science:[["PDF",fieldValue("science_pdf_path")],["输出",fieldValue("science_out_dir")],["剪辑",clip],["邮箱",ep.email_enabled?(ep.email_recipient||"开启但未填"):"关闭"]],local:[["用途","自优化 / 发版 / 试验"],["剪辑",clip],["邮箱",ep.email_enabled?(ep.email_recipient||"开启但未填"):"关闭"]]}[currentMode];const checks=readinessChecks(ep),ok=checks.every(x=>x.ok);byId("workspace_title").textContent=modeLabels[currentMode];byId("workspace_goal").textContent=modeGoal();byId("workspace_badge").className="badge "+(ok?"ok":"warn");byId("workspace_badge").textContent=ok?"可启动":"待补";byId("workspace_kv").innerHTML=kvRows(rows);renderReadiness(checks);renderBox("next_action_box",modeNextAction(checks));renderModelFlows()}
 function showMode(mode,loadEmail=true){currentMode=modes.includes(mode)?mode:"culture";for(const m of modes){byId("page"+cap(m)).classList.toggle("active",m===currentMode);byId("tab"+cap(m)).classList.toggle("active",m===currentMode)}if(loadEmail)loadModeEmail();renderWorkspace();renderJobs();renderLog()}document.addEventListener("input",()=>renderWorkspace());loadSettings().then(()=>{showMode("culture");refreshAllJobs()});
 </script></body></html>""".encode("utf-8")
 
@@ -5209,7 +5407,8 @@ def ps_rows():
     rows = []
     targets = [
         ('qlanalyser', ['qlanalyser', 'uvicorn service.qlanalyser']),
-        ('xiaozhuli', ['feishu-', 'xiaozhuli', 'ollama', 'llama-server']),
+        ('classifier', ['ollama', 'llama-server']),
+        ('xiaozhuli', ['feishu-', 'xiaozhuli']),
         ('nginx', ['nginx']),
     ]
     for line in lines:
@@ -5226,6 +5425,80 @@ def ps_rows():
             if any(n in lower for n in needles):
                 item['service_id'] = sid
                 break
+        purpose = '系统/其他进程'
+        owner = '系统'
+        advice = '通常不需要处理，持续异常时再排查。'
+        if 'llama-server' in lower:
+            purpose = '本地 DeepSeek 分类模型服务，负责飞书消息进入业务前的本地分类。'
+            owner = '小猪理分类器'
+            advice = '内存大户；可评估更小模型或缓存参数，但不能绕过分类链路。'
+        elif 'ollama serve' in lower or comm == 'ollama':
+            purpose = '本地模型管理服务，托管 DeepSeek 模型文件和本地推理接口。'
+            owner = '小猪理分类器'
+            advice = '常驻占用较小；通常保留。'
+        elif 'feishu-group-listener' in lower:
+            purpose = '飞书群消息监听入口，负责接收群聊事件。'
+            owner = '全澜小猪理'
+            advice = '关键入口，不建议停。'
+        elif 'feishu-codex-dispatcher' in lower:
+            purpose = '任务分发器，把分类后的消息交给知识库、工具或 Codex 队列处理。'
+            owner = '全澜小猪理'
+            advice = 'CPU 长期高才需要排查队列。'
+        elif 'feishu-permission-sync' in lower:
+            purpose = '飞书权限同步服务，维护文档/知识库访问白名单。'
+            owner = '全澜小猪理'
+            advice = '之前告警提到过它，建议常驻。'
+        elif 'feishu-watchdog' in lower:
+            purpose = '小猪理巡检守护进程，发现监听器或队列异常后告警。'
+            owner = '全澜小猪理'
+            advice = '常驻合理，占用异常才看日志。'
+        elif 'xiaozhuli-self-learning' in lower:
+            purpose = '全澜小猪理自学习循环，把用户反馈和运行问题沉淀到后续优化。'
+            owner = '全澜小猪理'
+            advice = '建议常驻；如果 CPU 长期高，先看学习队列和日志。'
+        elif 'xiaozhuli-dashboard' in lower:
+            purpose = '全澜小猪理网页控制台和宿主进程。'
+            owner = '全澜小猪理'
+            advice = '业务入口，常驻合理。'
+        elif 'uvicorn' in lower and 'qlanalyser' in lower:
+            purpose = '脑电分析平台 FastAPI 服务，负责网页和分析接口。'
+            owner = '脑电分析平台'
+            advice = '常驻合理，分析任务期间 CPU 上升正常。'
+        elif 'aliyundunmonitor' in lower or 'aliyundun' in lower:
+            purpose = '阿里云安全/监控组件，用于主机防护和云监控。'
+            owner = '阿里云'
+            advice = '不建议随便关闭。'
+        elif 'aliyun-service' in lower:
+            purpose = '阿里云助手服务，用于云端运维命令和实例管理。'
+            owner = '阿里云'
+            advice = '不建议随便关闭。'
+        elif 'dockerd' in lower:
+            purpose = 'Docker 守护进程，管理容器运行环境。'
+            owner = '系统/Docker'
+            advice = '若当前不用容器，可评估是否停用。'
+        elif 'containerd' in lower:
+            purpose = '容器运行时，通常由 Docker 调用。'
+            owner = '系统/Docker'
+            advice = '跟 Docker 一起评估。'
+        elif 'systemd-journal' in lower or 'rsyslogd' in lower:
+            purpose = '系统日志服务，保存系统和服务日志。'
+            owner = '系统'
+            advice = '不建议关闭，可做日志轮转。'
+        elif lower.startswith('sshd') or 'sshd:' in lower:
+            purpose = 'SSH 远程登录/运维连接，当前总控台采集云服务器指标也会短暂使用。'
+            owner = '系统'
+            advice = '采集时短时出现很正常；异常多连接时再排查安全日志。'
+        elif 'systemd' in lower:
+            purpose = 'Linux 服务管理/用户会话管理。'
+            owner = '系统'
+            advice = '系统核心进程，不处理。'
+        elif 'networkmanager' in lower or 'systemd-resolved' in lower:
+            purpose = '系统网络和 DNS 解析服务。'
+            owner = '系统'
+            advice = '不建议关闭。'
+        item['purpose'] = purpose
+        item['owner'] = owner
+        item['advice'] = advice
         rows.append(item)
     return rows
 
@@ -5238,7 +5511,7 @@ payload = {
     'memory': mem_info(),
     'disk': disk_info('/'),
     'network': net_bytes(),
-    'services': {name: systemctl(name) for name in ['qlanalyser', 'nginx', 'xiaozhuli']},
+    'services': {name: systemctl(name) for name in ['qlanalyser', 'nginx', 'xiaozhuli', 'ollama', 'xiaozhuli-classifier']},
     'processes': ps_rows(),
     'collected_at': time.strftime('%Y-%m-%d %H:%M:%S'),
 }
@@ -5293,7 +5566,7 @@ def _remote_metrics_to_cards(remote: dict[str, Any], file_metrics: dict[str, Any
 
 def _service_resource_summary(remote: dict[str, Any]) -> dict[str, dict[str, Any]]:
     result: dict[str, dict[str, Any]] = {}
-    service_names = {"eeg": "qlanalyser", "xiaozhuli": "xiaozhuli"}
+    service_names = {"eeg": "qlanalyser", "xiaozhuli": "xiaozhuli", "classifier": "classifier"}
     processes = remote.get("processes") if isinstance(remote.get("processes"), list) else []
     systemd = remote.get("services") if isinstance(remote.get("services"), dict) else {}
     for app_id, service_name in service_names.items():
@@ -5302,7 +5575,7 @@ def _service_resource_summary(remote: dict[str, Any]) -> dict[str, dict[str, Any
         mem = sum(float(x.get("mem_percent") or 0) for x in rows)
         rss = sum(int(x.get("rss_kb") or 0) for x in rows) * 1024
         result[app_id] = {
-            "systemd": systemd.get(service_name) or "unknown",
+            "systemd": (systemd.get("xiaozhuli-classifier") if app_id == "classifier" else systemd.get(service_name)) or "unknown",
             "process_count": len(rows),
             "cpu_percent": round(cpu, 1),
             "mem_percent": round(mem, 1),
@@ -5341,6 +5614,18 @@ def _cloud_server_statuses(*, force: bool = False) -> dict[str, Any]:
                 app = dict(app)
                 app["resource"] = resource_by_app.get(str(app.get("id") or ""), {})
                 apps.append(app)
+        classifier_resource = resource_by_app.get("classifier", {})
+        if classifier_resource:
+            apps.append({
+                "id": "classifier",
+                "name": "本地 DeepSeek 分类器",
+                "production_url": "http://127.0.0.1:11435/v1",
+                "production_target": "127.0.0.1:11435 / xiaozhuli-classifier.service",
+                "production_online": classifier_resource.get("systemd") == "active",
+                "resource": classifier_resource,
+                "protected": True,
+                "description": "飞书消息先本地分类的保护链路，优化时不能绕过。",
+            })
         servers.append({
             "id": cfg["id"],
             "name": cfg["name"],
@@ -6132,16 +6417,36 @@ def _build_audience_command(project: str, mode: str = "once") -> tuple[str, list
         if project == "eeg":
             return "脑电分析平台", ["powershell", "-ExecutionPolicy", "Bypass", "-File", "work/promote_release_if_idle.ps1"], EEG_ANALYSER_ROOT, mode
         raise ValueError("该项目还没有暴露发布版部署命令。")
+    audience_modes = {"once", "quick", "standard", "deep", "preflight"}
     if project == "assistant":
-        return "自媒体小猪理", [sys.executable, "-m", "modes.culture.automedia_core.audience_test_bot", "--online"], PROJECT_ROOT, "once"
+        cmd = [sys.executable, "-m", "modes.culture.automedia_core.audience_test_bot"]
+        if mode in {"standard", "deep", "preflight", "once"}:
+            cmd.append("--online")
+        if mode == "quick":
+            cmd.extend(["--query-limit", "2", "--max-materials", "8"])
+        elif mode == "standard" or mode == "once":
+            cmd.extend(["--query-limit", "5", "--max-materials", "30"])
+        elif mode == "deep":
+            cmd.extend(["--query-limit", "8", "--max-materials", "80"])
+        elif mode == "preflight":
+            cmd.extend(["--query-limit", "5", "--max-materials", "45"])
+        return "自媒体小猪理", cmd, PROJECT_ROOT, mode if mode in audience_modes else "standard"
     if project == "xiaozhuli":
-        return "全澜小猪理", ["node", "self-optimizer.mjs", "once", "--force"], XIAOZHULI_ROOT, "once"
+        return "全澜小猪理", ["node", "self-optimizer.mjs", "once", "--force"], XIAOZHULI_ROOT, mode if mode in audience_modes else "standard"
     if project == "eeg":
-        return "脑电分析平台", ["node", "work/self_optimizer.js", "once", "--force"], EEG_ANALYSER_ROOT, "once"
+        return "脑电分析平台", ["node", "work/self_optimizer.js", "once", "--force"], EEG_ANALYSER_ROOT, mode if mode in audience_modes else "standard"
     raise ValueError("该项目还没有暴露虚拟用户测试命令；已自动显示，待项目提供命令后可启动。")
 
 
 def _audience_mode_label(mode: str) -> str:
+    if mode == "quick":
+        return "快速体检"
+    if mode == "standard" or mode == "once":
+        return "标准评审"
+    if mode == "deep":
+        return "深度压力测试"
+    if mode == "preflight":
+        return "上线前复核"
     if mode == "dev_upgrade":
         return "一键升级开发区"
     if mode == "release_deploy":
@@ -6221,16 +6526,186 @@ def _summary_from_report(report: dict[str, Any]) -> dict[str, list[str]]:
         expected = list(dict.fromkeys(_effect_for_finding(item) for item in top))
         return {
             "overview": overview or ["本轮虚拟用户测试未发现明确问题。"],
+            "objections": [
+                f"{item.get('area') or 'overall'}：{_compact_line(item.get('message'))}"
+                for item in top
+                if str(item.get("severity") or "").lower() not in {"pass", "ok"} and item.get("message")
+            ] or ["本轮没有形成强烈反对意见。"],
             "suggestions": suggestions or ["继续积累真实观众反馈后复测。"],
             "expected_effects": expected or ["维持当前版本，避免无依据调整。"],
+            "needs_human_confirmation": [
+                "虚拟用户测试只能提前暴露可能问题，真实转化、评论和专家事实仍需真人确认。"
+            ],
+            "counts": {
+                "overall": str(len(findings)),
+                "positive": str(sum(1 for item in findings if isinstance(item, dict) and str(item.get("severity") or "").lower() in {"pass", "ok"})),
+                "negative": str(sum(1 for item in findings if isinstance(item, dict) and str(item.get("severity") or "").lower() not in {"pass", "ok"})),
+            },
         }
     if report.get("last_result"):
         return {
             "overview": ["自优化器已完成一轮检查，结果已写入项目状态。"],
+            "objections": ["请展开原始日志查看角色评审指出的问题。"],
             "suggestions": ["如需更细的虚拟用户建议，请使用“输入优化建议”补充你的观察后再复测。"],
             "expected_effects": ["下一轮会把记录的反馈纳入角色评审和修复计划。"],
+            "needs_human_confirmation": ["项目级自优化结果需要结合真实运行页面复核。"],
+            "counts": {"overall": "完成", "positive": "已跑", "negative": "待读"},
         }
     return {}
+
+
+def _tail_jsonl(path: Path, limit: int = 80) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    try:
+        lines = path.read_text(encoding="utf-8-sig", errors="replace").splitlines()[-limit:]
+    except Exception:
+        return []
+    rows: list[dict[str, Any]] = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            item = json.loads(line)
+        except Exception:
+            continue
+        if isinstance(item, dict):
+            rows.append(item)
+    return rows
+
+
+def _read_json_file(path: Path) -> dict[str, Any]:
+    data = _read_json(path, {})
+    return data if isinstance(data, dict) else {}
+
+
+def _audience_report_paths(project: str) -> list[Path]:
+    project = str(project or "").strip()
+    if project == "assistant":
+        return [
+            PROJECT_ROOT / "modes" / "culture" / "outputs" / "audience_test_bot" / "latest_audience_test_report.json",
+            PROJECT_ROOT / "modes" / "culture" / "outputs" / "self_optimizer" / "self_optimizer_state.json",
+            PROJECT_ROOT / "modes" / "culture" / "outputs" / "self_optimizer" / "self_optimizer_patch_plan.json",
+        ]
+    if project == "xiaozhuli":
+        return [
+            XIAOZHULI_ROOT / "self-optimizer-state.json",
+            XIAOZHULI_ROOT / "self-optimizer-patch-plan.json",
+            XIAOZHULI_ROOT / "feishu-realtime-optimizer-state.json",
+        ]
+    if project == "eeg":
+        base = EEG_ANALYSER_ROOT / "outputs" / "eeglab-mne-dev" / "assets" / "realtime_optimizer"
+        return [
+            base / "self_optimizer_state.json",
+            base / "optimizer_state.json",
+            base / "self_optimizer_patch_plan.json",
+        ]
+    return []
+
+
+def _latest_existing_path(paths: list[Path]) -> Path | None:
+    existing = [path for path in paths if path.exists()]
+    if not existing:
+        return None
+    return max(existing, key=lambda path: path.stat().st_mtime)
+
+
+def _summary_from_optimizer_files(project: str) -> tuple[dict[str, list[str]], list[str], str]:
+    if project == "assistant":
+        base = PROJECT_ROOT / "modes" / "culture" / "outputs" / "self_optimizer"
+        roleplay = base / "self_optimizer_roleplay_detail.jsonl"
+        issues = base / "self_optimizer_issues.jsonl"
+        patch = base / "self_optimizer_patch_plan.json"
+    elif project == "xiaozhuli":
+        base = XIAOZHULI_ROOT
+        roleplay = base / "self-optimizer-roleplay-detail.jsonl"
+        issues = base / "self-optimizer-issues.jsonl"
+        patch = base / "self-optimizer-patch-plan.json"
+    elif project == "eeg":
+        base = EEG_ANALYSER_ROOT / "outputs" / "eeglab-mne-dev" / "assets" / "realtime_optimizer"
+        roleplay = base / "self_optimizer_roleplay_detail.jsonl"
+        issues = base / "self_optimizer_issues.jsonl"
+        patch = base / "self_optimizer_patch_plan.json"
+    else:
+        return {}, [], ""
+    role_rows = _tail_jsonl(roleplay, 60)
+    issue_rows = _tail_jsonl(issues, 60)
+    patch_data = _read_json_file(patch)
+    readable: list[str] = []
+    overview: list[str] = []
+    objections: list[str] = []
+    suggestions: list[str] = []
+    for row in reversed(role_rows[-12:]):
+        speaker = _compact_line(row.get("speaker") or row.get("persona") or row.get("role") or "虚拟评委", 40)
+        text = _compact_line(row.get("message") or row.get("content") or row.get("question") or row.get("finding") or row.get("summary"), 220)
+        if text:
+            objections.append(f"{speaker}：{text}")
+            readable.append(f"虚拟评委：{speaker}；质疑：{text}")
+    for row in reversed(issue_rows[-12:]):
+        text = _compact_line(row.get("message") or row.get("issue") or row.get("evidence") or row.get("next_action"), 220)
+        action = _compact_line(row.get("next_action") or row.get("suggestion") or row.get("fix"), 220)
+        if text:
+            overview.append(text)
+        if action:
+            suggestions.append(action)
+            readable.append(f"建议：{action}")
+    plan_items = patch_data.get("items") or patch_data.get("patches") or patch_data.get("plans") or []
+    if isinstance(plan_items, list):
+        for item in plan_items[:8]:
+            if isinstance(item, dict):
+                text = _compact_line(item.get("summary") or item.get("title") or item.get("change") or item.get("next_action"), 220)
+            else:
+                text = _compact_line(item, 220)
+            if text:
+                suggestions.append(text)
+    summary = {
+        "overview": list(dict.fromkeys(overview or ["已读取项目自优化器/角色评审记录。"]))[:8],
+        "objections": list(dict.fromkeys(objections or ["未读取到新的角色反对意见；可先运行一轮评审。"]))[:8],
+        "suggestions": list(dict.fromkeys(suggestions or ["运行评审或写入人工观察后生成更具体的修复项。"]))[:8],
+        "expected_effects": ["把角色反对意见转成下一轮修复和复测项目，降低真实用户首次使用时的误解。"],
+        "needs_human_confirmation": ["真实客户/观众反应、专业事实、上线风险仍需人工复核。"],
+        "counts": {
+            "overall": str(len(role_rows) + len(issue_rows)),
+            "positive": "已读",
+            "negative": str(len(objections) + len(overview)),
+        },
+    }
+    return summary, readable[-30:], str(base)
+
+
+def _audience_report_payload(project: str) -> dict[str, Any]:
+    project = str(project or "").strip() or "assistant"
+    path = _latest_existing_path(_audience_report_paths(project))
+    if path:
+        report = _read_json_file(path)
+        summary = _summary_from_report(report)
+        readable = report.get("readable_log") if isinstance(report.get("readable_log"), list) else []
+        if summary:
+            return {
+                "ok": True,
+                "project": project,
+                "report_found": True,
+                "report_path": str(path),
+                "summary": summary,
+                "readable_log": [str(x) for x in readable[-80:]],
+            }
+    summary, readable, base = _summary_from_optimizer_files(project)
+    return {
+        "ok": True,
+        "project": project,
+        "report_found": bool(summary),
+        "report_path": str(path or base or ""),
+        "summary": summary or {
+            "overview": ["还没有找到该项目的虚拟用户测试报告。"],
+            "objections": ["请先启动一轮评审。"],
+            "suggestions": ["运行后这里会展示建议改动。"],
+            "expected_effects": ["等待评审结果。"],
+            "needs_human_confirmation": ["真实用户反馈仍需人工确认。"],
+            "counts": {"overall": "--", "positive": "--", "negative": "--"},
+        },
+        "readable_log": readable,
+    }
 
 
 def _summary_from_job(job: dict[str, Any]) -> dict[str, list[str]]:
@@ -6311,6 +6786,12 @@ def _run_job(job_id: str, cmd: list[str], cwd: Path) -> None:
         env["OPENAI_API_BASE"] = text_url
         env["CHATSHARE_API_BASE"] = text_url
         env["GPT_IMAGE_BASE_URL"] = image_url
+        image_model = str(models.get("culture_image_model") or models.get("image_engine") or "")
+        if image_model:
+            env["OPENAI_IMAGE_MODEL"] = image_model
+            env["CHATSHARE_IMAGE_MODEL"] = image_model
+            env["IMAGE_MODEL"] = image_model
+            env["QUANLAN_IMAGE_MODEL"] = image_model
         for field, env_name in {
             "culture_text_base_url": "CULTURE_TEXT_BASE_URL",
             "culture_polish_base_url": "CULTURE_POLISH_BASE_URL",
@@ -6322,9 +6803,19 @@ def _run_job(job_id: str, cmd: list[str], cwd: Path) -> None:
             env[env_name] = _model_base_url(models, field, base_url)
         if models.get("deepseek_base_url"):
             env["DEEPSEEK_BASE_URL"] = str(models.get("deepseek_base_url") or "")
+        polish_model = str(models.get("culture_polish_model") or models.get("polish_engine") or "")
+        if polish_model:
+            env["DEEPSEEK_MODEL"] = polish_model
+            env["DEEPSEEK_CHAT_MODEL"] = polish_model
+            env["DEEPSEEK_TEXT_MODEL"] = polish_model
+            env["POLISH_MODEL"] = polish_model
         env["GPT_PRO_BASE_URL"] = str(models.get("gpt_pro_base_url") or models.get("research_polish_base_url") or "")
         if models.get("minimax_base_url"):
             env["MINIMAX_BASE_URL"] = str(models.get("minimax_base_url") or "")
+        minimax_model = str(models.get("minimax_tts_model") or "")
+        if minimax_model:
+            env["MINIMAX_MODEL"] = minimax_model
+            env["MINIMAX_TTS_MODEL"] = minimax_model
     snapshot_summary = _model_usage_summary(models if isinstance(models, dict) else None)
     try:
         proc = subprocess.Popen(cmd, cwd=str(cwd), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", bufsize=1)
@@ -6439,7 +6930,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         if path.path == "/audience/":
-            body = _project_control_html("audience")
+            body = _audience_lab_html()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
@@ -6472,6 +6963,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path.path == "/api/apps":
             _json(self, {"ok": True, **_app_statuses()})
+            return
+        if path.path == "/api/audience_report":
+            query = urllib.parse.parse_qs(path.query)
+            _json(self, _audience_report_payload(query.get("project", ["assistant"])[0]))
             return
         if path.path == "/api/cloud_servers":
             _json(self, {"ok": True, **_cloud_server_statuses()})
