@@ -46,6 +46,8 @@ DEFAULT_GPT_PRO_BASE_URL = "https://www.fhl.mom/v1"
 DEFAULT_MINIMAX_BASE_URL = "https://api.53hk.cn"
 BGM_LIBRARY_DIR = PROJECT_ROOT / "bgm_library"
 JOB_MODEL_SNAPSHOT_DIR = PROJECT_ROOT / ".workbench_runtime" / "job_model_snapshots"
+CLOUD_MONITOR_STATE_FILE = PROJECT_ROOT / ".workbench_runtime" / "cloud_monitor_state.json"
+CLOUD_METRICS_FILE = PROJECT_ROOT / ".workbench_runtime" / "cloud_metrics.json"
 AUDIO_LIBRARY_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".flac"}
 LEGACY_FOREIGN_BASE_URLS: set[str] = set()
 PER_MODEL_BASE_URL_FIELDS = {
@@ -166,6 +168,17 @@ EEG_ANALYSER_TARGET = os.environ.get("EEG_ANALYSER_TARGET", "http://39.97.248.22
 EEG_ANALYSER_DEVELOPMENT_URL = os.environ.get("EEG_ANALYSER_DEVELOPMENT_URL", f"http://127.0.0.1:{EEG_ANALYSER_PORT}/?v=neuron-eeg-image2-new-file-2")
 EEG_ANALYSER_PROCESS: subprocess.Popen[str] | None = None
 PRODUCTION_CONTROL_TIMEOUT = float(os.environ.get("QUANLAN_PRODUCTION_CONTROL_TIMEOUT", "45") or 45)
+CLOUD_MONITOR_DEFAULT_SERVERS = (
+    {
+        "id": "aliyun-eeg-main",
+        "name": "阿里云 ECS / 脑电分析正式服务",
+        "provider": "阿里云 ECS",
+        "host": "39.97.248.225",
+        "root_url": "http://39.97.248.225/",
+        "health_url": "http://39.97.248.225/health",
+        "services": ("eeg", "xiaozhuli"),
+    },
+)
 DAILY_RESEARCH_DEFAULT_ROOT = Path(os.environ.get("DAILY_RESEARCH_DEFAULT_ROOT", r"D:\Quanlan\全澜脑科学视频号\科研速递"))
 SCIENCE_TASK_SETTINGS_FILE = PROJECT_ROOT / "modes" / "research" / "quanlan_task_page_settings.json"
 SCIENCE_DEFAULT_ROOT = Path(os.environ.get("SCIENCE_CLASSIC_DEFAULT_ROOT", r"D:\Quanlan\鍏ㄦ緶鑴戠瀛﹁棰戝彿\绁炵粡绉戝缁忓吀"))
@@ -4199,6 +4212,7 @@ def _entry_html_v2() -> bytes:
     <section class="grid utility-grid">
       <a class="card" href="/model/"><div class="title">大模型连接库</div><div class="desc">添加、查看、编辑、删除和测试各类模型连接；任务自动组合可用连接。</div></a>
       <a class="card" href="/audience/"><div class="title">虚拟用户测试</div><div class="desc">按项目列出虚拟用户评审入口，并在页面内查看运行日志。</div></a>
+      <a class="card" href="/cloud/"><div class="title">云服务器健康舱</div><div class="desc">监控正式服务器在线、健康接口、延迟和服务控制状态；CPU/内存/硬盘预留真实采集入口。</div></a>
     </section>
     <div class="section-head"><h2>自由化器</h2><span>代码保留在各自项目中</span></div>
     <section class="grid utility-grid">
@@ -4243,6 +4257,33 @@ def _project_control_html(kind: str) -> bytes:
     result_title = "运行日志" if is_optimizer else "虚拟用户测试结果"
     summary_style = "display:none" if is_optimizer else ""
     raw_log_open = " open" if is_optimizer else ""
+    initial_apps = _app_statuses().get("apps", [])
+    def _project_action_buttons(app_id: str) -> str:
+        safe_id = escape(str(app_id), quote=True)
+        if is_optimizer:
+            return (
+                f"<button onclick=\"startJob('{safe_id}','once')\">运行一次</button> "
+                f"<button class=\"secondary\" onclick=\"startJob('{safe_id}','daemon')\">启动持续自我学习</button>"
+            )
+        return (
+            f"<button onclick=\"startJob('{safe_id}','once')\">启动虚拟用户测试</button> "
+            f"<button class=\"secondary\" onclick=\"startJob('{safe_id}','dev_upgrade')\">一键升级开发版</button> "
+            f"<button class=\"ghost\" onclick=\"startJob('{safe_id}','release_deploy')\">一键部署发布版</button> "
+            f"<button class=\"ghost\" onclick=\"openFeedbackDialog('{safe_id}')\">输入优化建议</button>"
+        )
+    initial_cards = "".join(
+        (
+            '<div class="card">'
+            f'<div class="title">{escape(str(app.get("name") or app.get("id") or ""))}</div>'
+            f'<div class="desc">{escape(str(app.get("config_scope") or app.get("description") or ""))}</div>'
+            f'<div class="meta">项目 ID：{escape(str(app.get("id") or ""))} ｜ 状态：{"在线" if app.get("online") else "离线"} ｜ {escape(str(app.get("sync_state") or ""))}</div>'
+            f'<div class="row">{_project_action_buttons(str(app.get("id") or ""))}'
+            f'<button class="ghost" onclick="viewJob(\'{escape(str(app.get("id") or ""), quote=True)}\')">查看日志</button>'
+            f'<button class="danger" onclick="stopJob(\'{escape(str(app.get("id") or ""), quote=True)}\')">停止</button>'
+            '</div></div>'
+        )
+        for app in initial_apps
+    ) or '<div class="card"><div class="title">暂无项目</div><div class="desc">未读取到总控台项目列表。</div></div>'
     body = f"""<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -4269,7 +4310,7 @@ def _project_control_html(kind: str) -> bytes:
     <a class="home" href="/">杩斿洖鎬绘帶鍙?/a>
   </div>
   <div class="layout">
-    <section class="grid" id="project_grid"></section>
+    <section class="grid" id="project_grid">{initial_cards}</section>
     <main class="card">
       <div class="title">{result_title}</div>
       <div class="status" id="status">閫夋嫨椤圭洰鍚庡彲鍚姩鎴栨煡鐪嬫棩蹇?/div>
@@ -4297,7 +4338,8 @@ def _project_control_html(kind: str) -> bytes:
 const endpoint="{endpoint}";
 const isOptimizer={str(is_optimizer).lower()};
 const storageKey="quanlan_{kind}_jobs";
-let jobs=JSON.parse(localStorage.getItem(storageKey)||"{{}}");
+let jobs={{}};
+try{{jobs=JSON.parse(localStorage.getItem(storageKey)||"{{}}")||{{}}}}catch(e){{jobs={{}}}}
 let selectedProject="";
 let selectedJobKey="";
 function esc(s){{return String(s||"").replace(/[&<>"']/g,c=>({{"&":"&amp;","<":"&lt;",">":"&gt;","\\\"":"&quot;","'":"&#39;"}}[c]))}}
@@ -4329,7 +4371,7 @@ function renderApps(apps){{
     </div>
   </div>`).join("");
 }}
-async function loadApps(){{const r=await fetch("/api/apps");const data=await r.json();renderApps(data.apps||[])}}
+async function loadApps(){{try{{const r=await fetch("/api/apps");const data=await r.json();renderApps(data.apps||[]);if(!(data.apps||[]).length)setStatus("未读取到项目列表")}}catch(err){{setStatus("项目列表读取失败："+(err&&err.message?err.message:"network error"));const grid=document.getElementById("project_grid");if(grid)grid.innerHTML='<div class="card"><div class="title">项目列表读取失败</div><div class="desc">请刷新页面或检查 /api/apps。</div></div>'}}}}
 async function startJob(project,mode){{
   selectedProject=project;selectedJobKey=jobKey(project,mode);setStatus("正在"+actionLabel(mode)+"："+project+" ...");
   document.getElementById("log").textContent="正在创建任务："+project+" / "+actionLabel(mode)+"\\n等待后台返回任务编号...";
@@ -4353,11 +4395,73 @@ async function poll(){{
   document.getElementById("log").textContent=(data.lines||[]).join("")||"暂无日志";
   if(["running","starting","stopping"].includes(data.status))setTimeout(poll,1000);
 }}
+window.loadApps=loadApps;window.renderApps=renderApps;window.startJob=startJob;window.stopJob=stopJob;window.viewJob=viewJob;
 loadApps();
 </script>
 </body>
 </html>"""
     return _clean_console_html(body.encode("utf-8"))
+
+
+def _cloud_monitor_html() -> bytes:
+    body = """<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>云服务器健康舱</title>
+  <style>
+    :root{font-family:Arial,"Microsoft YaHei",sans-serif;color:#17202a;background:#f5f7fb;--brand:#0f766e;--line:#d7dce2;--muted:#667085;--bad:#b3261e;--ok:#027a48;--warn:#b54708}
+    *{box-sizing:border-box}body{margin:0;padding:20px}.wrap{max-width:1280px;margin:0 auto}.top{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:14px}h1{font-size:26px;margin:0 0 8px}.hint{color:var(--muted);font-size:13px;line-height:1.6;margin:0;max-width:820px}
+    a.home{display:inline-flex;align-items:center;min-height:38px;padding:0 13px;border-radius:8px;background:#111827;color:#fff;text-decoration:none;font-weight:800}.layout{display:grid;grid-template-columns:1fr 420px;gap:14px}.card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:14px;box-shadow:0 8px 22px rgba(15,23,42,.05)}.title{font-size:17px;font-weight:900;margin-bottom:8px}
+    .toolbar,.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.toolbar{margin-bottom:12px}button{border:0;border-radius:7px;background:var(--brand);color:#fff;padding:8px 10px;cursor:pointer;font-weight:800}button.secondary{background:#475569}button.danger{background:var(--bad)}button.ghost{background:#eef2f6;color:#263238}button:disabled{opacity:.65;cursor:wait}.pill{display:inline-flex;align-items:center;min-height:24px;padding:0 8px;border-radius:999px;background:#eef2f6;color:#334155;font-size:12px;font-weight:800}.pill.ok{background:#ecfdf3;color:var(--ok)}.pill.warn{background:#fff7ed;color:var(--warn)}
+    .server{display:grid;gap:12px}.server-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.meta{color:var(--muted);font-size:12px;line-height:1.5;overflow-wrap:anywhere}.metrics{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}.metric{border:1px solid var(--line);border-radius:8px;background:#f8fafc;padding:10px;min-height:72px}.metric b{display:block;font-size:12px;color:#334155}.metric span{display:block;margin-top:8px;font-size:15px;font-weight:900}.metric small{display:block;color:var(--muted);margin-top:4px}
+    .services{display:grid;gap:8px}.service{border:1px solid var(--line);border-radius:8px;padding:10px;background:#fff}.service-top{display:flex;justify-content:space-between;gap:8px;align-items:center}.status{font-size:13px;color:var(--brand);margin:0 0 10px;word-break:break-all}pre{white-space:pre-wrap;background:#111827;color:#e5e7eb;border-radius:8px;padding:12px;max-height:52vh;overflow:auto;margin:0}.note{font-size:12px;color:var(--muted);line-height:1.55;margin-top:10px}
+    @media(max-width:980px){.layout{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.top{flex-direction:column}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div><h1>云服务器健康舱</h1><p class="hint">独立监控正式服务器：先看在线、健康接口、延迟和服务控制状态；CPU、内存、硬盘、负载、网络会读取本机采集文件，未接入时明确显示“待接入”。</p></div>
+    <a class="home" href="/">返回总控台</a>
+  </div>
+  <div class="toolbar">
+    <button onclick="refreshCloud(this)">手动刷新</button>
+    <button class="secondary" id="toggle_monitor" onclick="toggleMonitor(this)">暂停监控</button>
+    <button class="ghost" onclick="openCloud()">打开正式服务</button>
+    <button class="danger" onclick="clearCloudLogs(this)">清空日志</button>
+  </div>
+  <div class="layout">
+    <main id="server_list" class="server"></main>
+    <aside class="card">
+      <div class="title">健康舱日志</div>
+      <div class="status" id="cloud_status">等待刷新</div>
+      <pre id="cloud_log">暂无日志</pre>
+      <div class="note" id="metrics_note"></div>
+    </aside>
+  </div>
+</div>
+<script>
+let cloudState={enabled:true,servers:[],logs:[]};
+function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\\\"":"&quot;","'":"&#39;"}[c]))}
+function pill(ok,text){return '<span class="pill '+(ok?'ok':'warn')+'">'+esc(text)+'</span>'}
+function metric(label,m){m=m||{};const text=m.label||"待接入";return '<div class="metric"><b>'+esc(label)+'</b><span>'+esc(text)+'</span><small>'+esc(m.status==="unknown"?"等待采集器写入":(m.unit||""))+'</small></div>'}
+function renderCloud(data){cloudState=data||cloudState;document.getElementById("toggle_monitor").textContent=cloudState.enabled?"暂停监控":"恢复监控";document.getElementById("cloud_status").textContent=(cloudState.enabled?"监控中":"已暂停")+" ｜ "+(cloudState.updated_at||"");document.getElementById("cloud_log").textContent=(cloudState.logs||[]).slice(-40).join("\\n")||"暂无日志";document.getElementById("metrics_note").textContent=(cloudState.metrics_connected?"已接入指标文件：":"尚未接入 CPU/内存/硬盘采集器；预留文件：")+(cloudState.metrics_source||"");
+  document.getElementById("server_list").innerHTML=(cloudState.servers||[]).map(s=>'<article class="card"><div class="server-head"><div><div class="title">'+esc(s.name)+'</div><div class="meta">'+esc(s.provider)+' ｜ '+esc(s.host)+' ｜ '+esc(s.root_url)+'</div></div><div>'+pill(!!s.online,s.online?"在线":"不可达")+'</div></div><div class="row"><span class="pill">延迟 '+esc(s.latency_ms==null?"待测":s.latency_ms+"ms")+'</span><span class="pill">健康接口 '+esc((s.health_probe&&s.health_probe.message)||"待测")+'</span><span class="pill">首页 '+esc((s.root_probe&&s.root_probe.message)||"待测")+'</span></div><div class="metrics">'+metric("CPU",s.metrics&&s.metrics.cpu)+metric("内存",s.metrics&&s.metrics.memory)+metric("硬盘",s.metrics&&s.metrics.disk)+metric("负载",s.metrics&&s.metrics.load)+metric("网络",s.metrics&&s.metrics.network)+'</div><div class="services">'+(s.services||[]).map(serviceHtml).join("")+'</div></article>').join("")}
+function serviceHtml(app){return '<div class="service"><div class="service-top"><div><b>'+esc(app.name||app.id)+'</b><div class="meta">'+esc(app.production_target||app.production_url||"")+'</div></div>'+pill(!!app.production_online,app.production_online?"在线":"离线")+'</div><div class="row"><button onclick="controlService(event,\\''+esc(app.id)+'\\',\\'start\\')">启动</button><button class="secondary" onclick="controlService(event,\\''+esc(app.id)+'\\',\\'restart\\')">重启</button><button class="danger" onclick="controlService(event,\\''+esc(app.id)+'\\',\\'stop\\')">停止</button><button class="ghost" onclick="window.open(\\''+esc(app.production_url||app.route||"/")+'\\',\\'_blank\\')">打开</button></div></div>'}
+async function refreshCloud(btn){if(btn)btn.disabled=true;try{const r=await fetch("/api/cloud_servers");renderCloud(await r.json())}catch(err){document.getElementById("cloud_status").textContent="刷新失败："+(err&&err.message?err.message:"network error")}finally{if(btn)btn.disabled=false}}
+async function postCloud(action,btn){if(btn)btn.disabled=true;try{const r=await fetch("/api/cloud_servers",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action})});renderCloud(await r.json())}finally{if(btn)btn.disabled=false}}
+function toggleMonitor(btn){postCloud(cloudState.enabled?"pause":"resume",btn)}
+function clearCloudLogs(btn){postCloud("clear_logs",btn)}
+function openCloud(){const s=(cloudState.servers||[])[0];window.open((s&&s.root_url)||"http://39.97.248.225/","_blank")}
+async function controlService(event,app,action){const btn=event.currentTarget;btn.disabled=true;document.getElementById("cloud_status").textContent="正在"+({start:"启动",restart:"重启",stop:"停止"}[action]||"控制")+"："+app;try{const r=await fetch("/api/apps",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({app,action,scope:"production",takeover:true})});const data=await r.json();if(!data.ok){document.getElementById("cloud_status").textContent="操作失败："+(data.error||"unknown")}else{document.getElementById("cloud_status").textContent="操作已发送："+app}await postCloud("refresh")}catch(err){document.getElementById("cloud_status").textContent="操作失败："+(err&&err.message?err.message:"network error")}finally{btn.disabled=false}}
+refreshCloud();
+setInterval(()=>{if(cloudState.enabled)refreshCloud()},15000);
+</script>
+</body>
+</html>"""
+    return body.encode("utf-8")
 
 
 def _clean_console_html(body: bytes) -> bytes:
@@ -4366,10 +4470,11 @@ def _clean_console_html(body: bytes) -> bytes:
         "澶фā鍨嬭繛鎺ュ簱": "大模型连接库",
         "杩斿洖鎺у埗鍙伴椤?": "返回控制台首页",
         "杩斿洖鎬绘帶鍙?": "返回总控台",
+        "閫夋嫨椤圭洰鍚庡彲鍚姩鎴栨煡鐪嬫棩蹇?/div>": "选择项目后可启动或查看日志</div>",
+        "閫夋嫨椤圭洰鍚庡彲鍚姩鎴栨煡鐪嬫棩蹇?": "选择项目后可启动或查看日志",
         "鏆傛棤鏃ュ織": "暂无日志",
         "鍘熷杩愯鏃ュ織": "原始运行日志",
         "绛夊緟鎿嶄綔": "等待操作",
-        "閫夋嫨椤圭洰鍚庡彲鍚姩鎴栨煡鐪嬫棩蹇?": "选择项目后可启动或查看日志",
         "铏氭嫙鐢ㄦ埛姹囨€?": "虚拟用户汇总",
         "浼樺寲寤鸿": "优化建议",
         "棰勮浼樺寲鍚庣殑鏁堟灉": "预计优化后的效果",
@@ -4381,6 +4486,7 @@ def _clean_console_html(body: bytes) -> bytes:
         "鍙栨秷": "取消",
         "杩愯涓€娆?": "运行一次",
         "鍚姩甯搁┗": "启动常驻",
+        "启动常驻": "启动持续自我学习",
         "鍚姩铏氭嫙鐢ㄦ埛娴嬭瘯": "启动虚拟用户测试",
         "涓€閿崌绾у紑鍙戠増": "一键升级开发版",
         "涓€閿儴缃插彂甯冪増": "一键部署发布版",
@@ -4772,6 +4878,28 @@ def _url_reachable(url: str, timeout: float = 1.2) -> bool:
         return False
 
 
+def _http_probe(url: str, timeout: float = 2.0) -> dict[str, Any]:
+    started = time.perf_counter()
+    try:
+        req = urllib.request.Request(url, method="GET", headers={"Cache-Control": "no-store"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read(2048)
+            latency_ms = round((time.perf_counter() - started) * 1000)
+            return {
+                "ok": 200 <= resp.status < 500,
+                "status_code": resp.status,
+                "latency_ms": latency_ms,
+                "message": "可达",
+                "sample": body.decode("utf-8", errors="replace")[:160],
+            }
+    except urllib.error.HTTPError as exc:
+        latency_ms = round((time.perf_counter() - started) * 1000)
+        return {"ok": False, "status_code": exc.code, "latency_ms": latency_ms, "message": f"HTTP {exc.code}"}
+    except Exception as exc:
+        latency_ms = round((time.perf_counter() - started) * 1000)
+        return {"ok": False, "status_code": 0, "latency_ms": latency_ms, "message": _safe_error(exc)}
+
+
 def _is_local_url(url: str) -> bool:
     try:
         parsed = urllib.parse.urlparse(url)
@@ -4925,6 +5053,110 @@ def _run_remote_production_control(app_id: str, action: str) -> None:
     if not command:
         raise ValueError(f"远程正式服务未配置启停控制：请设置环境变量 {env_key}，或把该服务配置为本机地址后再由总控台接管。")
     subprocess.run(shlex.split(command), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=PRODUCTION_CONTROL_TIMEOUT, check=True)
+
+
+def _cloud_monitor_state() -> dict[str, Any]:
+    data = _read_json(CLOUD_MONITOR_STATE_FILE, {})
+    if not isinstance(data, dict):
+        data = {}
+    data.setdefault("enabled", True)
+    data.setdefault("logs", [])
+    return data
+
+
+def _write_cloud_monitor_state(data: dict[str, Any]) -> None:
+    CLOUD_MONITOR_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    logs = data.get("logs")
+    if isinstance(logs, list):
+        data["logs"] = logs[-80:]
+    _write_json(CLOUD_MONITOR_STATE_FILE, data)
+
+
+def _cloud_log(message: str) -> None:
+    state = _cloud_monitor_state()
+    logs = state.setdefault("logs", [])
+    if isinstance(logs, list):
+        logs.append(f"[{time.strftime('%H:%M:%S')}] {message}")
+    _write_cloud_monitor_state(state)
+
+
+def _external_cloud_metrics() -> dict[str, Any]:
+    data = _read_json(CLOUD_METRICS_FILE, {})
+    return data if isinstance(data, dict) else {}
+
+
+def _metric_value(metrics: dict[str, Any], server_id: str, key: str) -> dict[str, Any]:
+    server_metrics = metrics.get(server_id) if isinstance(metrics, dict) else {}
+    value = server_metrics.get(key) if isinstance(server_metrics, dict) else None
+    if isinstance(value, dict):
+        return {"label": str(value.get("label") or "待接入"), "value": value.get("value"), "unit": str(value.get("unit") or ""), "status": str(value.get("status") or "unknown")}
+    if value is None or value == "":
+        return {"label": "待接入", "value": None, "unit": "", "status": "unknown"}
+    return {"label": str(value), "value": value, "unit": "", "status": "ok"}
+
+
+def _cloud_server_statuses(*, force: bool = False) -> dict[str, Any]:
+    state = _cloud_monitor_state()
+    metrics = _external_cloud_metrics()
+    enabled = bool(state.get("enabled", True))
+    servers: list[dict[str, Any]] = []
+    for cfg in CLOUD_MONITOR_DEFAULT_SERVERS:
+        root_probe = _http_probe(str(cfg.get("root_url") or ""), timeout=2.2) if enabled else {"ok": False, "latency_ms": None, "message": "监控已暂停"}
+        health_probe = _http_probe(str(cfg.get("health_url") or ""), timeout=2.2) if enabled else {"ok": False, "latency_ms": None, "message": "监控已暂停"}
+        ok = bool(root_probe.get("ok") or health_probe.get("ok"))
+        latency_values = [x.get("latency_ms") for x in (root_probe, health_probe) if isinstance(x.get("latency_ms"), (int, float))]
+        servers.append({
+            "id": cfg["id"],
+            "name": cfg["name"],
+            "provider": cfg["provider"],
+            "host": cfg["host"],
+            "root_url": cfg["root_url"],
+            "health_url": cfg["health_url"],
+            "enabled": enabled,
+            "online": ok,
+            "latency_ms": min(latency_values) if latency_values else None,
+            "root_probe": root_probe,
+            "health_probe": health_probe,
+            "metrics": {
+                "cpu": _metric_value(metrics, str(cfg["id"]), "cpu"),
+                "memory": _metric_value(metrics, str(cfg["id"]), "memory"),
+                "disk": _metric_value(metrics, str(cfg["id"]), "disk"),
+                "load": _metric_value(metrics, str(cfg["id"]), "load"),
+                "network": _metric_value(metrics, str(cfg["id"]), "network"),
+            },
+            "services": [app for app in _app_statuses().get("apps", []) if app.get("id") in set(cfg.get("services") or ())],
+        })
+    if force:
+        _cloud_log("已手动刷新云服务器健康状态。")
+    return {
+        "enabled": enabled,
+        "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "servers": servers,
+        "logs": state.get("logs", []),
+        "metrics_source": str(CLOUD_METRICS_FILE),
+        "metrics_connected": CLOUD_METRICS_FILE.exists(),
+    }
+
+
+def _control_cloud_monitor(payload: dict[str, Any]) -> dict[str, Any]:
+    action = str(payload.get("action") or "refresh").strip().lower()
+    state = _cloud_monitor_state()
+    if action == "pause":
+        state["enabled"] = False
+        _write_cloud_monitor_state(state)
+        _cloud_log("监控已暂停；页面不再主动探测云服务。")
+    elif action == "resume":
+        state["enabled"] = True
+        _write_cloud_monitor_state(state)
+        _cloud_log("监控已恢复；开始探测云服务。")
+    elif action == "clear_logs":
+        state["logs"] = []
+        _write_cloud_monitor_state(state)
+    elif action == "refresh":
+        pass
+    else:
+        raise ValueError("未知云服务器操作")
+    return _cloud_server_statuses(force=action == "refresh")
 
 
 def _process_running(process: subprocess.Popen[str] | None) -> bool:
@@ -5606,8 +5838,12 @@ def _build_command(payload: dict[str, Any]) -> tuple[list[str], Path]:
         # Keep the UI setting for future use, but do not pass an unsupported flag.
         _add(args, "--daily-journals", payload.get("research_journals"))
         _add(args, "--daily-article-list", article_list_value)
-        _add(args, "--daily-text-engine", _daily_text_engine_arg(payload.get("text_engine")))
-        _add(args, "--daily-polish-engine", _daily_text_engine_arg(payload.get("polish_engine")))
+        daily_polish_engine = _daily_text_engine_arg(payload.get("polish_engine"))
+        daily_text_engine = _daily_text_engine_arg(payload.get("text_engine"))
+        if str(daily_polish_engine or "").lower().startswith("deepseek"):
+            daily_text_engine = daily_polish_engine
+        _add(args, "--daily-text-engine", daily_text_engine)
+        _add(args, "--daily-polish-engine", daily_polish_engine)
         _add(args, "--daily-image-engine", _daily_image_engine_arg(payload.get("image_engine")))
         if str(payload.get("research_skip_medical_related") or "").lower() in {"1", "true", "yes", "on"}:
             args.append("--daily-skip-medical-related")
@@ -5973,6 +6209,20 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if path.path == "/cloud":
+            self.send_response(302)
+            self.send_header("Location", "/cloud/")
+            self.end_headers()
+            return
+        if path.path == "/cloud/":
+            body = _cloud_monitor_html()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if path.path == "/api/settings":
             accept = self.headers.get("Accept", "")
             if "text/html" in accept and "application/json" not in accept:
@@ -5984,6 +6234,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path.path == "/api/apps":
             _json(self, {"ok": True, **_app_statuses()})
+            return
+        if path.path == "/api/cloud_servers":
+            _json(self, {"ok": True, **_cloud_server_statuses()})
             return
         if path.path == "/api/research_article_list":
             query = urllib.parse.parse_qs(path.query)
@@ -6042,6 +6295,14 @@ class Handler(BaseHTTPRequestHandler):
                 _json(self, {"ok": True, **_control_app(payload)})
             except Exception as exc:
                 _json(self, {"ok": False, "error": _safe_error(exc), **_app_statuses()}, 400)
+            return
+        if path.path == "/api/cloud_servers":
+            length = int(self.headers.get("Content-Length", "0") or 0)
+            payload = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+            try:
+                _json(self, {"ok": True, **_control_cloud_monitor(payload)})
+            except Exception as exc:
+                _json(self, {"ok": False, "error": _safe_error(exc), **_cloud_server_statuses()}, 400)
             return
         if path.path == "/api/test_model":
             length = int(self.headers.get("Content-Length", "0") or 0)
